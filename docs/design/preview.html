@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>neuropathy-app — Brand Preview</title>
+<style>
+  /* Intended fonts: Poppins (display) + Inter (body), both SIL OFL. Preview falls back
+     to system fonts if the web fonts are unavailable offline — colors are the point. */
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Poppins:wght@500;600&display=swap');
+  :root{
+    --navy:#173A5E;--navy-deep:#0F2A45;--blue:#2E6DA4;--blue-bright:#2E86C8;
+    --sky:#7FB0D4;--sky-tint:#E8F1F8;--green:#2F8F5B;--danger:#C63F4C;
+    --warning:#D68A34;--neutral:#1F4E79;--text:#233444;--text2:#556677;
+    --card:#FFFFFF;--border:#D3DEE8;--muted:#F2F6FA;
+    --display:"Poppins",system-ui,sans-serif;--body:"Inter",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--sky-tint);color:var(--text);font-family:var(--body);
+    font-size:17px;line-height:26px;-webkit-font-smoothing:antialiased}
+  .header{background:linear-gradient(90deg,var(--navy-deep),var(--blue-bright));
+    color:#fff;padding:22px 24px;text-align:center}
+  .header .mark{font-family:var(--display);font-weight:600;font-size:22px;letter-spacing:.02em}
+  .header .sub{opacity:.85;font-size:13px;margin-top:2px}
+  .wrap{max-width:760px;margin:0 auto;padding:24px}
+  h1{font-family:var(--display);font-weight:600;font-size:26px;line-height:34px;margin:8px 0 2px}
+  h2{font-family:var(--display);font-weight:600;font-size:18px;margin:28px 0 12px;color:var(--navy)}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:16px;
+    padding:20px;margin-bottom:16px;box-shadow:0 1px 3px rgba(23,58,94,.06)}
+  .swatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px}
+  .sw{border-radius:12px;overflow:hidden;border:1px solid var(--border)}
+  .sw .chip{height:56px}
+  .sw .lbl{padding:8px 10px;font-size:13px;background:#fff}
+  .sw .hex{color:var(--text2);font-size:12px}
+  .type-row{display:flex;align-items:baseline;gap:14px;border-bottom:1px solid var(--border);padding:10px 0}
+  .type-row .tag{font-size:12px;color:var(--text2);width:96px;flex:none}
+  .btn{display:inline-block;font-family:var(--body);font-weight:600;font-size:17px;
+    color:#fff;background:var(--green);border:none;border-radius:12px;padding:14px 22px;
+    min-height:48px;cursor:pointer}
+  .btn.secondary{background:var(--blue)}
+  .status-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .status{border-radius:12px;padding:14px 16px;color:#fff;font-weight:600}
+  .status small{display:block;font-weight:400;opacity:.9;font-size:13px;margin-top:2px}
+  .score{display:flex;align-items:center;gap:18px}
+  .score .num{font-family:var(--display);font-weight:600;font-size:44px;color:var(--blue);
+    line-height:1}
+  .score .meta{font-size:15px;color:var(--text2)}
+  .bar{height:10px;border-radius:999px;background:var(--muted);overflow:hidden;margin-top:8px}
+  .bar > i{display:block;height:100%;width:57%;background:linear-gradient(90deg,var(--blue),var(--blue-bright))}
+  .note{font-size:13px;color:var(--text2);margin-top:6px}
+</style>
+</head>
+<body>
+  <div class="header">
+    <div class="mark">◍ Neuropathy&nbsp;App</div>
+    <div class="sub">placeholder wordmark — our own, not BioMech's logo</div>
+  </div>
+  <div class="wrap">
+    <h1>Brand Preview</h1>
+    <p class="note">v0.1 — palette estimated from BioMech Lab screenshots (ADR-0002).
+      Reconcile with BioMech's official brand guide when available.</p>
+
+    <h2>Color palette</h2>
+    <div class="card">
+      <div class="swatches">
+        <div class="sw"><div class="chip" style="background:#173A5E"></div><div class="lbl">Brand navy<br><span class="hex">#173A5E</span></div></div>
+        <div class="sw"><div class="chip" style="background:#2E6DA4"></div><div class="lbl">Brand blue<br><span class="hex">#2E6DA4</span></div></div>
+        <div class="sw"><div class="chip" style="background:#2E86C8"></div><div class="lbl">Bright blue<br><span class="hex">#2E86C8</span></div></div>
+        <div class="sw"><div class="chip" style="background:#7FB0D4"></div><div class="lbl">Sky<br><span class="hex">#7FB0D4</span></div></div>
+        <div class="sw"><div class="chip" style="background:#2F8F5B"></div><div class="lbl">Action green<br><span class="hex">#2F8F5B</span></div></div>
+        <div class="sw"><div class="chip" style="background:#C63F4C"></div><div class="lbl">Danger<br><span class="hex">#C63F4C</span></div></div>
+        <div class="sw"><div class="chip" style="background:#D68A34"></div><div class="lbl">Warning<br><span class="hex">#D68A34</span></div></div>
+        <div class="sw"><div class="chip" style="background:#E8F1F8"></div><div class="lbl">Background<br><span class="hex">#E8F1F8</span></div></div>
+      </div>
+    </div>
+
+    <h2>Type scale — Poppins headings, Inter body</h2>
+    <div class="card">
+      <div class="type-row"><span class="tag">Display 32</span><span style="font-family:var(--display);font-weight:600;font-size:32px">Your nerve health</span></div>
+      <div class="type-row"><span class="tag">H1 · 26</span><span style="font-family:var(--display);font-weight:600;font-size:26px">Balance check-in</span></div>
+      <div class="type-row"><span class="tag">H2 · 18</span><span style="font-family:var(--display);font-weight:600;font-size:18px">Today's readings</span></div>
+      <div class="type-row"><span class="tag">Body 17</span><span>Log a flare in under ten seconds — one tap, even at 2 a.m.</span></div>
+      <div class="type-row"><span class="tag">Data · 20</span><span style="font-weight:600;font-size:20px">57 / 100</span></div>
+    </div>
+
+    <h2>Components</h2>
+    <div class="card">
+      <button class="btn">Run Balance Test</button>
+      &nbsp;
+      <button class="btn secondary">View Report</button>
+      <p class="note">Green = action, blue = navigation. Min 48pt touch target.</p>
+    </div>
+
+    <div class="card">
+      <div class="score">
+        <div class="num">57</div>
+        <div class="meta"><strong>Balance Score</strong><br>Higher = lower fall risk
+          <div class="bar"><i></i></div></div>
+      </div>
+      <p class="note">Illustrative — our own neuropathy-weighted score, not BioMech's formula.</p>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0">Status colors (BioMech dashboard semantics)</h2>
+      <div class="status-grid">
+        <div class="status" style="background:#C63F4C">Expires today<small>0 days remaining</small></div>
+        <div class="status" style="background:#D68A34">Expires in 1 week<small>1–7 days</small></div>
+        <div class="status" style="background:#7FB0D4">Expires in 2 weeks<small>8–14 days</small></div>
+        <div class="status" style="background:#1F4E79">Recently expired<small>last 14 days</small></div>
+      </div>
+      <p class="note">Reused consistently so clinicians read them the same across both products.
+        Color is never the only signal — always paired with a text label.</p>
+    </div>
+  </div>
+</body>
+</html>
