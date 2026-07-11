@@ -17,6 +17,16 @@ Thumbs.db
 .idea/
 .vscode/
 
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
 # Build / deps (populated as the app is scaffolded)
 node_modules/
 dist/
