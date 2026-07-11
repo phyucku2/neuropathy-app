@@ -26,6 +26,10 @@ venv/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
 
 # Build / deps (populated as the app is scaffolded)
 node_modules/
