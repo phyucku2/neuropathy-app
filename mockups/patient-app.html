@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>neuropathy-app — Patient Mockups</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Poppins:wght@500;600&display=swap');
+  :root{
+    --navy:#173A5E;--navy-deep:#0F2A45;--blue:#2E6DA4;--blue-bright:#2E86C8;
+    --sky:#7FB0D4;--sky-tint:#E8F1F8;--green:#2F8F5B;--danger:#C63F4C;
+    --warning:#D68A34;--neutral:#1F4E79;--text:#233444;--text2:#556677;
+    --card:#FFFFFF;--border:#D3DEE8;--muted:#F2F6FA;
+    --display:"Poppins",system-ui,sans-serif;--body:"Inter",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#cfdce8;color:var(--text);font-family:var(--body);
+    font-size:17px;line-height:1.5;-webkit-font-smoothing:antialiased;padding:24px}
+  .intro{max-width:1080px;margin:0 auto 20px;color:#2b3a4a}
+  .intro h1{font-family:var(--display);font-size:24px;margin:0 0 4px}
+  .intro p{margin:0;color:#3d4d5c;font-size:15px}
+  .frames{display:flex;flex-wrap:wrap;gap:26px;justify-content:center;max-width:1300px;margin:0 auto}
+  .phone{width:360px;background:var(--sky-tint);border-radius:34px;overflow:hidden;
+    border:10px solid #10233a;box-shadow:0 14px 40px rgba(16,35,58,.28);display:flex;flex-direction:column;height:760px}
+  .screen-label{position:relative;text-align:center;font-size:13px;color:#33475a;
+    font-weight:600;margin:-6px 0 8px}
+  .col{display:flex;flex-direction:column;align-items:center}
+
+  .status-bar{background:linear-gradient(90deg,var(--navy-deep),var(--blue-bright));
+    color:#fff;padding:14px 18px 12px;display:flex;align-items:center;justify-content:space-between}
+  .status-bar .mark{font-family:var(--display);font-weight:600;font-size:16px;letter-spacing:.02em}
+  .status-bar .avatar{width:30px;height:30px;border-radius:999px;background:rgba(255,255,255,.25);
+    display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600}
+  .body{flex:1;overflow-y:auto;padding:16px}
+  .body::-webkit-scrollbar{width:0}
+
+  .card{background:var(--card);border:1px solid var(--border);border-radius:16px;
+    padding:16px;margin-bottom:14px;box-shadow:0 1px 3px rgba(23,58,94,.05)}
+  h2{font-family:var(--display);font-weight:600;font-size:16px;margin:2px 0 10px;color:var(--navy)}
+  .eyebrow{font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--text2);margin-bottom:6px}
+  .muted{color:var(--text2);font-size:14px}
+
+  /* Trajectory hero */
+  .traj{color:#fff;border-radius:18px;padding:20px;margin-bottom:14px}
+  .traj.improving{background:linear-gradient(140deg,#2F8F5B,#1f6f44)}
+  .traj.declining{background:linear-gradient(140deg,#c25a37,#a23f2c)}
+  .traj .eyebrow{color:rgba(255,255,255,.85)}
+  .traj .answer{font-family:var(--display);font-weight:600;font-size:30px;line-height:1.15;margin:2px 0 6px}
+  .traj .sub{font-size:15px;opacity:.95}
+  .traj .conf{margin-top:12px;font-size:13px;opacity:.9;display:flex;align-items:center;gap:8px}
+  .cbar{flex:1;height:7px;background:rgba(255,255,255,.3);border-radius:999px;overflow:hidden}
+  .cbar>i{display:block;height:100%;background:#fff}
+
+  .signal{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--border)}
+  .signal:last-child{border-bottom:0}
+  .dot{width:34px;height:34px;border-radius:10px;flex:none;display:flex;align-items:center;justify-content:center;font-size:16px;color:#fff}
+  .signal .t{flex:1}
+  .signal .t b{font-weight:600}
+  .signal .arrow{font-weight:600;font-size:15px}
+  .up{color:var(--green)} .down{color:var(--danger)} .flat{color:var(--text2)}
+
+  .btn{display:block;width:100%;text-align:center;font-family:var(--body);font-weight:600;
+    font-size:17px;color:#fff;background:var(--green);border:none;border-radius:12px;
+    padding:15px;min-height:52px;cursor:pointer;margin-top:6px}
+  .btn.secondary{background:var(--blue)}
+  .btn.ghost{background:transparent;color:var(--blue);border:1.5px solid var(--border)}
+
+  .src{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)}
+  .src:last-child{border-bottom:0}
+  .src .ic{width:40px;height:40px;border-radius:11px;flex:none;display:flex;align-items:center;justify-content:center;font-size:19px;color:#fff}
+  .src .info{flex:1}
+  .src .info small{color:var(--text2);font-size:13px}
+  .pill{font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px}
+  .pill.on{background:#e2f0e8;color:#1f6f44}
+  .pill.off{background:#eef1f4;color:var(--text2)}
+
+  /* toggle */
+  .tg{width:46px;height:28px;border-radius:999px;background:var(--green);position:relative;flex:none}
+  .tg.off{background:#c7d0d9}
+  .tg::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:999px;background:#fff;transition:.15s}
+  .tg.off::after{left:21px}
+
+  /* chart */
+  svg{display:block;width:100%;height:auto}
+  .chip{display:inline-block;font-size:12px;font-weight:600;padding:4px 9px;border-radius:999px;background:var(--muted);color:var(--text2);margin-right:6px}
+
+  .tabbar{display:flex;background:var(--card);border-top:1px solid var(--border)}
+  .tabbar .tab{flex:1;text-align:center;padding:10px 0 12px;font-size:11px;color:var(--text2)}
+  .tabbar .tab.active{color:var(--blue);font-weight:600}
+  .tabbar .tab .ic{font-size:18px;display:block;margin-bottom:2px}
+
+  .lab-preview{background:var(--muted);border:1px dashed var(--border);border-radius:12px;
+    padding:26px;text-align:center;color:var(--text2)}
+  .extract-row{display:flex;justify-content:space-between;align-items:center;padding:11px 0;border-bottom:1px solid var(--border)}
+  .extract-row:last-child{border-bottom:0}
+  .extract-row .val{font-weight:600;font-size:18px}
+  .confirmed{color:var(--green);font-size:13px;font-weight:600}
+</style>
+</head>
+<body>
+  <div class="intro">
+    <h1>Patient app — core screens</h1>
+    <p>Synthetic data only. Built on the approved BioMech-aligned tokens (Poppins + Inter). Flow: Home → Data sources (toggles) → Import a lab → Trend detail.</p>
+  </div>
+
+  <div class="frames">
+
+    <!-- 1. HOME / TRAJECTORY -->
+    <div class="col">
+      <div class="phone">
+        <div class="status-bar"><span class="mark">◍ Neuropathy</span><span class="avatar">WB</span></div>
+        <div class="body">
+          <div class="traj improving">
+            <div class="eyebrow">Your 30-day trend</div>
+            <div class="answer">Improving</div>
+            <div class="sub">Balance and daily function are up. One lab is worth a look.</div>
+            <div class="conf"><span>Confidence</span><span class="cbar"><i style="width:72%"></i></span><span>Good</span></div>
+          </div>
+
+          <div class="card">
+            <div class="eyebrow">What's driving it</div>
+            <div class="signal"><span class="dot" style="background:#2E6DA4">◔</span><div class="t"><b>Balance score</b><br><span class="muted">BioMech · up 8 pts since June</span></div><span class="arrow up">↑</span></div>
+            <div class="signal"><span class="dot" style="background:#2F8F5B">☑</span><div class="t"><b>Daily function (ADL)</b><br><span class="muted">Self check-in · steadier this month</span></div><span class="arrow up">↑</span></div>
+            <div class="signal"><span class="dot" style="background:#D68A34">⚗</span><div class="t"><b>HbA1c</b><br><span class="muted">Lab · 7.2, slightly up</span></div><span class="arrow down">↓</span></div>
+          </div>
+
+          <button class="btn">Today's check-in · 3 questions</button>
+          <button class="btn ghost">See full report</button>
+          <p class="muted" style="text-align:center;margin-top:10px">Not medical advice. Share with your care team.</p>
+        </div>
+        <div class="tabbar">
+          <div class="tab active"><span class="ic">◍</span>Home</div>
+          <div class="tab"><span class="ic">📈</span>Trends</div>
+          <div class="tab"><span class="ic">＋</span>Add</div>
+          <div class="tab"><span class="ic">⚙</span>Sources</div>
+        </div>
+      </div>
+      <div class="screen-label">1 · Home — the trajectory answer, up top</div>
+    </div>
+
+    <!-- 2. DATA SOURCES / TOGGLES -->
+    <div class="col">
+      <div class="phone">
+        <div class="status-bar"><span class="mark">Your data sources</span><span class="avatar">WB</span></div>
+        <div class="body">
+          <p class="muted" style="margin-top:0">Turn on what fits you. Everything is optional — your app, your way.</p>
+          <div class="card">
+            <div class="src"><span class="ic" style="background:#2E6DA4">◔</span><div class="info"><b>BioMech reports</b><br><small>Balance & gait · 4 imported</small></div><div class="tg"></div></div>
+            <div class="src"><span class="ic" style="background:#D68A34">⚗</span><div class="info"><b>Lab results</b><br><small>You bring them in · 3 on file</small></div><div class="tg"></div></div>
+            <div class="src"><span class="ic" style="background:#2F8F5B">☑</span><div class="info"><b>Daily function check-in</b><br><small>ADL · 3 quick questions/day</small></div><div class="tg"></div></div>
+            <div class="src"><span class="ic" style="background:#7FB0D4">👟</span><div class="info"><b>Activity from phone</b><br><small>Steps & mobility</small></div><div class="tg off"></div></div>
+          </div>
+          <h2>Insights</h2>
+          <div class="card">
+            <div class="src"><span class="ic" style="background:#173A5E">✦</span><div class="info"><b>AI trajectory analysis</b><br><small>Combines your sources into one trend</small></div><div class="tg"></div></div>
+            <div class="src"><span class="ic" style="background:#556677">👪</span><div class="info"><b>Share with caregiver</b><br><small>Off · you control access</small></div><div class="tg off"></div></div>
+          </div>
+          <p class="muted" style="text-align:center">Turning a source off hides it and pauses its use in your trend.</p>
+        </div>
+        <div class="tabbar">
+          <div class="tab"><span class="ic">◍</span>Home</div>
+          <div class="tab"><span class="ic">📈</span>Trends</div>
+          <div class="tab"><span class="ic">＋</span>Add</div>
+          <div class="tab active"><span class="ic">⚙</span>Sources</div>
+        </div>
+      </div>
+      <div class="screen-label">2 · Sources — every feature toggleable (B2C)</div>
+    </div>
+
+    <!-- 3. LAB IMPORT -->
+    <div class="col">
+      <div class="phone">
+        <div class="status-bar"><span class="mark">Add a lab result</span><span class="avatar">WB</span></div>
+        <div class="body">
+          <div class="lab-preview">📄<br><b style="color:var(--text)">Lab_2026-05.pdf</b><br><small>Snapped a photo · we read the values</small></div>
+          <div class="card">
+            <div class="eyebrow">We found these — tap to confirm</div>
+            <div class="extract-row"><div>HbA1c</div><div><span class="val">7.2</span> % <span class="confirmed">✓ confirmed</span></div></div>
+            <div class="extract-row"><div>Vitamin B12</div><div><span class="val">310</span> pg/mL <span class="confirmed">✓ confirmed</span></div></div>
+            <div class="extract-row"><div>eGFR</div><div><span class="val">88</span> <span class="muted">— check</span></div></div>
+          </div>
+          <p class="muted">You always confirm the numbers before they count — cameras misread, and your trend should be right.</p>
+          <button class="btn">Save 3 results</button>
+          <button class="btn ghost">Enter manually instead</button>
+        </div>
+        <div class="tabbar">
+          <div class="tab"><span class="ic">◍</span>Home</div>
+          <div class="tab"><span class="ic">📈</span>Trends</div>
+          <div class="tab active"><span class="ic">＋</span>Add</div>
+          <div class="tab"><span class="ic">⚙</span>Sources</div>
+        </div>
+      </div>
+      <div class="screen-label">3 · Lab import — snap, confirm, done</div>
+    </div>
+
+    <!-- 4. TREND DETAIL -->
+    <div class="col">
+      <div class="phone">
+        <div class="status-bar"><span class="mark">Balance score</span><span class="avatar">WB</span></div>
+        <div class="body">
+          <div class="card">
+            <div class="eyebrow">BioMech · last 4 reports</div>
+            <div style="display:flex;align-items:baseline;gap:10px"><span style="font-family:var(--display);font-weight:600;font-size:40px;color:var(--blue)">65</span><span class="arrow up" style="font-size:18px">↑ 8</span><span class="muted">since June</span></div>
+            <svg viewBox="0 0 300 130" role="img" aria-label="Balance score rising from 57 to 65">
+              <line x1="0" y1="100" x2="300" y2="100" stroke="#D3DEE8"/>
+              <polyline fill="none" stroke="#2E6DA4" stroke-width="3" points="20,80 100,86 190,64 280,52"/>
+              <circle cx="20" cy="80" r="4" fill="#2E6DA4"/><circle cx="100" cy="86" r="4" fill="#2E6DA4"/>
+              <circle cx="190" cy="64" r="4" fill="#2E6DA4"/><circle cx="280" cy="52" r="5" fill="#2E6DA4"/>
+              <text x="20" y="120" font-size="10" fill="#556677" text-anchor="middle">Apr</text>
+              <text x="100" y="120" font-size="10" fill="#556677" text-anchor="middle">May</text>
+              <text x="190" y="120" font-size="10" fill="#556677" text-anchor="middle">Jun</text>
+              <text x="280" y="120" font-size="10" fill="#556677" text-anchor="middle">Jul</text>
+            </svg>
+            <p class="muted">Higher is better — a higher balance score means lower fall risk.</p>
+          </div>
+          <div class="card">
+            <div class="eyebrow">Plain language</div>
+            <p style="margin:0">Your balance has steadily improved over the last three months. That's the biggest reason your overall trend is <b class="up">improving</b>.</p>
+            <div style="margin-top:10px"><span class="chip">from BioMech</span><span class="chip">4 data points</span></div>
+          </div>
+          <button class="btn secondary">Compare with other trends</button>
+        </div>
+        <div class="tabbar">
+          <div class="tab"><span class="ic">◍</span>Home</div>
+          <div class="tab active"><span class="ic">📈</span>Trends</div>
+          <div class="tab"><span class="ic">＋</span>Add</div>
+          <div class="tab"><span class="ic">⚙</span>Sources</div>
+        </div>
+      </div>
+      <div class="screen-label">4 · Trend detail — sourced & explained</div>
+    </div>
+
+  </div>
+</body>
+</html>

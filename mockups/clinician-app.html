@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>neuropathy-app — Clinician Mockup</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Poppins:wght@500;600&display=swap');
+  :root{
+    --navy:#173A5E;--navy-deep:#0F2A45;--blue:#2E6DA4;--blue-bright:#2E86C8;
+    --sky:#7FB0D4;--sky-tint:#E8F1F8;--green:#2F8F5B;--danger:#C63F4C;
+    --warning:#D68A34;--neutral:#1F4E79;--text:#233444;--text2:#556677;
+    --card:#FFFFFF;--border:#D3DEE8;--muted:#F2F6FA;
+    --display:"Poppins",system-ui,sans-serif;--body:"Inter",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--sky-tint);color:var(--text);font-family:var(--body);font-size:15px}
+  .top{background:linear-gradient(90deg,var(--navy-deep),var(--blue-bright));color:#fff;
+    padding:14px 22px;display:flex;align-items:center;justify-content:space-between}
+  .top .mark{font-family:var(--display);font-weight:600;font-size:18px}
+  .top .who{font-size:13px;opacity:.9}
+  .wrap{display:flex;max-width:1180px;margin:0 auto;gap:20px;padding:20px}
+  .list{width:300px;flex:none}
+  .main{flex:1}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px;margin-bottom:16px;box-shadow:0 1px 3px rgba(23,58,94,.05)}
+  h2{font-family:var(--display);font-weight:600;font-size:17px;margin:0 0 12px;color:var(--navy)}
+  .eyebrow{font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--text2);margin-bottom:8px}
+  .muted{color:var(--text2)}
+  .prow{display:flex;align-items:center;gap:12px;padding:11px;border-radius:10px;cursor:pointer}
+  .prow:hover{background:var(--muted)}
+  .prow.active{background:#e6eef7}
+  .prow .ava{width:34px;height:34px;border-radius:999px;background:var(--sky);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:13px;flex:none}
+  .prow .nm{flex:1}
+  .prow .nm small{color:var(--text2)}
+  .tr{font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px}
+  .tr.up{background:#e2f0e8;color:#1f6f44}
+  .tr.down{background:#f6e4e0;color:#a23f2c}
+  .tr.flat{background:#eef1f4;color:var(--text2)}
+
+  .banner{border-radius:12px;padding:16px 18px;color:#fff;display:flex;align-items:center;gap:16px;margin-bottom:16px}
+  .banner.declining{background:linear-gradient(140deg,#c25a37,#a23f2c)}
+  .banner .big{font-family:var(--display);font-weight:600;font-size:24px}
+  .banner .sub{font-size:14px;opacity:.95}
+
+  table{width:100%;border-collapse:collapse}
+  th,td{text-align:left;padding:10px 8px;border-bottom:1px solid var(--border);font-size:14px}
+  th{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--text2)}
+  .arrow.up{color:var(--green);font-weight:600}
+  .arrow.down{color:var(--danger);font-weight:600}
+  .arrow.flat{color:var(--text2);font-weight:600}
+
+  .cap{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)}
+  .cap:last-child{border-bottom:0}
+  .cap .info{flex:1}
+  .cap .info small{color:var(--text2)}
+  .tg{width:44px;height:26px;border-radius:999px;background:var(--green);position:relative;flex:none}
+  .tg.off{background:#c7d0d9}
+  .tg::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:999px;background:#fff}
+  .tg.off::after{left:21px}
+  .expiry{font-size:12px;color:var(--warning);font-weight:600}
+  .btn{font-family:var(--body);font-weight:600;font-size:15px;color:#fff;background:var(--green);
+    border:none;border-radius:10px;padding:11px 18px;cursor:pointer}
+  .btn.secondary{background:var(--blue)}
+  .note{background:#fbf6ee;border:1px solid #ecdcc2;border-radius:10px;padding:12px 14px;font-size:13px;color:#7a5a2a;margin-top:14px}
+</style>
+</head>
+<body>
+  <div class="top"><span class="mark">◍ Neuropathy · Clinician</span><span class="who">Advanced Health & Wellness Group · Dr. Rivera</span></div>
+  <div class="wrap">
+    <div class="list">
+      <div class="card" style="padding:10px">
+        <div class="eyebrow" style="padding:8px 8px 0">Panel · 3 need review</div>
+        <div class="prow active"><span class="ava">WB</span><span class="nm">W. Berman<br><small>DPN · 67</small></span><span class="tr up">↑</span></div>
+        <div class="prow"><span class="ava">JM</span><span class="nm">J. Marsh<br><small>CIPN · 54</small></span><span class="tr down">↓</span></div>
+        <div class="prow"><span class="ava">RP</span><span class="nm">R. Patel<br><small>Idiopathic · 61</small></span><span class="tr flat">→</span></div>
+        <div class="prow"><span class="ava">SL</span><span class="nm">S. Lee<br><small>DPN · 72</small></span><span class="tr up">↑</span></div>
+      </div>
+    </div>
+
+    <div class="main">
+      <div class="banner declining">
+        <div>
+          <div class="big">Trend: needs attention</div>
+          <div class="sub">J. Marsh · function and one lab declining over 30 days · confidence: moderate</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>What the data shows</h2>
+        <table>
+          <tr><th>Signal</th><th>Source</th><th>Trend</th><th>Detail</th></tr>
+          <tr><td>Gait score</td><td>BioMech</td><td class="arrow down">↓ 6</td><td class="muted">99 → 93 over 3 visits</td></tr>
+          <tr><td>Daily function (ADL)</td><td>Self-report</td><td class="arrow down">↓</td><td class="muted">More trouble with stairs</td></tr>
+          <tr><td>HbA1c</td><td>Lab</td><td class="arrow up">↑</td><td class="muted">7.8, up from 7.1</td></tr>
+          <tr><td>Balance score</td><td>BioMech</td><td class="arrow flat">→</td><td class="muted">Stable</td></tr>
+        </table>
+        <div class="note">⚠ AI-assisted synthesis for your review — not a diagnosis. Every trend links to its source data. You make the call.</div>
+        <div style="margin-top:14px;display:flex;gap:10px"><button class="btn">Mark reviewed</button><button class="btn secondary">Open full history</button></div>
+      </div>
+
+      <div class="card">
+        <h2>Monitoring for this patient</h2>
+        <div class="eyebrow">You control what's active — like an order, with a renewal date</div>
+        <div class="cap"><div class="info"><b>BioMech import</b><br><small>Balance & gait reports</small></div><span class="expiry">renews Aug 6</span><div class="tg"></div></div>
+        <div class="cap"><div class="info"><b>Lab import</b><br><small>Patient brings results in</small></div><span class="expiry">renews Aug 6</span><div class="tg"></div></div>
+        <div class="cap"><div class="info"><b>Daily function check-in</b><br><small>ADL · 3 questions/day</small></div><span class="expiry">renews Aug 6</span><div class="tg"></div></div>
+        <div class="cap"><div class="info"><b>AI trajectory analysis</b><br><small>Cross-source synthesis</small></div><span class="muted">—</span><div class="tg"></div></div>
+        <div class="cap"><div class="info"><b>Activity from phone</b><br><small>Steps & mobility</small></div><span class="muted">—</span><div class="tg off"></div></div>
+        <p class="muted" style="font-size:13px;margin-bottom:0">Changes are logged and shown to the patient ("Dr. Rivera turned on Daily check-in"). 16+ transmission days this cycle — RTM-ready.</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
