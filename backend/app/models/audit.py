@@ -4,10 +4,12 @@ Required by our health-data posture (CLAUDE.md §5): reads and writes of health 
 and every toggle/config change (which in the clinical version is order-like), are
 logged. One pipeline serves HIPAA, SOC 2, and later research/FDA evidence needs.
 """
+
 from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import DateTime, ForeignKey, String, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -25,13 +27,17 @@ class AuditEvent(UUIDPrimaryKey, Base):
     )
 
     actor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
-    actor_role: Mapped[str] = mapped_column(String(32), nullable=False)  # patient/clinician/ops/system
+    actor_role: Mapped[str] = mapped_column(
+        String(32), nullable=False
+    )  # patient/clinician/ops/system
 
-    action: Mapped[str] = mapped_column(String(64), nullable=False)      # e.g. read_observation, toggle_capability
+    action: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )  # e.g. read_observation, toggle_capability
     patient_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("patient.id"), nullable=True, index=True
     )
 
     # Context: what was accessed/changed (ids, before/after for toggles). No secrets, no
     # raw PHI values — references, not payloads.
-    detail: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    detail: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)

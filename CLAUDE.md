@@ -133,12 +133,34 @@ Rules of engagement:
 - A brainstorm that silently omits a listed lens is incomplete — state explicitly if
   a lens has nothing new to add rather than dropping it.
 
-## 7. Working Agreements
+## 7. Engineering Standards (highest quality & performance, always)
+
+We build to professional standards and let recognized external standards settle
+questions wherever one exists. Full detail: [`docs/engineering/standards.md`](docs/engineering/standards.md).
+The essentials, binding on every change:
+
+- **Quality is enforced, not hoped for.** Ruff (lint + format), mypy **strict**, and
+  pytest with a **≥85% coverage** bar on business logic all run in CI; failing checks
+  don't merge. Bug fixes ship with a regression test.
+- **Performance is budgeted and measured.** Read p95 < 200 ms, write p95 < 500 ms;
+  AI/OCR/parsing run as async jobs, never in the request path; hot-path queries indexed;
+  no N+1; list endpoints paginate.
+- **We follow the named standards:** WCAG 2.2 AA (accessibility), OWASP ASVS L2 /
+  Top 10 (security), HIPAA Security Rule + SOC 2 habits (health data), HL7 FHIR R4 +
+  LOINC/UCUM (interoperability), OpenAPI 3.1 (API), Twelve-Factor, SemVer, Conventional
+  Commits.
+- **Definition of Done** (from the standards doc) is the merge checklist: green CI +
+  coverage, tests for new behavior, accessibility + privacy + performance checks, docs/
+  ADR updated, PR-reviewed and single-concern.
+- Prefer the boring, correct, well-supported approach over the clever one. Simplicity
+  and clarity are quality.
+
+## 8. Working Agreements
 
 - All development happens on feature branches; nothing is committed directly to `main`.
 - Pull requests are the unit of review. Keep them scoped to one concern.
-- If a requirement is ambiguous and the ambiguity touches patentability, disclosure,
-  or health-data handling, **ask — don't assume.**
+- If a requirement is ambiguous and the ambiguity touches disclosure or health-data
+  handling, **ask — don't assume.**
 
 ---
 

@@ -3,6 +3,7 @@
 Minimal by design: this skeleton models identity + tenancy only. The full data model
 (consent, clinic membership, clinician links) is a dedicated ADR still to come.
 """
+
 from __future__ import annotations
 
 import uuid

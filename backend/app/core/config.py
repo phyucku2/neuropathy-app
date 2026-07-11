@@ -1,4 +1,5 @@
 """Application settings, loaded from environment / .env (never hard-coded secrets)."""
+
 from __future__ import annotations
 
 from pydantic_settings import BaseSettings, SettingsConfigDict

@@ -3,17 +3,18 @@
 Files-only workflow: `alembic revision --autogenerate -m "..."` writes a migration file
 for review; a human runs `alembic upgrade head` intentionally.
 """
+
 from __future__ import annotations
 
 import asyncio
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from alembic import context
+from app import models  # noqa: F401  (import registers all models on Base.metadata)
 from app.core.config import settings
 from app.db.base import Base
-from app import models  # noqa: F401  (import registers all models on Base.metadata)
 
 config = context.config
 if config.config_file_name is not None:

@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Enforces docs/engineering/standards.md. Failing checks block merge.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend — lint, types, tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Ruff lint
+        run: python -m ruff check .
+
+      - name: Ruff format check
+        run: python -m ruff format --check .
+
+      - name: mypy (strict)
+        run: python -m mypy app
+
+      - name: Tests + coverage (fails under 85%)
+        run: python -m pytest
+
+  security:
+    name: Security & license scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dependency vulnerability audit
+        run: |
+          pip install pip-audit
+          pip-audit -r backend/pyproject.toml || pip-audit --skip-editable . || true
+        # Non-blocking today (no locked deps yet); tighten to blocking once deps are pinned.
+
+      - name: License policy (no copyleft) — informational
+        run: |
+          pip install pip-licenses || true
+          echo "License gate placeholder — enforce MIT/BSD/Apache/ISC once deps are installed in this job."
+
+      - name: Secret scan (tracked files)
+        run: |
+          if git grep -nE '(AKIA[0-9A-Z]{16}|-----BEGIN (RSA|EC|OPENSSH) PRIVATE KEY-----|password\s*=\s*["'"'"'][^"'"'"']+)' -- . ':!*.md'; then
+            echo "::error::Possible secret committed"; exit 1
+          fi
+          echo "No obvious secrets found."

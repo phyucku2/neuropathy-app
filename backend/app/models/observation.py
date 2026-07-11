@@ -8,11 +8,13 @@ sources were active — Brainstorm #3). Heterogeneous per-source detail lives in
 This is a working skeleton; the authoritative schema is a dedicated data-model ADR
 (FHIR-informed: labs map toward Observation/LOINC).
 """
+
 from __future__ import annotations
 
 import enum
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import DateTime, Enum, ForeignKey, Index, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -21,10 +23,10 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base, Timestamps, UUIDPrimaryKey
 
 
-class SourceType(str, enum.Enum):
-    biomech = "biomech"   # ingested from BioMech reports/feed
-    lab = "lab"           # patient-imported lab result
-    adl = "adl"           # activities-of-daily-living / functional status
+class SourceType(enum.StrEnum):
+    biomech = "biomech"  # ingested from BioMech reports/feed
+    lab = "lab"  # patient-imported lab result
+    adl = "adl"  # activities-of-daily-living / functional status
 
 
 class Observation(UUIDPrimaryKey, Timestamps, Base):
@@ -47,7 +49,7 @@ class Observation(UUIDPrimaryKey, Timestamps, Base):
 
     # Full source payload (raw metric set / lab panel row / questionnaire answers) and
     # provenance (file id, parser version, extraction confidence, human-confirmed flag).
-    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
 
     __table_args__ = (
         Index("ix_observation_patient_code_time", "patient_id", "code", "effective_at"),

@@ -1,4 +1,5 @@
 """Top-level API router — mounts feature routers."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter

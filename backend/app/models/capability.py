@@ -7,6 +7,7 @@ row. Authority differs by version (Brainstorm #2):
     order — BioMech Lab review).
 The API enforces this server-side; client toggles are only UI hints.
 """
+
 from __future__ import annotations
 
 import enum
@@ -20,7 +21,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base, Timestamps, UUIDPrimaryKey
 
 
-class Actor(str, enum.Enum):
+class Actor(enum.StrEnum):
     patient = "patient"
     clinician = "clinician"
     ops = "ops"
@@ -38,7 +39,9 @@ class Capability(UUIDPrimaryKey, Timestamps, Base):
 
 class PatientCapability(UUIDPrimaryKey, Timestamps, Base):
     __tablename__ = "patient_capability"
-    __table_args__ = (UniqueConstraint("patient_id", "capability_id", name="uq_patient_capability"),)
+    __table_args__ = (
+        UniqueConstraint("patient_id", "capability_id", name="uq_patient_capability"),
+    )
 
     patient_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("patient.id"), nullable=False, index=True
