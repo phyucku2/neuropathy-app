@@ -50,6 +50,20 @@ jurisdictions; a 12-month clock in the US).
 - Do not paste novel code or designs from this repo into external services beyond what
   the owner has already approved for the development workflow.
 
+### Client / licensee relationship (BioMech Health)
+
+The app is built at the request of **BioMech Health**. **We own all IP; BioMech
+Health is a licensee** (see `docs/decisions/2026-07-11-adr-0001-ip-ownership-and-licensing.md`).
+
+- Sharing anything from this repo with BioMech Health is third-party disclosure:
+  NDA/agreement first, minimum necessary before patent filing, and mechanisms only
+  with counsel's clearance.
+- Their inbound briefs/requirements are legitimate design inputs (the clean-room rule
+  bars *our own prior builds*, not client input). Store them under
+  `docs/requirements/biomech-health/` with received-dates so provenance is auditable.
+- If their personnel suggest inventive concepts, flag it immediately — inventorship
+  affects ownership and counsel must paper it.
+
 ## 4. Third-Party Code & Licensing
 
 - Every dependency added must have a permissive license (MIT, Apache-2.0, BSD, ISC).
