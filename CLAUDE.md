@@ -88,7 +88,41 @@ This is a health application. Even before any real user data exists:
   the owner's explicit direction and appropriate disclaimers; wording of any clinical
   claims is an owner-level decision.
 
-## 6. Working Agreements
+## 6. Brainstorming Protocol (mandatory)
+
+Whenever brainstorming is performed in this project (the user asks to "brainstorm,"
+invokes a brainstorming skill, or requests ideation/review of a feature, product, or
+plan), **every lens below must be applied — no skipping** — plus any additional
+lenses relevant to the specific topic being brainstormed:
+
+1. Physician (neurology / endocrinology / podiatry / primary care)
+2. Patient
+3. BioMech Health (the client/licensee — their stated requirements and fit)
+4. Apple developer (iOS)
+5. Android developer
+6. HIPAA / privacy
+7. SOC 2 / security
+8. Marketing
+9. Legal & regulatory (incl. FDA SaMD, licensing, patents)
+10. Accessibility
+11. Payer / reimbursement
+12. Data science / ML
+13. Clinical research / validation
+14. Caregiver / family
+15. Agile (operating model, phasing, backlog impact)
+16. DevOps (CI/CD, infra, release, observability impact)
+
+Rules of engagement:
+- Add topic-specific lenses beyond this list whenever the subject warrants it (e.g.
+  hardware partner, pharmacist, health-economics), and record any newly added lens
+  here so the canonical list grows.
+- Every brainstorm is captured as a dated file in `docs/brainstorm/` (it is part of
+  the invention record) and must flag `> INVENTION CANDIDATE` items and the decisions
+  it forces (which then become ADRs).
+- A brainstorm that silently omits a listed lens is incomplete — state explicitly if
+  a lens has nothing new to add rather than dropping it.
+
+## 7. Working Agreements
 
 - All development happens on feature branches; nothing is committed directly to `main`.
 - Pull requests are the unit of review. Keep them scoped to one concern.
