@@ -1,8 +1,18 @@
 # neuropathy-app — Hard Rules
 
 These rules are **binding** on every contributor to this repository, human or AI agent.
-They exist to keep this build clean-room, original, and patent-eligible. If a task
-conflicts with a rule here, the rule wins — stop and ask the repository owner.
+If a task conflicts with a rule here, the rule wins — stop and ask the repository owner.
+
+## 0. Priority: build a great product
+
+The goal is an excellent, trustworthy product patients and clinicians love — clear,
+fast, accessible, safe. That is the objective every decision serves. The rules below
+are guardrails that keep us original, private, and safe **while** we build; they are
+not the point of the work. When in doubt, optimize for product quality and user trust,
+not for legal ceremony. Originality and confidentiality (§1, §3) protect the owner's
+options and are cheap to maintain, so we keep them — but they should never slow down or
+distort good product decisions. If a rule ever feels like it's fighting the product,
+raise it rather than lawyering around it.
 
 ---
 
@@ -24,31 +34,31 @@ This is a **from-scratch build**. It shares no lineage with any prior project.
   accessibility) are fine — they are public knowledge, not prior-project IP. The line:
   if it came from *our* earlier work, it stays out; if it's in any textbook, it's fine.
 
-## 2. IP Provenance & Invention Record
+## 2. Decision Records (good engineering practice)
 
-Everything novel must be traceable to its origin **inside this repo**.
+Load-bearing decisions get written down so the team stays aligned and future
+contributors understand *why*, not just *what*.
 
-- All design decisions live in `docs/decisions/` as dated Architecture Decision Records
-  (ADRs): one file per decision, with the date, the problem, the options considered, and
-  why the chosen approach was selected.
-- Novel mechanisms — algorithms, scoring methods, data models, interaction flows that
-  may be claimable — get flagged in their ADR with a `> INVENTION CANDIDATE` note so
-  patent counsel can find them.
-- Commits are small and descriptive. The git history is part of the invention record;
-  never squash away or rewrite history on shared branches.
+- Significant design decisions live in `docs/decisions/` as dated ADRs: the date, the
+  problem, the options considered, and why we chose what we chose. Keep them short.
+- This is for engineering clarity first. If something genuinely looks novel and worth
+  protecting, a one-line note in the ADR is enough to revisit later with counsel — no
+  need to hunt for "inventions" or let patent framing shape the design.
+- Small, descriptive commits; don't rewrite shared history.
 
-## 3. Confidentiality / No Public Disclosure
+## 3. Confidentiality (keep options open, don't obsess)
 
-Premature disclosure can destroy patent rights (immediately in most non-US
-jurisdictions; a 12-month clock in the US).
+The repo is a private, licensed product, so we keep it private — this is low-effort and
+protects the owner's choices (including any future filing).
 
 - This repository stays **private** until the owner says otherwise.
-- No part of the app's novel functionality may be published, demoed publicly, posted to
-  forums/social media, submitted to app stores, or described in public issue trackers
-  before the owner confirms a patent filing strategy with counsel.
-- Deployments before filing must be access-controlled (auth-gated, not indexable).
-- Do not paste novel code or designs from this repo into external services beyond what
-  the owner has already approved for the development workflow.
+- Don't publicly publish, demo, app-store-submit, or describe the product's distinctive
+  functionality before the owner says it's time. Pre-launch deployments are auth-gated,
+  not indexable.
+- Don't paste the repo's code or designs into external services beyond the approved
+  development workflow.
+- That's it — normal good hygiene for an unreleased product. No need to treat every
+  design note as a state secret.
 
 ### Client / licensee relationship (BioMech Health)
 
@@ -116,9 +126,10 @@ Rules of engagement:
 - Add topic-specific lenses beyond this list whenever the subject warrants it (e.g.
   hardware partner, pharmacist, health-economics), and record any newly added lens
   here so the canonical list grows.
-- Every brainstorm is captured as a dated file in `docs/brainstorm/` (it is part of
-  the invention record) and must flag `> INVENTION CANDIDATE` items and the decisions
-  it forces (which then become ADRs).
+- Every brainstorm is captured as a dated file in `docs/brainstorm/` and should call
+  out the decisions it forces (which then become ADRs). If something looks genuinely
+  novel, a light note is fine — but the goal of a brainstorm is a better product, not
+  an inventory of claims.
 - A brainstorm that silently omits a listed lens is incomplete — state explicitly if
   a lens has nothing new to add rather than dropping it.
 
