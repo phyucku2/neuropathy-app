@@ -1,0 +1,24 @@
+# Secrets / env — never commit
+.env
+.env.*
+*.pem
+*.key
+
+# PHI guard — no real patient data or clinical report images in the repo (CLAUDE.md §5).
+# De-identified transcriptions live in markdown; raw report images do not.
+**/phi/
+*-report-phi.*
+docs/requirements/**/reports-with-phi/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Build / deps (populated as the app is scaffolded)
+node_modules/
+dist/
+build/
+*.log
