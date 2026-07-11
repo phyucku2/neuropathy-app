@@ -1,7 +1,9 @@
 # ADR-0002: Visual Design — Brand Alignment with BioMech Lab
 
 **Date:** 2026-07-11
-**Status:** Accepted (owner decision)
+**Status:** Accepted (owner decision) — palette **approved by owner 2026-07-11**
+("colors look good"); hex values remain placeholders pending BioMech's official brand
+guide.
 
 ## Context
 
