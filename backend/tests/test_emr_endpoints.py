@@ -1,0 +1,280 @@
+"""End-to-end tests for the EMR endpoints (ADR-0009): providers -> connect -> callback
+-> pull -> revoke, against a fake EMR (no network).
+"""
+
+from __future__ import annotations
+
+from typing import Any
+from urllib.parse import parse_qs, urlparse
+from uuid import uuid4
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app.api.routes.emr import get_emr_service
+from app.emr.service import EmrService
+from app.main import app
+
+FHIR_BASE = "https://ehr.example/fhir"
+
+
+class FakeEmr:
+    """Plays the EMR: SMART discovery, token endpoint, and Observation search."""
+
+    def __init__(self) -> None:
+        self.token_requests: list[dict[str, str]] = []
+
+    async def get_json(self, url: str, *, access_token: str | None = None) -> dict[str, Any]:
+        if url.endswith("/.well-known/smart-configuration"):
+            return {
+                "authorization_endpoint": "https://ehr.example/oauth/authorize",
+                "token_endpoint": "https://ehr.example/oauth/token",
+            }
+        assert url.startswith(f"{FHIR_BASE}/Observation")
+        assert access_token == "the-access-token"
+        return {
+            "resourceType": "Bundle",
+            "type": "searchset",
+            "entry": [
+                {
+                    "resource": {
+                        "resourceType": "Observation",
+                        "status": "final",
+                        "code": {"coding": [{"system": "http://loinc.org", "code": "4548-4"}]},
+                        "effectiveDateTime": "2026-06-15T08:30:00+00:00",
+                        "valueQuantity": {
+                            "value": 7.2,
+                            "unit": "%",
+                            "system": "http://unitsofmeasure.org",
+                            "code": "%",
+                        },
+                    }
+                }
+            ],
+        }
+
+    async def post_form(self, url: str, data: dict[str, str]) -> dict[str, Any]:
+        assert url == "https://ehr.example/oauth/token"
+        self.token_requests.append(data)
+        return {
+            "access_token": "the-access-token",
+            "refresh_token": "the-refresh-token",
+            "patient": "fhir-patient-9",
+            "scope": "patient/Observation.read",
+            "expires_in": 3600,
+        }
+
+
+@pytest.fixture()
+def client() -> TestClient:
+    service = EmrService(
+        transport=FakeEmr(), client_id="test-client", redirect_uri="https://app.test/emr/callback"
+    )
+    app.dependency_overrides[get_emr_service] = lambda: service
+    try:
+        yield TestClient(app)
+    finally:
+        app.dependency_overrides.clear()
+
+
+def _connect(client: TestClient) -> tuple[str, str]:
+    resp = client.post("/emr/connect", json={"patient_id": str(uuid4()), "fhir_base": FHIR_BASE})
+    assert resp.status_code == 200
+    body = resp.json()
+    return body["connection_id"], body["state"]
+
+
+def test_providers_endpoint_lists_and_searches() -> None:
+    with TestClient(app) as anon:
+        all_providers = anon.get("/emr/providers").json()
+        assert any(p["key"] == "epic" for p in all_providers)
+        only_epic = anon.get("/emr/providers", params={"q": "mychart"}).json()
+        assert [p["key"] for p in only_epic] == ["epic"]
+
+
+def test_connect_returns_pkce_authorize_url(client: TestClient) -> None:
+    _, state = _connect(client)
+    resp = client.post("/emr/connect", json={"patient_id": str(uuid4()), "fhir_base": FHIR_BASE})
+    q = parse_qs(urlparse(resp.json()["authorize_url"]).query)
+    assert q["code_challenge_method"] == ["S256"]
+    assert q["aud"] == [FHIR_BASE]
+    assert q["client_id"] == ["test-client"]
+    assert state  # returned so the app can correlate the callback
+
+
+def test_full_flow_connect_callback_pull(client: TestClient) -> None:
+    connection_id, state = _connect(client)
+
+    cb = client.get("/emr/callback", params={"state": state, "code": "auth-code"})
+    assert cb.status_code == 200
+    body = cb.json()
+    assert body["status"] == "active"
+    assert body["patient_fhir_id"] == "fhir-patient-9"
+    assert "token" not in cb.text.lower().replace("token_expires_at", "")  # no token leaks
+
+    pull = client.post(f"/emr/connections/{connection_id}/pull")
+    assert pull.status_code == 200
+    assert pull.json()["imported"] == 1
+    assert pull.json()["results"][0]["loinc_code"] == "4548-4"
+
+
+def test_callback_with_unknown_state_is_404(client: TestClient) -> None:
+    resp = client.get("/emr/callback", params={"state": "forged", "code": "x"})
+    assert resp.status_code == 404
+
+
+def test_state_is_single_use(client: TestClient) -> None:
+    _, state = _connect(client)
+    assert client.get("/emr/callback", params={"state": state, "code": "c"}).status_code == 200
+    # Replaying the same state must fail (CSRF/replay protection).
+    assert client.get("/emr/callback", params={"state": state, "code": "c"}).status_code == 404
+
+
+def test_revoked_connection_cannot_pull(client: TestClient) -> None:
+    connection_id, state = _connect(client)
+    client.get("/emr/callback", params={"state": state, "code": "c"})
+
+    revoked = client.delete(f"/emr/connections/{connection_id}")
+    assert revoked.status_code == 200
+    assert revoked.json()["status"] == "revoked"
+
+    assert client.post(f"/emr/connections/{connection_id}/pull").status_code == 409
+
+
+def test_pull_before_callback_is_409(client: TestClient) -> None:
+    connection_id, _ = _connect(client)
+    assert client.post(f"/emr/connections/{connection_id}/pull").status_code == 409
+
+
+def test_unknown_connection_is_404(client: TestClient) -> None:
+    assert client.post(f"/emr/connections/{uuid4()}/pull").status_code == 404
+    assert client.delete(f"/emr/connections/{uuid4()}").status_code == 404
+
+
+async def test_active_connection_missing_tokens_is_409() -> None:
+    # Defensive invariant: active status without vaulted tokens must refuse to pull.
+    import uuid as uuid_mod
+
+    from app.emr.service import ConnectionRecord, EmrError
+    from app.models.emr_connection import EmrConnectionStatus
+
+    service = EmrService(transport=FakeEmr(), client_id="c", redirect_uri="https://a/cb")
+    record = ConnectionRecord(
+        id=uuid_mod.uuid4(),
+        patient_id=uuid_mod.uuid4(),
+        fhir_base=FHIR_BASE,
+        provider_name=None,
+        status=EmrConnectionStatus.active,
+    )
+    service._connections[record.id] = record  # noqa: SLF001 — contrived state for the invariant
+    try:
+        await service.pull_labs(record.id)
+        raise AssertionError("expected EmrError")
+    except EmrError as exc:
+        assert exc.status_code == 409
+
+
+def test_unknown_provider_key_is_404(client: TestClient) -> None:
+    resp = client.post(
+        "/emr/connect", json={"patient_id": str(uuid4()), "provider_key": "not-an-emr"}
+    )
+    assert resp.status_code == 404
+
+
+def test_provider_without_sandbox_requires_fhir_base(client: TestClient) -> None:
+    resp = client.post(
+        "/emr/connect", json={"patient_id": str(uuid4()), "provider_key": "meditech"}
+    )
+    assert resp.status_code == 422
+
+
+def test_connect_requires_provider_or_fhir_base(client: TestClient) -> None:
+    resp = client.post("/emr/connect", json={"patient_id": str(uuid4())})
+    assert resp.status_code == 422
+
+
+class BrokenEmr(FakeEmr):
+    """An EMR with no SMART config and a token endpoint that returns no token."""
+
+    def __init__(self, *, empty_config: bool) -> None:
+        super().__init__()
+        self._empty_config = empty_config
+
+    async def get_json(self, url: str, *, access_token: str | None = None) -> dict[str, Any]:
+        if self._empty_config and url.endswith("/.well-known/smart-configuration"):
+            return {}
+        return await super().get_json(url, access_token=access_token)
+
+    async def post_form(self, url: str, data: dict[str, str]) -> dict[str, Any]:
+        return {"error": "server_error"}
+
+
+def _client_with(service: EmrService) -> TestClient:
+    app.dependency_overrides[get_emr_service] = lambda: service
+    return TestClient(app)
+
+
+def test_emr_without_smart_config_is_502() -> None:
+    service = EmrService(
+        transport=BrokenEmr(empty_config=True), client_id="c", redirect_uri="https://a/cb"
+    )
+    try:
+        resp = _client_with(service).post(
+            "/emr/connect", json={"patient_id": str(uuid4()), "fhir_base": FHIR_BASE}
+        )
+        assert resp.status_code == 502
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_token_exchange_without_access_token_is_502() -> None:
+    service = EmrService(
+        transport=BrokenEmr(empty_config=False), client_id="c", redirect_uri="https://a/cb"
+    )
+    try:
+        c = _client_with(service)
+        state = c.post(
+            "/emr/connect", json={"patient_id": str(uuid4()), "fhir_base": FHIR_BASE}
+        ).json()["state"]
+        assert c.get("/emr/callback", params={"state": state, "code": "x"}).status_code == 502
+    finally:
+        app.dependency_overrides.clear()
+
+
+class MinimalTokenEmr(FakeEmr):
+    """Token response with only an access token — optional fields must default safely."""
+
+    async def post_form(self, url: str, data: dict[str, str]) -> dict[str, Any]:
+        return {"access_token": "the-access-token"}
+
+
+def test_minimal_token_response_still_activates() -> None:
+    service = EmrService(transport=MinimalTokenEmr(), client_id="c", redirect_uri="https://a/cb")
+    try:
+        c = _client_with(service)
+        state = c.post(
+            "/emr/connect", json={"patient_id": str(uuid4()), "fhir_base": FHIR_BASE}
+        ).json()["state"]
+        body = c.get("/emr/callback", params={"state": state, "code": "x"}).json()
+        assert body["status"] == "active"
+        assert body["patient_fhir_id"] is None
+        assert body["granted_scope"] is None
+        assert body["token_expires_at"] is None
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_default_service_builds_from_settings() -> None:
+    from app.api.routes.emr import get_emr_service as real_dep
+
+    service = real_dep()
+    assert isinstance(service, EmrService)
+    assert service is real_dep()  # cached singleton
+
+
+def test_registry_provider_connects_via_sandbox(client: TestClient) -> None:
+    # Epic entry resolves to its sandbox base until per-org production endpoints land.
+    resp = client.post("/emr/connect", json={"patient_id": str(uuid4()), "provider_key": "epic"})
+    assert resp.status_code == 200
+    q = parse_qs(urlparse(resp.json()["authorize_url"]).query)
+    assert q["aud"] == ["https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4"]

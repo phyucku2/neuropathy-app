@@ -44,6 +44,22 @@ def test_authorize_url_has_required_smart_params() -> None:
     assert q["state"] == ["xyz"]
 
 
+def test_ehr_launch_adds_launch_scope_and_param() -> None:
+    # Clinician launching from inside the EHR (SMART EHR launch — ADR-0009).
+    url = build_authorize_url(
+        authorization_endpoint="https://ehr.example/oauth/authorize",
+        client_id="my-client",
+        redirect_uri="https://app.example/callback",
+        fhir_base="https://ehr.example/fhir",
+        state="xyz",
+        code_challenge="challenge123",
+        launch="launch-context-token",
+    )
+    q = parse_qs(urlparse(url).query)
+    assert q["launch"] == ["launch-context-token"]
+    assert q["scope"][0].startswith("launch ")
+
+
 def test_token_request_uses_pkce_verifier() -> None:
     body = build_token_request(
         client_id="my-client",

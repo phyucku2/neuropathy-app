@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.routes import health
+from app.api.routes import emr, health
 
 api_router = APIRouter()
 api_router.include_router(health.router)
+api_router.include_router(emr.router)
 
-# Feature routers slot in here as they're built:
-#   ingestion (labs, adl), emr (SMART on FHIR connect/pull), capabilities (toggles),
-#   trajectory (AI), clinic. Domain logic for these already exists under app/ingestion,
-#   app/emr, app/fhir, and app/services; the HTTP layer wires in once auth + DB land.
+# Feature routers still to come: ingestion (lab upload, adl), capabilities (toggles),
+# trajectory (AI), clinic. Domain logic already exists under app/ingestion, app/fhir,
+# and app/services; those HTTP layers wire in once app auth + DB land.

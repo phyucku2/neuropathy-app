@@ -41,8 +41,16 @@ def build_authorize_url(
     state: str,
     code_challenge: str,
     scopes: tuple[str, ...] = DEFAULT_SCOPES,
+    launch: str | None = None,
 ) -> str:
-    """Construct the SMART authorization-code (PKCE) URL for standalone patient launch."""
+    """Construct the SMART authorization-code (PKCE) URL.
+
+    Standalone patient launch by default; pass `launch` (the EHR-provided context token)
+    for a SMART EHR launch from within a clinician's EHR session — the `launch` scope is
+    added automatically (ADR-0009).
+    """
+    if launch is not None and "launch" not in scopes:
+        scopes = ("launch", *scopes)
     params = {
         "response_type": "code",
         "client_id": client_id,
@@ -53,6 +61,8 @@ def build_authorize_url(
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
     }
+    if launch is not None:
+        params["launch"] = launch
     return f"{authorization_endpoint}?{urlencode(params)}"
 
 
