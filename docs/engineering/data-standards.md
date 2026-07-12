@@ -4,6 +4,11 @@ The concrete standard behind ADR-0006. Binding on all data collection (CLAUDE.md
 Goal: every datum is defensible as research evidence — traceable, reproducible, and
 integrity-preserving.
 
+> **Scope now (ADR-0007):** the immediate application is **lab data, modeled on
+> HL7 FHIR R4** (`Observation`, LOINC codes, UCUM units). **ADL** is a patient-reported
+> source. **BioMech is a separate module** built later and is not in the core data
+> model yet. The integrity principles below apply to every source we do collect.
+
 ## ALCOA+ (the integrity backbone)
 | Principle | What it means here |
 |---|---|
