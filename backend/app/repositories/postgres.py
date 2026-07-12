@@ -13,15 +13,18 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import exists, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.models.audit import AuditEvent
 from app.models.emr_connection import EmrConnection
 from app.models.observation import Observation, ObservationStatus
+from app.models.patient import Patient
 from app.models.user import User
 from app.repositories.emr_connection import ConnectionRecord
-from app.repositories.user import UserRecord
+from app.repositories.user import DuplicateEmailError, UserRecord
 from app.services.observation import counts_toward_analysis
 
 # The SQL twin of the unit-tested analyzable-status predicate: derived from it, so the
@@ -36,6 +39,11 @@ class PostgresUserRepository:
         self._session = session
 
     async def add(self, user: UserRecord) -> None:
+        # One flush: the user row and its linked Patient clinical record are created
+        # atomically, and the unique email index enforces uniqueness without a
+        # check-then-insert race (translated to the domain error).
+        if user.patient_id is not None:
+            self._session.add(Patient(id=user.patient_id, display_name=user.display_name))
         self._session.add(
             User(
                 id=user.id,
@@ -46,7 +54,12 @@ class PostgresUserRepository:
                 patient_id=user.patient_id,
             )
         )
-        await self._session.flush()
+        try:
+            await self._session.flush()
+        except IntegrityError as exc:
+            if "app_user" in str(exc.orig) and "email" in str(exc.orig):
+                raise DuplicateEmailError(user.email) from exc
+            raise
 
     async def get_by_email(self, email: str) -> UserRecord | None:
         row = await self._session.scalar(select(User).where(User.email == email))
@@ -111,17 +124,36 @@ class PostgresObservationRepository:
     async def list_for_patient(
         self, patient_id: uuid.UUID, code: str | None = None
     ) -> list[Observation]:
+        # "Current" records only: exclude rows superseded by a newer row's revises_id
+        # (corrections replace their target in the analyzable dataset).
+        newer = aliased(Observation)
         stmt = (
             select(Observation)
             .where(
                 Observation.patient_id == patient_id,
                 Observation.status.in_(_ANALYZABLE_STATUSES),
+                ~exists(
+                    select(newer.id).where(
+                        newer.patient_id == patient_id, newer.revises_id == Observation.id
+                    )
+                ),
             )
             .order_by(Observation.effective_at)
         )
         if code is not None:
             stmt = stmt.where(Observation.code == code)
         return list((await self._session.scalars(stmt)).all())
+
+    async def has_import_key(self, patient_id: uuid.UUID, import_key: str) -> bool:
+        stmt = select(
+            exists(
+                select(Observation.id).where(
+                    Observation.patient_id == patient_id,
+                    Observation.payload["import_key"].astext == import_key,
+                )
+            )
+        )
+        return bool(await self._session.scalar(stmt))
 
 
 class PostgresAuditEventRepository:

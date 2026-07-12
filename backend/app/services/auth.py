@@ -2,9 +2,8 @@
 
 Users live behind the injected `UserRepository` (in-memory by default, so unit tests
 and DB-less development keep working; Postgres in deployment). Token verification
-itself is stateless JWT. The public methods are synchronous — they drive the
-repository via `resolve_now`, which the in-memory store satisfies; the DB-backed
-request path awaits the repository when the API layer moves onto the async session.
+itself is stateless JWT. All methods are async so any repository implementation
+(in-memory or Postgres) works behind them.
 """
 
 from __future__ import annotations
@@ -21,8 +20,12 @@ from app.core.security import (
     verify_password,
 )
 from app.models.user import UserRole
-from app.repositories.support import resolve_now
-from app.repositories.user import InMemoryUserRepository, UserRecord, UserRepository
+from app.repositories.user import (
+    DuplicateEmailError,
+    InMemoryUserRepository,
+    UserRecord,
+    UserRepository,
+)
 
 __all__ = ["AuthApiError", "AuthService", "TokenPair", "UserRecord"]
 
@@ -49,39 +52,44 @@ class AuthService:
     secret: str = field(default_factory=lambda: secrets.token_urlsafe(48))
     users: UserRepository = field(default_factory=InMemoryUserRepository)
 
-    def register_patient(self, *, email: str, password: str, display_name: str) -> UserRecord:
+    async def register_patient(self, *, email: str, password: str, display_name: str) -> UserRecord:
         normalized = email.strip().lower()
-        if resolve_now(self.users.get_by_email(normalized)) is not None:
-            raise AuthApiError("An account with this email already exists", status_code=409)
         user = UserRecord(
             id=uuid.uuid4(),
             email=normalized,
             password_hash=hash_password(password),
             display_name=display_name,
             role=UserRole.patient,
-            patient_id=uuid.uuid4(),  # DB layer will create the Patient row atomically
+            patient_id=uuid.uuid4(),
         )
-        resolve_now(self.users.add(user))
+        try:
+            # The repository owns email uniqueness (atomic in Postgres via the unique
+            # index) and creates the linked Patient row with the user.
+            await self.users.add(user)
+        except DuplicateEmailError as exc:
+            raise AuthApiError(
+                "An account with this email already exists", status_code=409
+            ) from exc
         return user
 
-    def login(self, *, email: str, password: str) -> tuple[UserRecord, TokenPair]:
-        user = resolve_now(self.users.get_by_email(email.strip().lower()))
+    async def login(self, *, email: str, password: str) -> tuple[UserRecord, TokenPair]:
+        user = await self.users.get_by_email(email.strip().lower())
         # Same error for unknown email and wrong password — no account enumeration.
         if user is None or not verify_password(user.password_hash, password):
             raise AuthApiError("Invalid email or password", status_code=401)
         return user, self._issue_tokens(user)
 
-    def refresh(self, *, refresh_token: str) -> str:
+    async def refresh(self, *, refresh_token: str) -> str:
         claims = decode_token(refresh_token, secret=self.secret, expected_kind=TokenKind.refresh)
-        user = resolve_now(self.users.get_by_id(claims.user_id))
+        user = await self.users.get_by_id(claims.user_id)
         if user is None:
             raise AuthApiError("Account no longer exists", status_code=401)
         return create_token(
             user_id=user.id, role=user.role.value, kind=TokenKind.access, secret=self.secret
         )
 
-    def get_user(self, user_id: uuid.UUID) -> UserRecord | None:
-        return resolve_now(self.users.get_by_id(user_id))
+    async def get_user(self, user_id: uuid.UUID) -> UserRecord | None:
+        return await self.users.get_by_id(user_id)
 
     def _issue_tokens(self, user: UserRecord) -> TokenPair:
         return TokenPair(

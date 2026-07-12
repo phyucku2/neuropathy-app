@@ -211,7 +211,7 @@ def _data_gaps(assessments: list[_Assessment], now: datetime) -> list[str]:
     present_sources = {assessment.source for assessment in assessments}
     for source in SourceType:
         if source.value not in present_sources:
-            gaps.append(_SOURCE_GAP_MESSAGES[source])
+            gaps.append(_SOURCE_GAP_MESSAGES.get(source, f"No {source.value} data yet."))
     for assessment in assessments:
         label = assessment.info.label
         stats = assessment.stats
@@ -228,6 +228,13 @@ def _data_gaps(assessments: list[_Assessment], now: datetime) -> list[str]:
                 )
             else:
                 gaps.append(f"No reference range on file for {label}, so it is not judged.")
+        if (
+            assessment.judged
+            and assessment.range_position is not None
+            and assessment.range_position is not RangePosition.within
+        ):
+            note = _RANGE_NOTES[assessment.range_position]
+            gaps.append(f"{_capitalize(label)} is {note} — worth discussing with your care team.")
         age_days = _days_between(stats.latest_at, now)
         if age_days > STALE_AFTER_DAYS:
             gaps.append(f"The last {label} reading was {round(age_days)} days ago.")

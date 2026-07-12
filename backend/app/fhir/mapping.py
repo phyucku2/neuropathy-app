@@ -125,6 +125,7 @@ def from_fhir(obs: Observation) -> LabResultIn:
 
     return LabResultIn(
         loinc_code=coding.code or "",
+        source_record_id=obs.id,
         display=coding.display or obs.code.text or (coding.code or ""),
         value=value,
         value_text=obs.value_string,

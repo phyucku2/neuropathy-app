@@ -34,6 +34,7 @@ def lab_result_to_observation(
     recorded_by_role: str,
     quality: dict[str, Any] | None = None,
     recorded_at: datetime | None = None,
+    import_key: str | None = None,
 ) -> Observation:
     """Map a FHIR-aligned lab result to a research-grade Observation row.
 
@@ -58,6 +59,8 @@ def lab_result_to_observation(
         quality=quality or {},
         payload={
             "display": result.display,
+            "source_record_id": result.source_record_id,
+            "import_key": import_key,
             "reference_range": result.reference_range.model_dump()
             if result.reference_range
             else None,

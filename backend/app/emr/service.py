@@ -35,7 +35,6 @@ from app.repositories.emr_connection import (
     InMemoryEmrConnectionRepository,
 )
 from app.repositories.observation import InMemoryObservationRepository, ObservationRepository
-from app.repositories.support import resolve_now
 from app.schemas.lab import LabResultIn
 
 __all__ = ["ConnectionRecord", "EmrError", "EmrService", "InMemorySecretStore"]
@@ -152,8 +151,13 @@ class EmrService:
         await self.connections.update(record)
         return record
 
-    async def pull_labs(self, connection_id: uuid.UUID) -> list[LabResultIn]:
-        record = self.get_connection(connection_id)
+    async def pull_labs(self, connection_id: uuid.UUID) -> tuple[list[LabResultIn], int]:
+        """Fetch labs from the EMR and persist the ones not already imported.
+
+        Returns (fetched results, newly persisted count) — re-pulling never
+        duplicates the analyzable dataset (import is idempotent per source record).
+        """
+        record = await self.get_connection(connection_id)
         if record.status is not EmrConnectionStatus.active:
             raise EmrError("Connection is not active", status_code=409)
         if record.token_ref is None or record.patient_fhir_id is None:
@@ -164,18 +168,25 @@ class EmrService:
         results = await client.fetch_lab_observations(
             patient_fhir_id=record.patient_fhir_id, access_token=tokens["access_token"]
         )
-        await self._persist_pulled_labs(record, results)
-        return results
+        imported = await self._persist_pulled_labs(record, results)
+        return results, imported
 
     async def _persist_pulled_labs(
         self, record: ConnectionRecord, results: list[LabResultIn]
-    ) -> None:
+    ) -> int:
         """Persist pulled labs as research-grade Observations + one audit event.
 
+        Idempotent: each result carries an import key (the source FHIR record id when
+        the EMR provides one, else code+time+value); already-imported records are
+        skipped so repeated pulls never duplicate the analyzable dataset.
         Provenance (data-standards.md): origin=ehr_imported, recorded by the system,
         source system named in quality. The PHI write is audit-logged (CLAUDE.md §5).
         """
+        imported = 0
         for result in results:
+            import_key = _import_key(record, result)
+            if await self.observations.has_import_key(record.patient_id, import_key):
+                continue
             await self.observations.add(
                 lab_result_to_observation(
                     result,
@@ -183,8 +194,10 @@ class EmrService:
                     origin=DataOrigin.ehr_imported,
                     recorded_by_role="system",
                     quality={"source_system": record.provider_name or record.fhir_base},
+                    import_key=import_key,
                 )
             )
+            imported += 1
         await self.audit.add(
             AuditEvent(
                 actor_id=None,
@@ -192,19 +205,38 @@ class EmrService:
                 action="import_labs",
                 patient_id=record.patient_id,
                 # References only, never PHI values (audit model contract).
-                detail={"connection_id": str(record.id), "imported": len(results)},
+                detail={
+                    "connection_id": str(record.id),
+                    "fetched": len(results),
+                    "imported": imported,
+                },
             )
         )
+        return imported
 
-    def revoke(self, connection_id: uuid.UUID) -> ConnectionRecord:
-        record = self.get_connection(connection_id)
+    async def revoke(self, connection_id: uuid.UUID) -> ConnectionRecord:
+        record = await self.get_connection(connection_id)
         record.status = EmrConnectionStatus.revoked
         record.revoked_at = datetime.now(UTC)
-        resolve_now(self.connections.update(record))
+        await self.connections.update(record)
         return record
 
-    def get_connection(self, connection_id: uuid.UUID) -> ConnectionRecord:
-        record = resolve_now(self.connections.get(connection_id))
+    async def get_connection(self, connection_id: uuid.UUID) -> ConnectionRecord:
+        record = await self.connections.get(connection_id)
         if record is None:
             raise EmrError("Connection not found", status_code=404)
         return record
+
+
+def _import_key(record: ConnectionRecord, result: LabResultIn) -> str:
+    """Stable idempotency key for one pulled lab record.
+
+    Prefer the EMR's own FHIR Observation id (globally stable per source); fall back to
+    the clinical identity of the result when the EMR omits ids.
+    """
+    if result.source_record_id:
+        return f"fhir:{record.fhir_base}:{result.source_record_id}"
+    return (
+        f"content:{result.loinc_code}:{result.effective_at.isoformat()}"
+        f":{result.value}:{result.unit}:{result.value_text}"
+    )

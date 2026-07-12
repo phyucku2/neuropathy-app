@@ -18,7 +18,6 @@ from app.models.observation import DataOrigin
 from app.repositories.audit import InMemoryAuditEventRepository
 from app.repositories.emr_connection import ConnectionRecord, InMemoryEmrConnectionRepository
 from app.repositories.observation import InMemoryObservationRepository
-from app.repositories.support import resolve_now
 from app.schemas.lab import LabResultIn, LabStatus
 
 PATIENT_ID = uuid.uuid4()
@@ -92,16 +91,6 @@ async def test_emr_connection_repository_round_trip() -> None:
     assert await repo.get(uuid.uuid4()) is None
 
 
-def test_resolve_now_rejects_a_coroutine_that_suspends() -> None:
-    import asyncio
-
-    async def suspends() -> None:
-        await asyncio.sleep(0)
-
-    with pytest.raises(RuntimeError, match="suspended in a synchronous context"):
-        resolve_now(suspends())
-
-
 class _PullOnlyEmr:
     """Transport fake: just enough FHIR for pull_labs (no network, synthetic data)."""
 
@@ -151,8 +140,9 @@ async def test_pull_labs_persists_research_grade_observations_and_audits() -> No
     )
     await service.connections.add(record)
 
-    results = await service.pull_labs(record.id)
+    results, imported = await service.pull_labs(record.id)
     assert len(results) == 1
+    assert imported == 1
 
     observations = await service.observations.list_for_patient(PATIENT_ID)
     assert len(observations) == 1
@@ -165,7 +155,7 @@ async def test_pull_labs_persists_research_grade_observations_and_audits() -> No
 
     events = await service.audit.list_for_patient(PATIENT_ID)
     assert [e.action for e in events] == ["import_labs"]
-    assert events[0].detail == {"connection_id": str(record.id), "imported": 1}
+    assert events[0].detail == {"connection_id": str(record.id), "fetched": 1, "imported": 1}
     # References only in the audit trail — never lab values (PHI).
     assert "7.2" not in str(events[0].detail)
 
@@ -191,3 +181,138 @@ async def test_pull_labs_names_fhir_base_when_provider_unknown() -> None:
     await service.pull_labs(record.id)
     observations = await service.observations.list_for_patient(PATIENT_ID)
     assert observations[0].quality == {"source_system": "https://ehr.example/fhir"}
+
+
+async def test_repeated_pulls_do_not_duplicate_observations() -> None:
+    """Re-syncing the same EMR records must never double-count the dataset (review
+    finding: duplicate labs on repeated pulls)."""
+    secret_store = InMemorySecretStore()
+    service = EmrService(
+        transport=_PullOnlyEmr(),
+        client_id="c",
+        redirect_uri="https://a/cb",
+        secret_store=secret_store,
+    )
+    record = ConnectionRecord(
+        id=uuid.uuid4(),
+        patient_id=PATIENT_ID,
+        fhir_base="https://ehr.example/fhir",
+        provider_name="Synthetic Health",
+        status=EmrConnectionStatus.active,
+        patient_fhir_id="fhir-patient-9",
+        token_ref=secret_store.put({"access_token": "the-access-token"}),
+    )
+    await service.connections.add(record)
+
+    _, first = await service.pull_labs(record.id)
+    results, second = await service.pull_labs(record.id)
+    assert (first, second) == (1, 0)  # second sync fetches but persists nothing new
+    assert len(results) == 1
+    assert len(await service.observations.list_for_patient(PATIENT_ID)) == 1
+
+
+async def test_superseded_observations_are_excluded_from_the_analyzable_dataset() -> None:
+    """A corrected-away original must not be returned (review finding: revises_id
+    chains double-counted)."""
+    from datetime import UTC, datetime
+
+    from app.models.observation import Observation, ObservationStatus, SourceType
+    from app.repositories.observation import InMemoryObservationRepository
+
+    repo = InMemoryObservationRepository()
+    wrong = await repo.add(
+        Observation(
+            patient_id=PATIENT_ID,
+            source=SourceType.lab,
+            origin=DataOrigin.ehr_imported,
+            code="4548-4",
+            value_num=9.2,  # mis-OCR'd value
+            effective_at=datetime(2026, 6, 1, tzinfo=UTC),
+            recorded_at=datetime(2026, 6, 1, tzinfo=UTC),
+            status=ObservationStatus.final,
+            quality={},
+            payload={},
+        )
+    )
+    await repo.add(
+        Observation(
+            patient_id=PATIENT_ID,
+            source=SourceType.lab,
+            origin=DataOrigin.ehr_imported,
+            code="4548-4",
+            value_num=7.0,
+            effective_at=datetime(2026, 6, 1, tzinfo=UTC),
+            recorded_at=datetime(2026, 6, 2, tzinfo=UTC),
+            status=ObservationStatus.corrected,
+            revises_id=wrong.id,
+            quality={},
+            payload={},
+        )
+    )
+    rows = await repo.list_for_patient(PATIENT_ID)
+    assert [r.value_num for r in rows] == [7.0]  # only the current record survives
+
+
+async def test_duplicate_email_raises_domain_error_at_the_repository() -> None:
+    """The repository owns email uniqueness (review finding: check-then-insert race)."""
+    from app.models.user import UserRole
+    from app.repositories.user import DuplicateEmailError, InMemoryUserRepository, UserRecord
+
+    repo = InMemoryUserRepository()
+    user = UserRecord(
+        id=uuid.uuid4(),
+        email="dup@example.com",
+        password_hash="x",
+        display_name="Dup",
+        role=UserRole.patient,
+        patient_id=uuid.uuid4(),
+    )
+    await repo.add(user)
+    assert repo.patients  # the linked patient record is created with the user
+    with pytest.raises(DuplicateEmailError):
+        await repo.add(user)
+
+
+async def test_callback_for_vanished_connection_is_404() -> None:
+    """Defensive: a pending state whose connection was removed fails cleanly."""
+    from app.emr.service import EmrError, _PendingAuth
+
+    service = EmrService(transport=_PullOnlyEmr(), client_id="c", redirect_uri="https://a/cb")
+    service._pending["s"] = _PendingAuth(  # noqa: SLF001 — contrived state
+        connection_id=uuid.uuid4(), code_verifier="v", token_endpoint="https://t"
+    )
+
+    class _TokenOnly(_PullOnlyEmr):
+        async def post_form(self, url: str, data: dict[str, str]) -> dict[str, Any]:
+            return {"access_token": "the-access-token"}
+
+    service.transport = _TokenOnly()
+    with pytest.raises(EmrError) as exc_info:
+        await service.complete_callback(state="s", code="c")
+    assert exc_info.value.status_code == 404
+
+
+def test_import_key_prefers_source_record_id() -> None:
+    """The EMR's own FHIR id wins; content identity is the fallback (dedup design)."""
+    from datetime import UTC, datetime
+
+    from app.emr.service import _import_key
+    from app.schemas.lab import LabResultIn
+
+    record = ConnectionRecord(
+        id=uuid.uuid4(),
+        patient_id=PATIENT_ID,
+        fhir_base="https://ehr.example/fhir",
+        provider_name=None,
+    )
+    with_id = LabResultIn(
+        loinc_code="4548-4",
+        source_record_id="obs-123",
+        display="Hemoglobin A1c",
+        value=7.2,
+        unit="%",
+        effective_at=datetime(2026, 6, 15, tzinfo=UTC),
+    )
+    without_id = with_id.model_copy(update={"source_record_id": None})
+    assert _import_key(record, with_id) == "fhir:https://ehr.example/fhir:obs-123"
+    assert _import_key(record, without_id).startswith("content:4548-4:2026-06-15")

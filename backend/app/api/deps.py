@@ -57,7 +57,7 @@ async def get_current_user(
         )
     except AuthError as exc:
         raise _unauthorized(exc.reason) from exc
-    user = auth.get_user(claims.user_id)
+    user = await auth.get_user(claims.user_id)
     if user is None:
         raise _unauthorized("Account no longer exists")
     return CurrentUser(

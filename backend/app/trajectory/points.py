@@ -58,10 +58,16 @@ def points_from_observations(observations: Iterable[Observation]) -> list[Observ
     """Convert Observation rows into analyzable points, oldest first.
 
     Filters to statuses that count toward analysis (`entered_in_error` is excluded —
-    ALCOA: Accurate) and to numeric values (qualitative results cannot be trended).
+    ALCOA: Accurate), drops rows superseded by a correction/amendment (a newer row's
+    revises_id — only the current record may drive the trajectory), and keeps numeric
+    values only (qualitative results cannot be trended).
     """
+    rows = list(observations)
+    superseded = {row.revises_id for row in rows if row.revises_id is not None}
     points: list[ObservationPoint] = []
-    for row in observations:
+    for row in rows:
+        if row.id is not None and row.id in superseded:
+            continue
         if not counts_toward_analysis(ObservationStatus(row.status)):
             continue
         if row.value_num is None:

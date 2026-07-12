@@ -22,10 +22,10 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 @router.post("/register", response_model=TokenOut, status_code=201)
 async def register(body: RegisterIn, auth: AuthDep) -> TokenOut:
     try:
-        auth.register_patient(
+        await auth.register_patient(
             email=body.email, password=body.password, display_name=body.display_name
         )
-        _, tokens = auth.login(email=body.email, password=body.password)
+        _, tokens = await auth.login(email=body.email, password=body.password)
     except AuthApiError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.reason) from exc
     return TokenOut(access_token=tokens.access_token, refresh_token=tokens.refresh_token)
@@ -34,7 +34,7 @@ async def register(body: RegisterIn, auth: AuthDep) -> TokenOut:
 @router.post("/login", response_model=TokenOut)
 async def login(body: LoginIn, auth: AuthDep) -> TokenOut:
     try:
-        _, tokens = auth.login(email=body.email, password=body.password)
+        _, tokens = await auth.login(email=body.email, password=body.password)
     except AuthApiError as exc:
         raise HTTPException(
             status_code=exc.status_code,
@@ -47,7 +47,7 @@ async def login(body: LoginIn, auth: AuthDep) -> TokenOut:
 @router.post("/refresh", response_model=AccessTokenOut)
 async def refresh(body: RefreshIn, auth: AuthDep) -> AccessTokenOut:
     try:
-        access_token = auth.refresh(refresh_token=body.refresh_token)
+        access_token = await auth.refresh(refresh_token=body.refresh_token)
     except (AuthApiError, AuthError) as exc:
         reason = exc.reason if isinstance(exc, (AuthApiError, AuthError)) else "Invalid token"
         raise HTTPException(

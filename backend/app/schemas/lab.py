@@ -43,6 +43,9 @@ class LabResultIn(BaseModel):
     """One lab analyte result on intake (FHIR Observation, category = laboratory)."""
 
     loinc_code: str = Field(..., description="LOINC code (FHIR Observation.code)")
+    source_record_id: str | None = Field(
+        default=None, description="The source system's own record id (FHIR Observation.id)"
+    )
     display: str = Field(..., description="Human-readable analyte name, e.g. 'Hemoglobin A1c'")
 
     value: float | None = Field(default=None, description="Quantity value (valueQuantity.value)")

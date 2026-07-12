@@ -534,3 +534,33 @@ def test_unknown_codes_default_to_unknown_polarity_with_a_readable_label() -> No
 
 def test_loinc_and_friendly_key_share_one_label() -> None:
     assert signal_info("4548-4").label == signal_info("hba1c").label
+
+
+def test_converter_excludes_superseded_originals() -> None:
+    """A corrected-away value must never drive the trajectory (review finding: the
+    mis-OCR'd 9.2 corrected to 7.0 previously produced a false 'declining')."""
+    wrong = _observation(days_ago=5, value=9.2)
+    wrong.id = uuid.uuid4()
+    correction = _observation(days_ago=5, value=7.0, status=ObservationStatus.corrected)
+    correction.id = uuid.uuid4()
+    correction.revises_id = wrong.id
+    flat_history = [_observation(days_ago=d, value=7.0) for d in (60, 40, 20)]
+    for row in flat_history:
+        row.id = uuid.uuid4()
+
+    points = points_from_observations([*flat_history, wrong, correction])
+
+    assert [p.value for p in points] == [7.0, 7.0, 7.0, 7.0]  # 9.2 is gone
+    trajectory = compute_trajectory(points, now=NOW)
+    assert trajectory.direction is not Direction.declining
+
+
+def test_flat_out_of_range_signal_is_surfaced_not_reassuring() -> None:
+    """B12 flat at 120 (range 200-900) must not read as plain 'holding steady' —
+    the out-of-range state is surfaced for the care team (review finding)."""
+    points = [_pt("2132-9", 120.0, days_ago, low=200.0, high=900.0) for days_ago in (60, 40, 20, 5)]
+    trajectory = compute_trajectory(points, now=NOW)
+
+    assert any(
+        "below the typical range" in gap and "care team" in gap for gap in trajectory.data_gaps
+    )

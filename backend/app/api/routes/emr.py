@@ -67,12 +67,12 @@ async def list_providers(q: str = "") -> list[ProviderOut]:
     ]
 
 
-def _owned_connection(
+async def _owned_connection(
     service: EmrService, connection_id: uuid.UUID, current: CurrentUser
 ) -> ConnectionRecord:
     """Fetch the connection and enforce ownership (cross-user access -> 403)."""
     try:
-        record = service.get_connection(connection_id)
+        record = await service.get_connection(connection_id)
     except EmrError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.reason) from exc
     if record.patient_id != current.patient_id:
@@ -129,14 +129,14 @@ async def oauth_callback(
 async def pull_labs(
     connection_id: uuid.UUID, service: ServiceDep, current: PatientUserDep
 ) -> PullOut:
-    _owned_connection(service, connection_id, current)
+    await _owned_connection(service, connection_id, current)
     try:
-        results = await service.pull_labs(connection_id)
+        results, imported = await service.pull_labs(connection_id)
     except EmrError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.reason) from exc
-    # Persistence as research-grade Observations (origin=ehr_imported) lands with the
-    # DB layer; until then the parsed results are returned to the caller.
-    return PullOut(imported=len(results), results=results)
+    # `imported` counts newly persisted Observations; re-pulls are idempotent, so a
+    # second sync of the same records reports imported=0 while still returning them.
+    return PullOut(imported=imported, results=results)
 
 
 @router.delete("/connections/{connection_id}", response_model=ConnectionOut)
@@ -144,5 +144,5 @@ async def revoke_connection(
     connection_id: uuid.UUID, service: ServiceDep, current: PatientUserDep
 ) -> ConnectionOut:
     # _owned_connection guarantees existence + ownership; revoke cannot fail after it.
-    _owned_connection(service, connection_id, current)
-    return _to_out(service.revoke(connection_id))
+    await _owned_connection(service, connection_id, current)
+    return _to_out(await service.revoke(connection_id))

@@ -26,7 +26,15 @@ class ObservationRepository(Protocol):
     async def list_for_patient(
         self, patient_id: uuid.UUID, code: str | None = None
     ) -> list[Observation]:
-        """Analyzable records for one patient (optionally one code), oldest first."""
+        """Analyzable records for one patient (optionally one code), oldest first.
+
+        "Analyzable" = non-errored status AND not superseded by a newer row's
+        revises_id (data-standards.md: current records only).
+        """
+        ...
+
+    async def has_import_key(self, patient_id: uuid.UUID, import_key: str) -> bool:
+        """Whether a record with this import idempotency key already exists."""
         ...
 
 
@@ -46,11 +54,23 @@ class InMemoryObservationRepository:
     async def list_for_patient(
         self, patient_id: uuid.UUID, code: str | None = None
     ) -> list[Observation]:
+        superseded = {
+            o.revises_id
+            for o in self._observations
+            if o.patient_id == patient_id and o.revises_id is not None
+        }
         rows = [
             o
             for o in self._observations
             if o.patient_id == patient_id
             and (code is None or o.code == code)
             and counts_toward_analysis(o.status)
+            and o.id not in superseded
         ]
         return sorted(rows, key=lambda o: o.effective_at)
+
+    async def has_import_key(self, patient_id: uuid.UUID, import_key: str) -> bool:
+        return any(
+            o.patient_id == patient_id and o.payload.get("import_key") == import_key
+            for o in self._observations
+        )
