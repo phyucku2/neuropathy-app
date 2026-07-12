@@ -178,7 +178,7 @@
           <p class="muted" style="margin-top:0">Turn on what fits you. Everything is optional — your app, your way.</p>
           <div class="card">
             <div class="src"><span class="ic" style="background:#2E6DA4">◔</span><div class="info"><b>BioMech reports</b><br><small>Balance & gait · 4 imported</small></div><div class="tg"></div></div>
-            <div class="src"><span class="ic" style="background:#D68A34">⚗</span><div class="info"><b>Lab results</b><br><small>You bring them in · 3 on file</small></div><div class="tg"></div></div>
+            <div class="src"><span class="ic" style="background:#D68A34">⚗</span><div class="info"><b>Lab results</b><br><small>Upload or pull from your EMR · 3 on file</small></div><div class="tg"></div></div>
             <div class="src"><span class="ic" style="background:#2F8F5B">☑</span><div class="info"><b>Daily function check-in</b><br><small>ADL · 3 quick questions/day</small></div><div class="tg"></div></div>
             <div class="src"><span class="ic" style="background:#7FB0D4">👟</span><div class="info"><b>Activity from phone</b><br><small>Steps & mobility</small></div><div class="tg off"></div></div>
           </div>
@@ -197,6 +197,35 @@
         </div>
       </div>
       <div class="screen-label">2 · Sources — every feature toggleable (B2C)</div>
+    </div>
+
+    <!-- 2b. CONNECT EMR (ADR-0008) -->
+    <div class="col">
+      <div class="phone">
+        <div class="status-bar"><span class="mark">Connect your records</span><span class="avatar">WB</span></div>
+        <div class="body">
+          <p class="muted" style="margin-top:0">Pull your labs straight from your health system — no PDFs to hunt for.</p>
+          <div class="card">
+            <div class="eyebrow">Find your provider</div>
+            <div style="background:var(--muted);border-radius:10px;padding:12px 14px;margin-bottom:12px">🔍 Search health systems…</div>
+            <div class="src"><span class="ic" style="background:#2E6DA4">🏥</span><div class="info"><b>Advanced Health &amp; Wellness</b><br><small>MyChart</small></div><span class="pill off">Connect</span></div>
+            <div class="src"><span class="ic" style="background:#556677">🏥</span><div class="info"><b>Regional Medical Center</b><br><small>Patient portal</small></div><span class="pill off">Connect</span></div>
+          </div>
+          <div class="card" style="border:1px solid var(--border);background:var(--muted)">
+            <div style="display:flex;gap:10px;align-items:flex-start"><span style="font-size:20px">🔒</span>
+              <p class="muted" style="margin:0;font-size:14px">You'll sign in on <b>your health system's</b> own page. We never see your password — and you can disconnect anytime.</p></div>
+          </div>
+          <button class="btn secondary">Sign in to MyChart →</button>
+          <p class="muted" style="text-align:center;font-size:13px;margin-top:10px">Securely pulls your lab results (SMART on FHIR).</p>
+        </div>
+        <div class="tabbar">
+          <div class="tab"><span class="ic">◍</span>Home</div>
+          <div class="tab"><span class="ic">📈</span>Trends</div>
+          <div class="tab active"><span class="ic">＋</span>Add</div>
+          <div class="tab"><span class="ic">⚙</span>Sources</div>
+        </div>
+      </div>
+      <div class="screen-label">2b · Connect EMR — pull labs via SMART on FHIR (ADR-0008)</div>
     </div>
 
     <!-- 3. LAB IMPORT -->

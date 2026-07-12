@@ -5,7 +5,8 @@ Static HTML mockups built on the approved design tokens (`docs/design/`, ADR-000
 
 - **`patient-app.html`** — patient core flow: Connect (self vs. with a clinic —
   ADR-0005), Home (trajectory answer up top), Data sources (every feature toggleable),
-  Lab import (snap → confirm → save), Trend detail (sourced + plain-language).
+  Connect EMR (pull labs via SMART on FHIR — ADR-0008), Lab import (snap → confirm →
+  save), Trend detail (sourced + plain-language).
 - **`clinician-app.html`** — clinical version: panel review, cross-source trend table
   (AI-assisted, non-diagnostic, clinician-in-the-loop), and per-patient monitoring
   toggles modeled as renewable orders (RTM-friendly).

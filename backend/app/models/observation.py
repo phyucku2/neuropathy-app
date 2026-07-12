@@ -35,6 +35,7 @@ class DataOrigin(enum.StrEnum):
 
     device_measured = "device_measured"  # from an instrument (e.g. BioMech sensor)
     document_imported = "document_imported"  # extracted from an imported doc (e.g. lab PDF)
+    ehr_imported = "ehr_imported"  # pulled from the patient's EMR via SMART on FHIR
     patient_reported = "patient_reported"  # self-reported (e.g. ADL check-in)
     derived = "derived"  # computed from other observations
 

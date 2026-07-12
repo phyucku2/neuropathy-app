@@ -20,5 +20,11 @@ class Settings(BaseSettings):
 
     jwt_secret: str | None = None
 
+    # SMART on FHIR / EMR pull (ADR-0008). Client secret (if any) and OAuth tokens live
+    # in a secret manager, never here.
+    smart_client_id: str | None = None
+    smart_redirect_uri: str | None = None
+    smart_scopes: str = "launch/patient patient/Observation.read openid fhirUser offline_access"
+
 
 settings = Settings()
