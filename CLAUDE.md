@@ -94,6 +94,10 @@ This is a health application. Even before any real user data exists:
   in local `.env` files (gitignored) or a secrets manager. No sample secrets in docs.
 - No real patient/user data in fixtures, tests, seeds, or screenshots — synthetic data
   only.
+- **Data collection is research grade** (ADR-0006 / [`docs/engineering/data-standards.md`](docs/engineering/data-standards.md)):
+  ALCOA+ integrity, immutable/append-only with corrections-as-new-records, full
+  provenance on every datum, dual UTC timestamps, and standardized coding (LOINC/UCUM/
+  SNOMED). A datum captured without its provenance is a bug, not a warning.
 - The app must not present itself as providing diagnosis or treatment decisions without
   the owner's explicit direction and appropriate disclaimers; wording of any clinical
   claims is an owner-level decision.
