@@ -3,9 +3,9 @@
 Static HTML mockups built on the approved design tokens (`docs/design/`, ADR-0002).
 **Synthetic data only** — no real patients (CLAUDE.md §5). Names/values are invented.
 
-- **`patient-app.html`** — B2C patient core flow: Home (trajectory answer up top),
-  Data sources (every feature toggleable), Lab import (snap → confirm → save),
-  Trend detail (sourced + plain-language).
+- **`patient-app.html`** — patient core flow: Connect (self vs. with a clinic —
+  ADR-0005), Home (trajectory answer up top), Data sources (every feature toggleable),
+  Lab import (snap → confirm → save), Trend detail (sourced + plain-language).
 - **`clinician-app.html`** — clinical version: panel review, cross-source trend table
   (AI-assisted, non-diagnostic, clinician-in-the-loop), and per-patient monitoring
   toggles modeled as renewable orders (RTM-friendly).

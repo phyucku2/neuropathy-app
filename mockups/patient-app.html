@@ -100,10 +100,42 @@
 <body>
   <div class="intro">
     <h1>Patient app — core screens</h1>
-    <p>Synthetic data only. Built on the approved BioMech-aligned tokens (Poppins + Inter). Flow: Home → Data sources (toggles) → Import a lab → Trend detail.</p>
+    <p>Synthetic data only. Built on the approved BioMech-aligned tokens (Poppins + Inter). Flow: Connect → Home → Data sources (toggles) → Import a lab → Trend detail.</p>
   </div>
 
   <div class="frames">
+
+    <!-- 0. CONNECT (ADR-0005) -->
+    <div class="col">
+      <div class="phone">
+        <div class="status-bar"><span class="mark">◍ Neuropathy</span></div>
+        <div class="body" style="display:flex;flex-direction:column;justify-content:center">
+          <h2 style="font-family:var(--display);font-size:22px;text-align:center;margin-bottom:4px">How would you like to connect?</h2>
+          <p class="muted" style="text-align:center;margin-bottom:20px">You can change this later.</p>
+
+          <div class="card" style="border:2px solid var(--green)">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">
+              <span class="dot" style="background:#2F8F5B;width:40px;height:40px">👤</span>
+              <b style="font-size:18px">On my own</b>
+            </div>
+            <p class="muted" style="margin:0">Bring in your own BioMech reports and labs. You control everything. Private to you.</p>
+          </div>
+
+          <div class="card">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">
+              <span class="dot" style="background:#2E6DA4;width:40px;height:40px">🏥</span>
+              <b style="font-size:18px">With my clinic</b>
+            </div>
+            <p class="muted" style="margin:0 0 10px">Link to your care team. They set up your monitoring and see your trends. You approve the connection and can disconnect anytime.</p>
+            <div style="background:var(--muted);border-radius:10px;padding:10px 12px;font-size:14px">Enter clinic code · <b>______</b></div>
+          </div>
+
+          <button class="btn" style="margin-top:8px">Continue on my own</button>
+          <p class="muted" style="text-align:center;margin-top:10px;font-size:13px">Your data is never shared until you approve a connection.</p>
+        </div>
+      </div>
+      <div class="screen-label">0 · Connect — self or with a clinic (ADR-0005)</div>
+    </div>
 
     <!-- 1. HOME / TRAJECTORY -->
     <div class="col">
