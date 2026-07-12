@@ -57,3 +57,18 @@ def test_qualitative_result_is_allowed_without_unit() -> None:
     )
     assert r.value is None
     assert r.value_text == "positive"
+
+
+def test_naive_datetimes_are_coerced_to_utc() -> None:
+    """FHIR date-only effectiveDateTime parses tz-naive; intake must normalize so
+    stored timestamps never mix naive and aware (crashes sorting/trend math)."""
+    r = LabResultIn(
+        loinc_code="4548-4",
+        display="Hemoglobin A1c",
+        value=7.2,
+        unit="%",
+        effective_at=datetime(2026, 5, 1),  # noqa: DTZ001 — deliberately naive
+        issued_at=datetime(2026, 5, 2),  # noqa: DTZ001
+    )
+    assert r.effective_at.tzinfo is UTC
+    assert r.issued_at is not None and r.issued_at.tzinfo is UTC

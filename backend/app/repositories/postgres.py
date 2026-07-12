@@ -12,6 +12,7 @@ Covered by the integration tests in tests/integration/ against a real Postgres
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
 from sqlalchemy import exists, select
 from sqlalchemy.exc import IntegrityError
@@ -122,7 +123,7 @@ class PostgresObservationRepository:
         return observation
 
     async def list_for_patient(
-        self, patient_id: uuid.UUID, code: str | None = None
+        self, patient_id: uuid.UUID, code: str | None = None, since: datetime | None = None
     ) -> list[Observation]:
         # "Current" records only: exclude rows superseded by a newer row's revises_id
         # (corrections replace their target in the analyzable dataset).
@@ -142,6 +143,8 @@ class PostgresObservationRepository:
         )
         if code is not None:
             stmt = stmt.where(Observation.code == code)
+        if since is not None:
+            stmt = stmt.where(Observation.effective_at >= since)
         return list((await self._session.scalars(stmt)).all())
 
     async def has_import_key(self, patient_id: uuid.UUID, import_key: str) -> bool:

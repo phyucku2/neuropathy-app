@@ -9,9 +9,9 @@ import/export is a later increment.
 from __future__ import annotations
 
 import enum
-from datetime import datetime
+from datetime import UTC, datetime
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class LabStatus(enum.StrEnum):
@@ -66,6 +66,18 @@ class LabResultIn(BaseModel):
     # UCUM coding system is fixed for lab quantities; LOINC for the code.
     code_system: str = "LOINC"
     unit_system: str = "UCUM"
+
+    @field_validator("effective_at", "issued_at")
+    @classmethod
+    def _require_timezone(cls, value: datetime | None) -> datetime | None:
+        """FHIR permits date-only effectiveDateTime (no offset), which parses naive.
+
+        Naive timestamps are assumed UTC so every stored datetime is tz-aware —
+        mixing naive and aware datetimes crashes sorting and trend math downstream.
+        """
+        if value is not None and value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value
 
     @model_validator(mode="after")
     def _require_a_value(self) -> LabResultIn:

@@ -10,7 +10,7 @@ be trended.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from app.models.observation import ObservationStatus
@@ -73,12 +73,17 @@ def points_from_observations(observations: Iterable[Observation]) -> list[Observ
         if row.value_num is None:
             continue
         low, high = _reference_bounds(row.payload)
+        effective_at = row.effective_at
+        if effective_at.tzinfo is None:
+            # Defense in depth: intake coerces to UTC, but hand-created rows must not
+            # crash aware-vs-naive comparisons in the engine.
+            effective_at = effective_at.replace(tzinfo=UTC)
         points.append(
             ObservationPoint(
                 code=row.code,
                 source=str(row.source.value),
                 value=float(row.value_num),
-                effective_at=row.effective_at,
+                effective_at=effective_at,
                 status=str(row.status.value),
                 reference_low=low,
                 reference_high=high,

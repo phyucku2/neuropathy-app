@@ -261,6 +261,9 @@ def upgrade() -> None:
         unique=False,
     )
     op.create_index("ix_observation_patient_id", "observation", ["patient_id"], unique=False)
+    op.create_index(
+        "ix_observation_patient_revises", "observation", ["patient_id", "revises_id"], unique=False
+    )
     op.create_index("ix_observation_status", "observation", ["status"], unique=False)
 
     op.create_table(
@@ -288,6 +291,7 @@ def downgrade() -> None:
     op.drop_index("ix_audit_event_occurred_at", table_name="audit_event")
     op.drop_table("audit_event")
     op.drop_index("ix_observation_status", table_name="observation")
+    op.drop_index("ix_observation_patient_revises", table_name="observation")
     op.drop_index("ix_observation_patient_id", table_name="observation")
     op.drop_index("ix_observation_patient_code_time", table_name="observation")
     op.drop_table("observation")

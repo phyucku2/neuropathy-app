@@ -10,10 +10,17 @@ unit-test (`app.services.observation.counts_toward_analysis`).
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from typing import Protocol
 
 from app.models.observation import Observation
 from app.services.observation import counts_toward_analysis
+
+
+def _aware(value: datetime) -> datetime:
+    """Treat a naive stored timestamp as UTC (defense in depth; intake coerces, but a
+    naive row must never crash comparisons or sorting on the read path)."""
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value
 
 
 class ObservationRepository(Protocol):
@@ -24,12 +31,14 @@ class ObservationRepository(Protocol):
         ...
 
     async def list_for_patient(
-        self, patient_id: uuid.UUID, code: str | None = None
+        self, patient_id: uuid.UUID, code: str | None = None, since: datetime | None = None
     ) -> list[Observation]:
         """Analyzable records for one patient (optionally one code), oldest first.
 
         "Analyzable" = non-errored status AND not superseded by a newer row's
-        revises_id (data-standards.md: current records only).
+        revises_id (data-standards.md: current records only). `since` bounds the
+        lookback (hot-path budget) by effective_at; supersession is still computed
+        over the patient's full history so a recent correction hides an old original.
         """
         ...
 
@@ -52,7 +61,7 @@ class InMemoryObservationRepository:
         return observation
 
     async def list_for_patient(
-        self, patient_id: uuid.UUID, code: str | None = None
+        self, patient_id: uuid.UUID, code: str | None = None, since: datetime | None = None
     ) -> list[Observation]:
         superseded = {
             o.revises_id
@@ -66,8 +75,9 @@ class InMemoryObservationRepository:
             and (code is None or o.code == code)
             and counts_toward_analysis(o.status)
             and o.id not in superseded
+            and (since is None or _aware(o.effective_at) >= since)
         ]
-        return sorted(rows, key=lambda o: o.effective_at)
+        return sorted(rows, key=lambda o: _aware(o.effective_at))
 
     async def has_import_key(self, patient_id: uuid.UUID, import_key: str) -> bool:
         return any(

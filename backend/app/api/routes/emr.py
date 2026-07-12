@@ -8,35 +8,24 @@ touching this layer.
 from __future__ import annotations
 
 import uuid
-from functools import lru_cache
-from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 
-from app.api.deps import CurrentUser, PatientUserDep
-from app.core.config import settings
+from app.api.deps import (
+    CurrentUser,
+    PatientUserDep,
+    get_emr_service,
+)
+from app.api.deps import (
+    EmrServiceDep as ServiceDep,
+)
 from app.emr.providers import get_provider, search_providers
 from app.emr.service import ConnectionRecord, EmrError, EmrService
-from app.emr.transport import HttpxTransport
 from app.schemas.emr import ConnectionOut, ConnectStartIn, ConnectStartOut, ProviderOut, PullOut
 
+__all__ = ["get_emr_service", "router"]
+
 router = APIRouter(prefix="/emr", tags=["emr"])
-
-
-@lru_cache(maxsize=1)
-def _default_service() -> EmrService:
-    return EmrService(
-        transport=HttpxTransport(),
-        client_id=settings.smart_client_id or "unconfigured-client",
-        redirect_uri=settings.smart_redirect_uri or "http://localhost:8000/emr/callback",
-    )
-
-
-def get_emr_service() -> EmrService:
-    return _default_service()
-
-
-ServiceDep = Annotated[EmrService, Depends(get_emr_service)]
 
 
 def _to_out(record: ConnectionRecord) -> ConnectionOut:

@@ -103,4 +103,6 @@ class Observation(UUIDPrimaryKey, Timestamps, Base):
     __table_args__ = (
         Index("ix_observation_patient_code_time", "patient_id", "code", "effective_at"),
         Index("ix_observation_status", "status"),
+        # The superseded-row anti-join probes revises_id per candidate row (hot path).
+        Index("ix_observation_patient_revises", "patient_id", "revises_id"),
     )

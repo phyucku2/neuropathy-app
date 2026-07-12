@@ -12,6 +12,8 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.config import settings
 from app.core.security import AuthError, TokenKind, decode_token
+from app.emr.service import EmrService
+from app.emr.transport import HttpxTransport
 from app.models.user import UserRole
 from app.services.auth import AuthService
 
@@ -80,3 +82,25 @@ def require_patient(current: CurrentUserDep) -> CurrentUser:
 
 
 PatientUserDep = Annotated[CurrentUser, Depends(require_patient)]
+
+
+@lru_cache(maxsize=1)
+def _default_emr_service() -> EmrService:
+    """Process-wide EmrService — the single home of the shared in-memory stores.
+
+    Living in deps.py (not a route module) so every feature reads/writes the SAME
+    observation/audit stores. Replaced by request-scoped, DB-backed repositories when
+    DATABASE_URL wiring lands; until then state is per-process and non-durable.
+    """
+    return EmrService(
+        transport=HttpxTransport(),
+        client_id=settings.smart_client_id or "unconfigured-client",
+        redirect_uri=settings.smart_redirect_uri or "http://localhost:8000/emr/callback",
+    )
+
+
+def get_emr_service() -> EmrService:
+    return _default_emr_service()
+
+
+EmrServiceDep = Annotated[EmrService, Depends(get_emr_service)]
