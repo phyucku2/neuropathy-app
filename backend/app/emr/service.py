@@ -1,9 +1,11 @@
 """EMR connection service — orchestrates the SMART flow end to end (ADR-0009).
 
-Storage posture: connections and pending auth states live behind in-memory stores with
-the same shapes as the DB models; OAuth tokens live in a SecretStore (in-memory now,
-secret manager later). Swapping storage changes implementations, not this flow or the
-API contract. Our own endpoint auth is a placeholder until the app-auth ADR lands.
+Storage posture: connections live behind the injected `EmrConnectionRepository` and
+pulled labs are persisted as research-grade Observations through the injected
+`ObservationRepository` (in-memory defaults for unit tests and DB-less development;
+Postgres in deployment). OAuth tokens live in a SecretStore (in-memory now, secret
+manager later); pending auth states are transient and stay in-process. Swapping
+storage changes implementations, not this flow or the API contract.
 """
 
 from __future__ import annotations
@@ -22,8 +24,21 @@ from app.emr.smart import (
     generate_code_verifier,
 )
 from app.emr.transport import HttpTransport
+from app.ingestion.labs import lab_result_to_observation
+from app.models.audit import AuditEvent
 from app.models.emr_connection import EmrConnectionStatus
+from app.models.observation import DataOrigin
+from app.repositories.audit import AuditEventRepository, InMemoryAuditEventRepository
+from app.repositories.emr_connection import (
+    ConnectionRecord,
+    EmrConnectionRepository,
+    InMemoryEmrConnectionRepository,
+)
+from app.repositories.observation import InMemoryObservationRepository, ObservationRepository
+from app.repositories.support import resolve_now
 from app.schemas.lab import LabResultIn
+
+__all__ = ["ConnectionRecord", "EmrError", "EmrService", "InMemorySecretStore"]
 
 
 class EmrError(Exception):
@@ -33,22 +48,6 @@ class EmrError(Exception):
         super().__init__(reason)
         self.reason = reason
         self.status_code = status_code
-
-
-@dataclass
-class ConnectionRecord:
-    """In-memory twin of models.EmrConnection (same fields the DB row will hold)."""
-
-    id: uuid.UUID
-    patient_id: uuid.UUID
-    fhir_base: str
-    provider_name: str | None
-    status: EmrConnectionStatus = EmrConnectionStatus.authorizing
-    granted_scope: str | None = None
-    patient_fhir_id: str | None = None
-    token_ref: str | None = None
-    token_expires_at: datetime | None = None
-    revoked_at: datetime | None = None
 
 
 @dataclass
@@ -79,7 +78,9 @@ class EmrService:
     client_id: str
     redirect_uri: str
     secret_store: InMemorySecretStore = field(default_factory=InMemorySecretStore)
-    _connections: dict[uuid.UUID, ConnectionRecord] = field(default_factory=dict)
+    connections: EmrConnectionRepository = field(default_factory=InMemoryEmrConnectionRepository)
+    observations: ObservationRepository = field(default_factory=InMemoryObservationRepository)
+    audit: AuditEventRepository = field(default_factory=InMemoryAuditEventRepository)
     _pending: dict[str, _PendingAuth] = field(default_factory=dict)
 
     async def start_connect(
@@ -96,7 +97,7 @@ class EmrService:
         record = ConnectionRecord(
             id=uuid.uuid4(), patient_id=patient_id, fhir_base=base, provider_name=provider_name
         )
-        self._connections[record.id] = record
+        await self.connections.add(record)
 
         verifier = generate_code_verifier()
         state = pysecrets.token_urlsafe(32)
@@ -132,7 +133,9 @@ class EmrService:
         if not access_token:
             raise EmrError("EMR token exchange returned no access token", status_code=502)
 
-        record = self._connections[pending.connection_id]
+        record = await self.connections.get(pending.connection_id)
+        if record is None:
+            raise EmrError("Connection not found", status_code=404)
         tokens = {"access_token": str(access_token)}
         if token_response.get("refresh_token"):
             tokens["refresh_token"] = str(token_response["refresh_token"])
@@ -146,6 +149,7 @@ class EmrService:
                 seconds=int(token_response["expires_in"])
             )
         record.status = EmrConnectionStatus.active
+        await self.connections.update(record)
         return record
 
     async def pull_labs(self, connection_id: uuid.UUID) -> list[LabResultIn]:
@@ -157,18 +161,50 @@ class EmrService:
 
         tokens = self.secret_store.get(record.token_ref)
         client = EmrClient(record.fhir_base, self.transport)
-        return await client.fetch_lab_observations(
+        results = await client.fetch_lab_observations(
             patient_fhir_id=record.patient_fhir_id, access_token=tokens["access_token"]
+        )
+        await self._persist_pulled_labs(record, results)
+        return results
+
+    async def _persist_pulled_labs(
+        self, record: ConnectionRecord, results: list[LabResultIn]
+    ) -> None:
+        """Persist pulled labs as research-grade Observations + one audit event.
+
+        Provenance (data-standards.md): origin=ehr_imported, recorded by the system,
+        source system named in quality. The PHI write is audit-logged (CLAUDE.md §5).
+        """
+        for result in results:
+            await self.observations.add(
+                lab_result_to_observation(
+                    result,
+                    patient_id=record.patient_id,
+                    origin=DataOrigin.ehr_imported,
+                    recorded_by_role="system",
+                    quality={"source_system": record.provider_name or record.fhir_base},
+                )
+            )
+        await self.audit.add(
+            AuditEvent(
+                actor_id=None,
+                actor_role="system",
+                action="import_labs",
+                patient_id=record.patient_id,
+                # References only, never PHI values (audit model contract).
+                detail={"connection_id": str(record.id), "imported": len(results)},
+            )
         )
 
     def revoke(self, connection_id: uuid.UUID) -> ConnectionRecord:
         record = self.get_connection(connection_id)
         record.status = EmrConnectionStatus.revoked
         record.revoked_at = datetime.now(UTC)
+        resolve_now(self.connections.update(record))
         return record
 
     def get_connection(self, connection_id: uuid.UUID) -> ConnectionRecord:
-        record = self._connections.get(connection_id)
+        record = resolve_now(self.connections.get(connection_id))
         if record is None:
             raise EmrError("Connection not found", status_code=404)
         return record

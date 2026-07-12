@@ -111,8 +111,9 @@ def test_me_with_garbage_token_is_401(client: TestClient) -> None:
 def test_deleted_account_token_is_401(client: TestClient) -> None:
     tokens = _register(client, email="gone@example.com")
     service = app.dependency_overrides[get_auth_service]()
-    user = service._by_email.pop("gone@example.com")  # noqa: SLF001 — simulate deletion
-    service._by_id.pop(user.id)  # noqa: SLF001
+    # Reach into the in-memory repository to simulate account deletion.
+    user = service.users._by_email.pop("gone@example.com")  # noqa: SLF001
+    service.users._by_id.pop(user.id)  # noqa: SLF001
     resp = client.get("/auth/me", headers={"Authorization": f"Bearer {tokens['access_token']}"})
     assert resp.status_code == 401
 
@@ -120,8 +121,8 @@ def test_deleted_account_token_is_401(client: TestClient) -> None:
 def test_refresh_for_deleted_account_is_401(client: TestClient) -> None:
     tokens = _register(client, email="gone2@example.com")
     service = app.dependency_overrides[get_auth_service]()
-    user = service._by_email.pop("gone2@example.com")  # noqa: SLF001
-    service._by_id.pop(user.id)  # noqa: SLF001
+    user = service.users._by_email.pop("gone2@example.com")  # noqa: SLF001
+    service.users._by_id.pop(user.id)  # noqa: SLF001
     resp = client.post("/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
     assert resp.status_code == 401
 

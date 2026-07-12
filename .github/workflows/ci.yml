@@ -17,6 +17,26 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    services:
+      # Throwaway Postgres for the integration suite (tests/integration/). The
+      # credentials are CI-ephemeral service config, not secrets.
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: neuropathy_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Presence of TEST_DATABASE_URL activates tests/integration/ (they skip
+      # cleanly without it, e.g. on a laptop with no Postgres running).
+      TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/neuropathy_test
     steps:
       - uses: actions/checkout@v4
 
@@ -38,7 +58,7 @@ jobs:
       - name: mypy (strict)
         run: python -m mypy app
 
-      - name: Tests + coverage (fails under 85%)
+      - name: Tests + coverage (fails under 85%; includes Postgres integration suite)
         run: python -m pytest
 
   security:

@@ -74,6 +74,11 @@ omit = [
     "app/models/*",
     "alembic/*",
     "*/__init__.py",
+    # Postgres repository implementations only run against a real database; the
+    # integration suite (tests/integration/, Postgres service in CI) exercises them.
+    # Unit coverage measures the storage-agnostic logic they share with the in-memory
+    # implementations.
+    "app/repositories/postgres.py",
 ]
 
 # All dependencies above are permissively licensed (MIT/BSD/Apache) per CLAUDE.md §4.

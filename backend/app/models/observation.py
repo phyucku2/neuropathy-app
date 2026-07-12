@@ -71,7 +71,8 @@ class Observation(UUIDPrimaryKey, Timestamps, Base):
     # qualitative results (e.g. "positive")
     value_text: Mapped[str | None] = mapped_column(String(500), nullable=True)
     unit: Mapped[str | None] = mapped_column(String(40), nullable=True)
-    unit_system: Mapped[str | None] = mapped_column(String(20), nullable=True)  # e.g. "UCUM"
+    # Wide enough for the UCUM system URI ("http://unitsofmeasure.org"), like code_system.
+    unit_system: Mapped[str | None] = mapped_column(String(40), nullable=True)
 
     # Dual timestamps (ALCOA: Contemporaneous). effective_at = clinically about;
     # recorded_at = when it entered the system. Both tz-aware UTC.

@@ -188,7 +188,7 @@ async def test_active_connection_missing_tokens_is_409() -> None:
         provider_name=None,
         status=EmrConnectionStatus.active,
     )
-    service._connections[record.id] = record  # noqa: SLF001 — contrived state for the invariant
+    await service.connections.add(record)  # contrived state for the invariant
     try:
         await service.pull_labs(record.id)
         raise AssertionError("expected EmrError")

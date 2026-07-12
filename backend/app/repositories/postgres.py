@@ -1,0 +1,173 @@
+"""Postgres repository implementations — async SQLAlchemy against app/models.
+
+Each class satisfies the corresponding Protocol in this package using an
+``AsyncSession`` (app/db/session.py). Methods flush (so constraints fire and
+defaults populate) but do not commit: the unit of work — request handler or test —
+owns the transaction boundary.
+
+Covered by the integration tests in tests/integration/ against a real Postgres
+(CI provides one); excluded from the unit-coverage gate for that reason.
+"""
+
+from __future__ import annotations
+
+import uuid
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.audit import AuditEvent
+from app.models.emr_connection import EmrConnection
+from app.models.observation import Observation, ObservationStatus
+from app.models.user import User
+from app.repositories.emr_connection import ConnectionRecord
+from app.repositories.user import UserRecord
+from app.services.observation import counts_toward_analysis
+
+# The SQL twin of the unit-tested analyzable-status predicate: derived from it, so the
+# two can never drift apart.
+_ANALYZABLE_STATUSES = tuple(s for s in ObservationStatus if counts_toward_analysis(s))
+
+
+class PostgresUserRepository:
+    """UserRepository over the app_user table."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, user: UserRecord) -> None:
+        self._session.add(
+            User(
+                id=user.id,
+                email=user.email,
+                password_hash=user.password_hash,
+                display_name=user.display_name,
+                role=user.role,
+                patient_id=user.patient_id,
+            )
+        )
+        await self._session.flush()
+
+    async def get_by_email(self, email: str) -> UserRecord | None:
+        row = await self._session.scalar(select(User).where(User.email == email))
+        return None if row is None else _user_to_record(row)
+
+    async def get_by_id(self, user_id: uuid.UUID) -> UserRecord | None:
+        row = await self._session.get(User, user_id)
+        return None if row is None else _user_to_record(row)
+
+
+class PostgresEmrConnectionRepository:
+    """EmrConnectionRepository over the emr_connection table."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, connection: ConnectionRecord) -> None:
+        self._session.add(
+            EmrConnection(
+                id=connection.id,
+                patient_id=connection.patient_id,
+                fhir_base=connection.fhir_base,
+                provider_name=connection.provider_name,
+                status=connection.status,
+                granted_scope=connection.granted_scope,
+                patient_fhir_id=connection.patient_fhir_id,
+                token_ref=connection.token_ref,
+                token_expires_at=connection.token_expires_at,
+                revoked_at=connection.revoked_at,
+            )
+        )
+        await self._session.flush()
+
+    async def get(self, connection_id: uuid.UUID) -> ConnectionRecord | None:
+        row = await self._session.get(EmrConnection, connection_id)
+        return None if row is None else _connection_to_record(row)
+
+    async def update(self, connection: ConnectionRecord) -> None:
+        row = await self._session.get(EmrConnection, connection.id)
+        if row is None:
+            raise LookupError(f"emr_connection {connection.id} does not exist")
+        row.status = connection.status
+        row.granted_scope = connection.granted_scope
+        row.patient_fhir_id = connection.patient_fhir_id
+        row.token_ref = connection.token_ref
+        row.token_expires_at = connection.token_expires_at
+        row.revoked_at = connection.revoked_at
+        await self._session.flush()
+
+
+class PostgresObservationRepository:
+    """ObservationRepository over the observation table (append-only)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, observation: Observation) -> Observation:
+        self._session.add(observation)
+        await self._session.flush()
+        return observation
+
+    async def list_for_patient(
+        self, patient_id: uuid.UUID, code: str | None = None
+    ) -> list[Observation]:
+        stmt = (
+            select(Observation)
+            .where(
+                Observation.patient_id == patient_id,
+                Observation.status.in_(_ANALYZABLE_STATUSES),
+            )
+            .order_by(Observation.effective_at)
+        )
+        if code is not None:
+            stmt = stmt.where(Observation.code == code)
+        return list((await self._session.scalars(stmt)).all())
+
+
+class PostgresAuditEventRepository:
+    """AuditEventRepository over the audit_event table (append-only)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, event: AuditEvent) -> AuditEvent:
+        self._session.add(event)
+        await self._session.flush()
+        # occurred_at is a server default; load it so callers see the same shape the
+        # in-memory implementation returns.
+        await self._session.refresh(event)
+        return event
+
+    async def list_for_patient(self, patient_id: uuid.UUID) -> list[AuditEvent]:
+        stmt = (
+            select(AuditEvent)
+            .where(AuditEvent.patient_id == patient_id)
+            .order_by(AuditEvent.occurred_at)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+
+def _user_to_record(row: User) -> UserRecord:
+    return UserRecord(
+        id=row.id,
+        email=row.email,
+        password_hash=row.password_hash,
+        display_name=row.display_name,
+        role=row.role,
+        patient_id=row.patient_id,
+    )
+
+
+def _connection_to_record(row: EmrConnection) -> ConnectionRecord:
+    return ConnectionRecord(
+        id=row.id,
+        patient_id=row.patient_id,
+        fhir_base=row.fhir_base,
+        provider_name=row.provider_name,
+        status=row.status,
+        granted_scope=row.granted_scope,
+        patient_fhir_id=row.patient_fhir_id,
+        token_ref=row.token_ref,
+        token_expires_at=row.token_expires_at,
+        revoked_at=row.revoked_at,
+    )
