@@ -20,8 +20,11 @@ in the core data schema at this stage.
    - `status` mirrors FHIR `Observation.status`
      (`preliminary | final | amended | corrected | entered-in-error`).
    - Reference range and interpretation are captured for each result.
-   - The internal model is FHIR-*aligned*; full FHIR resource import/export (parsing
-     external `Observation` JSON, exposing a FHIR endpoint) is a follow-up increment.
+   - The internal model is FHIR-*aligned*; the **full bidirectional resource mapping**
+     (parsing/emitting `Observation` JSON, plus `Bundle`) is implemented in `app/fhir/`
+     — see [`docs/engineering/fhir-mapping.md`](../engineering/fhir-mapping.md).
+     Exposing a live FHIR endpoint / writing to an external FHIR server is the remaining
+     follow-up.
 
 2. **BioMech is a separate module, deferred.** The core `SourceType` no longer lists
    `biomech`; the BioMech module will add its own ingestion and representation when
