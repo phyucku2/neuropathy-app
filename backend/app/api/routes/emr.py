@@ -13,6 +13,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from app.api.deps import CurrentUser, PatientUserDep
 from app.core.config import settings
 from app.emr.providers import get_provider, search_providers
 from app.emr.service import ConnectionRecord, EmrError, EmrService
@@ -66,8 +67,23 @@ async def list_providers(q: str = "") -> list[ProviderOut]:
     ]
 
 
+def _owned_connection(
+    service: EmrService, connection_id: uuid.UUID, current: CurrentUser
+) -> ConnectionRecord:
+    """Fetch the connection and enforce ownership (cross-user access -> 403)."""
+    try:
+        record = service.get_connection(connection_id)
+    except EmrError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.reason) from exc
+    if record.patient_id != current.patient_id:
+        raise HTTPException(status_code=403, detail="Not your connection")
+    return record
+
+
 @router.post("/connect", response_model=ConnectStartOut)
-async def start_connect(body: ConnectStartIn, service: ServiceDep) -> ConnectStartOut:
+async def start_connect(
+    body: ConnectStartIn, service: ServiceDep, current: PatientUserDep
+) -> ConnectStartOut:
     fhir_base = body.fhir_base
     provider_name = None
     if body.provider_key is not None:
@@ -84,9 +100,10 @@ async def start_connect(body: ConnectStartIn, service: ServiceDep) -> ConnectSta
                 detail="Provider has no public sandbox; supply fhir_base explicitly",
             )
     assert fhir_base is not None  # guaranteed by ConnectStartIn validator + above
+    assert current.patient_id is not None  # guaranteed by require_patient
     try:
         record, url, state = await service.start_connect(
-            patient_id=body.patient_id, fhir_base=fhir_base, provider_name=provider_name
+            patient_id=current.patient_id, fhir_base=fhir_base, provider_name=provider_name
         )
     except EmrError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.reason) from exc
@@ -94,16 +111,25 @@ async def start_connect(body: ConnectStartIn, service: ServiceDep) -> ConnectSta
 
 
 @router.get("/callback", response_model=ConnectionOut)
-async def oauth_callback(state: str, code: str, service: ServiceDep) -> ConnectionOut:
+async def oauth_callback(
+    state: str, code: str, service: ServiceDep, current: PatientUserDep
+) -> ConnectionOut:
+    # The app forwards code+state after the EMR redirect; the single-use state ties the
+    # exchange to the connect this same user started.
     try:
         record = await service.complete_callback(state=state, code=code)
     except EmrError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.reason) from exc
+    if record.patient_id != current.patient_id:
+        raise HTTPException(status_code=403, detail="Not your connection")
     return _to_out(record)
 
 
 @router.post("/connections/{connection_id}/pull", response_model=PullOut)
-async def pull_labs(connection_id: uuid.UUID, service: ServiceDep) -> PullOut:
+async def pull_labs(
+    connection_id: uuid.UUID, service: ServiceDep, current: PatientUserDep
+) -> PullOut:
+    _owned_connection(service, connection_id, current)
     try:
         results = await service.pull_labs(connection_id)
     except EmrError as exc:
@@ -114,9 +140,9 @@ async def pull_labs(connection_id: uuid.UUID, service: ServiceDep) -> PullOut:
 
 
 @router.delete("/connections/{connection_id}", response_model=ConnectionOut)
-async def revoke_connection(connection_id: uuid.UUID, service: ServiceDep) -> ConnectionOut:
-    try:
-        record = service.revoke(connection_id)
-    except EmrError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.reason) from exc
-    return _to_out(record)
+async def revoke_connection(
+    connection_id: uuid.UUID, service: ServiceDep, current: PatientUserDep
+) -> ConnectionOut:
+    # _owned_connection guarantees existence + ownership; revoke cannot fail after it.
+    _owned_connection(service, connection_id, current)
+    return _to_out(service.revoke(connection_id))

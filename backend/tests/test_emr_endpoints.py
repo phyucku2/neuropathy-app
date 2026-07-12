@@ -11,11 +11,32 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api.deps import CurrentUser, get_current_user
 from app.api.routes.emr import get_emr_service
 from app.emr.service import EmrService
 from app.main import app
+from app.models.user import UserRole
 
 FHIR_BASE = "https://ehr.example/fhir"
+
+USER_A = CurrentUser(
+    user_id=uuid4(),
+    role=UserRole.patient,
+    patient_id=uuid4(),
+    email="a@example.test",
+    display_name="Patient A",
+)
+USER_B = CurrentUser(
+    user_id=uuid4(),
+    role=UserRole.patient,
+    patient_id=uuid4(),
+    email="b@example.test",
+    display_name="Patient B",
+)
+
+
+def _sign_in_as(user: CurrentUser) -> None:
+    app.dependency_overrides[get_current_user] = lambda: user
 
 
 class FakeEmr:
@@ -71,6 +92,7 @@ def client() -> TestClient:
         transport=FakeEmr(), client_id="test-client", redirect_uri="https://app.test/emr/callback"
     )
     app.dependency_overrides[get_emr_service] = lambda: service
+    _sign_in_as(USER_A)
     try:
         yield TestClient(app)
     finally:
@@ -78,7 +100,7 @@ def client() -> TestClient:
 
 
 def _connect(client: TestClient) -> tuple[str, str]:
-    resp = client.post("/emr/connect", json={"patient_id": str(uuid4()), "fhir_base": FHIR_BASE})
+    resp = client.post("/emr/connect", json={"fhir_base": FHIR_BASE})
     assert resp.status_code == 200
     body = resp.json()
     return body["connection_id"], body["state"]
@@ -94,7 +116,7 @@ def test_providers_endpoint_lists_and_searches() -> None:
 
 def test_connect_returns_pkce_authorize_url(client: TestClient) -> None:
     _, state = _connect(client)
-    resp = client.post("/emr/connect", json={"patient_id": str(uuid4()), "fhir_base": FHIR_BASE})
+    resp = client.post("/emr/connect", json={"fhir_base": FHIR_BASE})
     q = parse_qs(urlparse(resp.json()["authorize_url"]).query)
     assert q["code_challenge_method"] == ["S256"]
     assert q["aud"] == [FHIR_BASE]
@@ -175,21 +197,17 @@ async def test_active_connection_missing_tokens_is_409() -> None:
 
 
 def test_unknown_provider_key_is_404(client: TestClient) -> None:
-    resp = client.post(
-        "/emr/connect", json={"patient_id": str(uuid4()), "provider_key": "not-an-emr"}
-    )
+    resp = client.post("/emr/connect", json={"provider_key": "not-an-emr"})
     assert resp.status_code == 404
 
 
 def test_provider_without_sandbox_requires_fhir_base(client: TestClient) -> None:
-    resp = client.post(
-        "/emr/connect", json={"patient_id": str(uuid4()), "provider_key": "meditech"}
-    )
+    resp = client.post("/emr/connect", json={"provider_key": "meditech"})
     assert resp.status_code == 422
 
 
 def test_connect_requires_provider_or_fhir_base(client: TestClient) -> None:
-    resp = client.post("/emr/connect", json={"patient_id": str(uuid4())})
+    resp = client.post("/emr/connect", json={})
     assert resp.status_code == 422
 
 
@@ -211,6 +229,7 @@ class BrokenEmr(FakeEmr):
 
 def _client_with(service: EmrService) -> TestClient:
     app.dependency_overrides[get_emr_service] = lambda: service
+    _sign_in_as(USER_A)
     return TestClient(app)
 
 
@@ -219,9 +238,7 @@ def test_emr_without_smart_config_is_502() -> None:
         transport=BrokenEmr(empty_config=True), client_id="c", redirect_uri="https://a/cb"
     )
     try:
-        resp = _client_with(service).post(
-            "/emr/connect", json={"patient_id": str(uuid4()), "fhir_base": FHIR_BASE}
-        )
+        resp = _client_with(service).post("/emr/connect", json={"fhir_base": FHIR_BASE})
         assert resp.status_code == 502
     finally:
         app.dependency_overrides.clear()
@@ -233,9 +250,7 @@ def test_token_exchange_without_access_token_is_502() -> None:
     )
     try:
         c = _client_with(service)
-        state = c.post(
-            "/emr/connect", json={"patient_id": str(uuid4()), "fhir_base": FHIR_BASE}
-        ).json()["state"]
+        state = c.post("/emr/connect", json={"fhir_base": FHIR_BASE}).json()["state"]
         assert c.get("/emr/callback", params={"state": state, "code": "x"}).status_code == 502
     finally:
         app.dependency_overrides.clear()
@@ -252,9 +267,7 @@ def test_minimal_token_response_still_activates() -> None:
     service = EmrService(transport=MinimalTokenEmr(), client_id="c", redirect_uri="https://a/cb")
     try:
         c = _client_with(service)
-        state = c.post(
-            "/emr/connect", json={"patient_id": str(uuid4()), "fhir_base": FHIR_BASE}
-        ).json()["state"]
+        state = c.post("/emr/connect", json={"fhir_base": FHIR_BASE}).json()["state"]
         body = c.get("/emr/callback", params={"state": state, "code": "x"}).json()
         assert body["status"] == "active"
         assert body["patient_fhir_id"] is None
@@ -274,7 +287,53 @@ def test_default_service_builds_from_settings() -> None:
 
 def test_registry_provider_connects_via_sandbox(client: TestClient) -> None:
     # Epic entry resolves to its sandbox base until per-org production endpoints land.
-    resp = client.post("/emr/connect", json={"patient_id": str(uuid4()), "provider_key": "epic"})
+    resp = client.post("/emr/connect", json={"provider_key": "epic"})
     assert resp.status_code == 200
     q = parse_qs(urlparse(resp.json()["authorize_url"]).query)
     assert q["aud"] == ["https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4"]
+
+
+# --- auth on EMR endpoints (ADR-0010) -------------------------------------------------
+
+
+def test_emr_endpoints_require_auth() -> None:
+    # No get_current_user override -> real dependency -> 401 without a bearer token.
+    with TestClient(app) as anon:
+        assert anon.post("/emr/connect", json={"fhir_base": FHIR_BASE}).status_code == 401
+        assert anon.post(f"/emr/connections/{uuid4()}/pull").status_code == 401
+        assert anon.delete(f"/emr/connections/{uuid4()}").status_code == 401
+        assert anon.get("/emr/callback", params={"state": "s", "code": "c"}).status_code == 401
+
+
+def test_cross_user_access_is_403(client: TestClient) -> None:
+    # User A creates and activates a connection...
+    connection_id, state = _connect(client)
+    assert client.get("/emr/callback", params={"state": state, "code": "c"}).status_code == 200
+
+    # ...user B must not be able to pull or revoke it.
+    _sign_in_as(USER_B)
+    assert client.post(f"/emr/connections/{connection_id}/pull").status_code == 403
+    assert client.delete(f"/emr/connections/{connection_id}").status_code == 403
+
+    # And back as user A, it still works.
+    _sign_in_as(USER_A)
+    assert client.post(f"/emr/connections/{connection_id}/pull").status_code == 200
+
+
+def test_callback_for_another_users_state_is_403(client: TestClient) -> None:
+    _, state = _connect(client)  # started by user A
+    _sign_in_as(USER_B)
+    resp = client.get("/emr/callback", params={"state": state, "code": "c"})
+    assert resp.status_code == 403
+
+
+def test_clinician_cannot_use_patient_endpoints(client: TestClient) -> None:
+    clinician = CurrentUser(
+        user_id=uuid4(),
+        role=UserRole.clinician,
+        patient_id=None,
+        email="dr@example.test",
+        display_name="Dr. Example",
+    )
+    _sign_in_as(clinician)
+    assert client.post("/emr/connect", json={"fhir_base": FHIR_BASE}).status_code == 403

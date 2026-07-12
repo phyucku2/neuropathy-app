@@ -6,6 +6,7 @@ from app.models.connection import ClinicConnection, ConnectionStatus, Initiator
 from app.models.emr_connection import EmrConnection, EmrConnectionStatus
 from app.models.observation import DataOrigin, Observation, ObservationStatus, SourceType
 from app.models.patient import ConnectionMode, Patient
+from app.models.user import User, UserRole
 
 __all__ = [
     "AuditEvent",
@@ -23,4 +24,6 @@ __all__ = [
     "SourceType",
     "ConnectionMode",
     "Patient",
+    "User",
+    "UserRole",
 ]

@@ -21,10 +21,9 @@ class ProviderOut(BaseModel):
 class ConnectStartIn(BaseModel):
     """Start an EMR connection: pick a registry provider OR supply a custom FHIR base.
 
-    patient_id is explicit until app auth lands (ADR-0009 placeholder).
+    The patient is the authenticated caller (ADR-0010) — never supplied by the client.
     """
 
-    patient_id: uuid.UUID
     provider_key: str | None = Field(default=None, description="Key from GET /emr/providers")
     fhir_base: str | None = Field(default=None, description="Custom SMART FHIR base URL")
 
