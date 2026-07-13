@@ -83,6 +83,23 @@ describe('auth screens', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Email already registered');
   });
 
+  it('clears the stored session when the post-login profile read fails', async () => {
+    server.use(
+      http.get('/auth/me', () =>
+        HttpResponse.json({ detail: 'Profile unavailable' }, { status: 500 }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderApp('/login', { authenticated: false });
+    await user.type(screen.getByLabelText('Email'), TEST_EMAIL);
+    await user.type(screen.getByLabelText('Password'), TEST_PASSWORD);
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Profile unavailable');
+    // The failed sign-in must not leave a live refresh token behind (kiosk risk).
+    expect(sessionStorage.getItem('neuropathy.refresh_token')).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Welcome back' })).toBeInTheDocument();
+  });
+
   it('signs out from the avatar button', async () => {
     const user = userEvent.setup();
     renderApp('/');

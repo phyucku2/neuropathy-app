@@ -4,7 +4,7 @@
  * a 409 means the feature is turned off (server-enforced toggle, ADR-0013).
  */
 
-import { useState } from 'react';
+import { useRef, useState, type KeyboardEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { ApiError, messageFor } from '../../api/client';
 import { postAdlCheckIn } from '../../api/endpoints';
@@ -12,6 +12,17 @@ import type { AdlCheckInOut } from '../../api/types';
 import { ErrorNotice, SuccessNotice } from '../../components/StatusMessages';
 
 const ANSWER_VALUES = [0, 1, 2, 3, 4] as const;
+
+/**
+ * The browser-LOCAL calendar day as YYYY-MM-DD. Never toISOString(): that is
+ * UTC, and an evening check-in west of UTC would land on tomorrow's date,
+ * breaking same-day supersede.
+ */
+export function localCheckInDate(now = new Date()): string {
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${String(now.getFullYear())}-${month}-${day}`;
+}
 
 interface Question {
   key: 'walking' | 'stairs' | 'balance_confidence';
@@ -40,6 +51,33 @@ function SegmentedAnswer({
   value: number | null;
   onChange: (answer: number) => void;
 }) {
+  const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  // WAI-ARIA radio-group keyboard pattern: arrow keys move focus AND select,
+  // wrapping at the ends.
+  const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>, answer: number) => {
+    const step =
+      event.key === 'ArrowRight' || event.key === 'ArrowDown'
+        ? 1
+        : event.key === 'ArrowLeft' || event.key === 'ArrowUp'
+          ? -1
+          : 0;
+    if (step === 0) {
+      return;
+    }
+    event.preventDefault();
+    const next = (answer + step + ANSWER_VALUES.length) % ANSWER_VALUES.length;
+    onChange(next);
+    optionRefs.current[next]?.focus();
+  };
+
+  // Scale anchors in the accessible name so AT users hear what the endpoints mean.
+  const nameFor = (answer: number): string | undefined => {
+    if (answer === 0) return `0 — ${question.low}`;
+    if (answer === ANSWER_VALUES.length - 1) return `${String(answer)} — ${question.high}`;
+    return undefined;
+  };
+
   return (
     <fieldset className="seg-group">
       <legend>{question.prompt}</legend>
@@ -47,10 +85,20 @@ function SegmentedAnswer({
         {ANSWER_VALUES.map((answer) => (
           <button
             key={answer}
+            ref={(element) => {
+              optionRefs.current[answer] = element;
+            }}
             type="button"
             className="seg"
             role="radio"
             aria-checked={value === answer}
+            aria-label={nameFor(answer)}
+            // Roving tabindex: the selected option — or the first, before any
+            // selection — is the group's single tab stop.
+            tabIndex={value === answer || (value === null && answer === 0) ? 0 : -1}
+            onKeyDown={(event) => {
+              onKeyDown(event, answer);
+            }}
             onClick={() => {
               onChange(answer);
             }}
@@ -59,7 +107,7 @@ function SegmentedAnswer({
           </button>
         ))}
       </div>
-      <div className="seg-anchors" aria-hidden="true">
+      <div className="seg-anchors">
         <span>0 · {question.low}</span>
         <span>4 · {question.high}</span>
       </div>
@@ -98,6 +146,9 @@ export function CheckInPage() {
           walking: answers.walking,
           stairs: answers.stairs,
           balance_confidence: answers.balance_confidence,
+          // The patient's local calendar day — otherwise the backend defaults
+          // to today-UTC and evening check-ins west of UTC land on tomorrow.
+          check_in_date: localCheckInDate(),
         }),
       );
     } catch (cause) {

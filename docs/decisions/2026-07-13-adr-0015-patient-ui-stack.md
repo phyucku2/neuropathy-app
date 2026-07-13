@@ -96,6 +96,30 @@ Dev: vite (MIT); @vitejs/plugin-react (MIT); typescript (Apache-2.0); vitest,
 eslint-plugin-react-hooks (MIT); eslint-plugin-jsx-a11y (MIT); eslint-config-prettier
 (MIT); prettier (MIT); @types/react, @types/react-dom (MIT).
 
+## Adversarial-review hardening
+
+Addendum (same day) for the adversarial-review findings on this portion.
+
+- **Derived contrast token.** Brand green `#2F8F5B` is only 4.04:1 against white —
+  fine for non-text accents, failing WCAG 2.2 AA (4.5:1) for normal text. Rather than
+  darken the brand green everywhere, `tokens.css` gains a derived token
+  `--color-action-green-strong: #277A4D` (same hue family, 5.28:1 with white) used on
+  TEXT-BEARING surfaces only: the primary button and the improving-hero gradient stops
+  (`--color-action-green-hover` deepens to `#1F6F44`, 6.15:1). The declining hero's
+  light stop darkens `#C25A37` → `#B34E2D` (4.36 → 5.19:1) and `.pill.warn` text
+  darkens `#9A6423` → `#8A5313` (4.26 → 5.41:1 on `#F7ECDD`). Brand green stays for
+  icons, toggle tracks, and other non-text accents (docs/design/brand.md unchanged as
+  the brand source). `frontend/src/styles/contrast.test.ts` computes the WCAG
+  relative-luminance contrast for these pairs from the shipped CSS and fails CI below
+  4.5:1, so regressions cannot land silently.
+- **Toggle-knob convention (mockup correction).** `mockups/patient-app.html` — the
+  approved design source — drew the switch inverted: ON with the knob LEFT, OFF with
+  the knob RIGHT, and the app CSS copied it. Patients read knob position as on/off
+  (universal convention: right = on), so an inverted switch misreports consent-bearing
+  states like "Share with clinic". Both the mockup and `app.css` are corrected:
+  `aria-checked=true` puts the knob RIGHT on the green track. Locked by the same test
+  file.
+
 ## Consequences
 
 - CI gains a frontend job (node 22): `npm ci`, `tsc --noEmit`, `eslint

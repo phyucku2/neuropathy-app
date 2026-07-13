@@ -14,7 +14,7 @@ import {
   type ReactNode,
 } from 'react';
 import { getMe, login as apiLogin, register as apiRegister } from '../api/endpoints';
-import type { MeOut } from '../api/types';
+import type { MeOut, TokenOut } from '../api/types';
 import { clearSession, getRefreshToken, onSessionExpired, storeSession } from './tokenStore';
 
 export type AuthStatus = 'restoring' | 'authenticated' | 'anonymous';
@@ -65,17 +65,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [status]);
 
-  const login = useCallback(async (email: string, password: string) => {
-    storeSession(await apiLogin({ email, password }));
-    setUser(await getMe());
+  // Tokens only stay persisted if the WHOLE sign-in sequence succeeds: if the
+  // profile read fails, the stored session (memory + sessionStorage) is cleared
+  // before rethrowing, so a "failed" sign-in never leaves a live refresh token
+  // behind (kiosk / shared-machine risk).
+  const establishSession = useCallback(async (tokens: TokenOut) => {
+    storeSession(tokens);
+    let me: MeOut;
+    try {
+      me = await getMe();
+    } catch (cause) {
+      clearSession();
+      throw cause;
+    }
+    setUser(me);
     setStatus('authenticated');
   }, []);
 
-  const register = useCallback(async (displayName: string, email: string, password: string) => {
-    storeSession(await apiRegister({ email, password, display_name: displayName }));
-    setUser(await getMe());
-    setStatus('authenticated');
-  }, []);
+  const login = useCallback(
+    async (email: string, password: string) => {
+      await establishSession(await apiLogin({ email, password }));
+    },
+    [establishSession],
+  );
+
+  const register = useCallback(
+    async (displayName: string, email: string, password: string) => {
+      await establishSession(await apiRegister({ email, password, display_name: displayName }));
+    },
+    [establishSession],
+  );
 
   const logout = useCallback(() => {
     clearSession();

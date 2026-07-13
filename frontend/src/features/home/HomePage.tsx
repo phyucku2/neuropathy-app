@@ -36,12 +36,17 @@ function SignalRow({ signal }: { signal: SignalTrend }) {
     glyph: '•',
     color: 'var(--color-status-neutral)',
   };
+  // 'insufficient_data' must never fall into the 'stable' branch: the backend
+  // explicitly refuses to judge these signals, so the UI must not fabricate a
+  // stability claim (visually or in the aria-label).
   const arrow =
     signal.direction === 'improving'
       ? { glyph: '↑', className: 'arrow up', text: 'improving' }
       : signal.direction === 'declining'
         ? { glyph: '↓', className: 'arrow down', text: 'declining' }
-        : { glyph: '→', className: 'arrow flat', text: 'stable' };
+        : signal.direction === 'stable'
+          ? { glyph: '→', className: 'arrow flat', text: 'stable' }
+          : { glyph: '·', className: 'arrow unjudged', text: 'not enough data' };
   return (
     <div className="signal">
       <span className="dot" style={{ background: icon.color }} aria-hidden="true">

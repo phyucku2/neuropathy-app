@@ -1,7 +1,7 @@
 import { screen } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
-import { TRAJECTORY_AI, TRAJECTORY_INSUFFICIENT } from '../../test/fixtures';
+import { TRAJECTORY_AI, TRAJECTORY_IMPROVING, TRAJECTORY_INSUFFICIENT } from '../../test/fixtures';
 import { renderApp } from '../../test/renderApp';
 import { server } from '../../test/server';
 
@@ -49,6 +49,31 @@ describe('HomePage', () => {
     );
     expect(screen.queryByText("What's driving it")).not.toBeInTheDocument();
     expect(screen.getByText('No BioMech reports yet')).toBeInTheDocument();
+  });
+
+  it('renders an unjudged signal as "not enough data", never as "stable"', async () => {
+    server.use(
+      http.get('/trajectory', () =>
+        HttpResponse.json({
+          ...TRAJECTORY_IMPROVING,
+          signals: [
+            {
+              code: 'biomech_cadence',
+              source: 'biomech',
+              direction: 'insufficient_data',
+              detail: 'only one cadence reading so far',
+            },
+          ],
+        }),
+      ),
+    );
+    renderApp('/');
+    const badge = await screen.findByRole('img', { name: 'not enough data' });
+    expect(badge).toHaveTextContent('·');
+    expect(badge).toHaveClass('arrow', 'unjudged');
+    // The backend refused to judge this signal — no fabricated stability claim.
+    expect(screen.queryByRole('img', { name: 'stable' })).not.toBeInTheDocument();
+    expect(screen.queryByText('stable')).not.toBeInTheDocument();
   });
 
   it('shows the error state when the trajectory read fails', async () => {

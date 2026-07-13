@@ -158,7 +158,8 @@ h2 {
   font-weight: 600;
   font-size: var(--text-body);
   color: var(--color-text-on-dark);
-  background: var(--color-action-green);
+  /* Text-bearing surface: the -strong derived token (≥4.5:1 with white). */
+  background: var(--color-action-green-strong);
   border: none;
   border-radius: var(--radius-md);
   padding: 15px;
@@ -221,12 +222,16 @@ h2 {
   margin-bottom: 14px;
 }
 
+/*
+ * Hero gradients carry 15px body text, so EVERY stop must hold ≥4.5:1 with
+ * white (WCAG 2.2 AA) — locked by src/styles/contrast.test.ts.
+ */
 .traj.improving {
-  background: linear-gradient(140deg, #2f8f5b, #1f6f44);
+  background: linear-gradient(140deg, var(--color-action-green-strong), #1f6f44);
 }
 
 .traj.declining {
-  background: linear-gradient(140deg, #c25a37, #a23f2c);
+  background: linear-gradient(140deg, #b34e2d, #a23f2c);
 }
 
 .traj.stable {
@@ -339,6 +344,10 @@ h2 {
   color: var(--color-text-secondary);
 }
 
+.unjudged {
+  color: var(--color-text-secondary);
+}
+
 /* ---------- Source / settings rows (mockup screen 2) ---------- */
 
 .src {
@@ -395,7 +404,7 @@ h2 {
 
 .pill.warn {
   background: #f7ecdd;
-  color: #9a6423;
+  color: #8a5313; /* 5.4:1 on #f7ecdd (the lighter #9a6423 was 4.26:1) */
 }
 
 /* ---------- Toggle switch ---------- */
@@ -416,11 +425,16 @@ h2 {
   background: var(--color-action-green);
 }
 
+/*
+ * Universal switch convention: OFF = knob LEFT (grey track), ON = knob RIGHT
+ * (green track). Patients read knob position as on/off, so getting this
+ * backwards is a consent-integrity bug — locked by src/styles/contrast.test.ts.
+ */
 .tg::after {
   content: '';
   position: absolute;
   top: 3px;
-  left: 21px;
+  left: 3px;
   width: 22px;
   height: 22px;
   border-radius: var(--radius-pill);
@@ -429,7 +443,7 @@ h2 {
 }
 
 .tg[aria-checked='true']::after {
-  left: 3px;
+  left: 21px;
 }
 
 .tg:disabled {

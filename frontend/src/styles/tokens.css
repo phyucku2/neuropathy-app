@@ -18,7 +18,14 @@
 
   /* Action */
   --color-action-green: #2f8f5b;
-  --color-action-green-hover: #277a4d;
+  /*
+   * Derived token (ADR-0015 addendum): brand green #2f8f5b is only 4.04:1
+   * against white, so TEXT-BEARING green surfaces (buttons, gradient stops
+   * under text) use this darker shade of the same hue — 5.28:1 with white,
+   * ≥ the 4.6:1 target. Brand green stays for non-text accents.
+   */
+  --color-action-green-strong: #277a4d;
+  --color-action-green-hover: #1f6f44;
 
   /* Status */
   --color-status-danger: #c63f4c;

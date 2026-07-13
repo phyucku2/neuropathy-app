@@ -75,13 +75,24 @@ function DeltaBadge({ code, points, unitText }: MetricSeries) {
   const judged = delta === null ? 'neutral' : judgeChange(code, delta);
   const deltaClass =
     judged === 'better' ? 'delta up' : judged === 'worse' ? 'delta down' : 'delta flat';
+  // The judgment is a visible word, never color alone; for lower-is-better
+  // measures the arrow and the color would otherwise contradict each other.
+  // Unjudged (unknown-polarity) measures show no judgment word at all.
+  const judgedWord = judged === 'better' ? 'better' : judged === 'worse' ? 'worse' : null;
+  const spokenJudgment =
+    judged === 'better' ? ' — improving' : judged === 'worse' ? ' — getting worse' : '';
   return (
     <div className="big-value">
       <span className="num">{formatValue(last.value)}</span>
       {unitText !== '' && <span className="muted">{unitText}</span>}
       {delta !== null && delta !== 0 && (
-        <span className={deltaClass}>
+        <span
+          className={deltaClass}
+          role="img"
+          aria-label={`${delta > 0 ? 'up' : 'down'} ${formatValue(Math.abs(delta))}${spokenJudgment}`}
+        >
           {delta > 0 ? '↑' : '↓'} {formatValue(Math.abs(delta))}
+          {judgedWord !== null && ` · ${judgedWord}`}
         </span>
       )}
       <span className="muted">latest, {formatDayYear(last.t)}</span>

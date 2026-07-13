@@ -51,6 +51,66 @@ describe('TrendsPage', () => {
     expect(screen.getByText('Lower is better for this measure.')).toBeInTheDocument();
   });
 
+  it('states the judgment in words on the delta badge, matching each polarity', async () => {
+    const user = userEvent.setup();
+    renderApp('/trends');
+    // Balance score: higher-is-better, +1 → judged better, up-arrow.
+    const balanceDelta = await screen.findByRole('img', { name: 'up 1 — improving' });
+    expect(balanceDelta).toHaveTextContent('↑ 1 · better');
+    // Sway velocity: lower-is-better, so the DOWN arrow is judged better too —
+    // the visible word resolves the arrow/color contradiction.
+    await user.click(screen.getByRole('button', { name: 'Sway velocity' }));
+    const swayDelta = await screen.findByRole('img', { name: 'down 1.5 — improving' });
+    expect(swayDelta).toHaveTextContent('↓ 1.5 · better');
+  });
+
+  it('marks a worsening change and leaves unjudged metrics without a verdict word', async () => {
+    const worseAndUnjudged: ObservationItem[] = [
+      // Sway velocity rising: lower-is-better, so this is judged worse.
+      {
+        ...(OBSERVATIONS[3] as ObservationItem),
+        value: 13.1,
+        effective_at: '2026-07-02T10:00:00Z',
+      },
+      {
+        ...(OBSERVATIONS[3] as ObservationItem),
+        value: 11.4,
+        effective_at: '2026-06-04T10:00:00Z',
+      },
+      // Cadence: unknown polarity — tracked but never judged.
+      {
+        code: 'biomech_cadence',
+        display: 'Cadence',
+        value: 104,
+        value_text: null,
+        unit: 'steps/min',
+        effective_at: '2026-07-01T10:00:00Z',
+        source: 'biomech',
+        status: 'final',
+      },
+      {
+        code: 'biomech_cadence',
+        display: 'Cadence',
+        value: 100,
+        value_text: null,
+        unit: 'steps/min',
+        effective_at: '2026-06-01T10:00:00Z',
+        source: 'biomech',
+        status: 'final',
+      },
+    ];
+    server.use(observationsPage(worseAndUnjudged));
+    const user = userEvent.setup();
+    renderApp('/trends');
+    const worse = await screen.findByRole('img', { name: 'up 1.7 — getting worse' });
+    expect(worse).toHaveTextContent('↑ 1.7 · worse');
+    await user.click(screen.getByRole('button', { name: 'Cadence' }));
+    const unjudged = await screen.findByRole('img', { name: 'up 4' });
+    expect(unjudged).toHaveTextContent('↑ 4');
+    expect(unjudged).not.toHaveTextContent('better');
+    expect(unjudged).not.toHaveTextContent('worse');
+  });
+
   it('shows a visible empty state for a code with fewer than 2 points', async () => {
     const user = userEvent.setup();
     renderApp('/trends');

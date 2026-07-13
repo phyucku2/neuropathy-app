@@ -27,7 +27,7 @@ review findings fixed), **Merged** (on `main`).
 |---|---|---|---|---|---|
 | 1 | Patient graphing/trends UI — from mockups/patient-app.html against the existing API | ✅ | ✅ | ◻️ | ADR-0015; Vite + React + recharts in `frontend/`; msw-tested, 90%+ coverage gate in CI |
 | 2 | Clinician UI — from mockups/clinician-app.html (panel, cross-source trend table, non-diagnostic) | ◻️ | ◻️ | ◻️ | Mockup approved |
-| 3 | Hardening pass — invitation rate limiting (ADR-0012 deferral), durable secret-manager adapter, DB-backed pending-auth store, ops-auth surface to replace bootstrap token | ◻️ | ◻️ | ◻️ | Deferred follow-ups, all documented in ADRs/deps.py |
+| 3 | Hardening pass — invitation rate limiting (ADR-0012 deferral), durable secret-manager adapter, DB-backed pending-auth store, ops-auth surface to replace bootstrap token, make CI's Python pip-audit/pip-licenses steps blocking (still non-blocking placeholders; the frontend npm audit + license allowlist are already blocking) | ◻️ | ◻️ | ◻️ | Deferred follow-ups, all documented in ADRs/deps.py |
 
 ## Deferred (not scheduled)
 

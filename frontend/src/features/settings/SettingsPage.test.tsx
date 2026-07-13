@@ -54,13 +54,14 @@ describe('SettingsPage — capability toggles', () => {
     expect(screen.getByRole('switch', { name: 'BioMech report upload' })).toBeChecked();
   });
 
-  it('labels clinician-managed rows', async () => {
+  it('labels clinician-managed rows, including a clinician-set expiry', async () => {
     server.use(
       http.get('/capabilities', () =>
         HttpResponse.json({
           capabilities: [
             { ...CAPABILITIES[0], managed_by: 'clinic' },
             { ...CAPABILITIES[1], expires_at: '2026-09-01T00:00:00Z' },
+            { ...CAPABILITIES[2], managed_by: 'clinic', expires_at: '2026-09-01T00:00:00Z' },
           ],
         }),
       ),
@@ -68,6 +69,9 @@ describe('SettingsPage — capability toggles', () => {
     renderApp('/settings');
     expect(await screen.findByText('Managed by your clinic')).toBeInTheDocument();
     expect(screen.getByText('Until Sep 1, 2026')).toBeInTheDocument();
+    // Expiry only exists when a clinician set it, so it must render alongside
+    // the managed-by label instead of being swallowed by it.
+    expect(screen.getByText('Managed by your clinic · until Sep 1, 2026')).toBeInTheDocument();
   });
 
   it('shows the error state when the capabilities read fails', async () => {

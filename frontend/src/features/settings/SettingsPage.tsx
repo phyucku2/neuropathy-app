@@ -49,7 +49,11 @@ function CapabilityRow({
           {!capability.enforced
             ? 'Coming soon'
             : managedByClinic
-              ? 'Managed by your clinic'
+              ? // A clinician-set expiry (the only way expiry exists) renders
+                // WITH the managed-by label, never hidden behind it.
+                capability.expires_at !== null
+                ? `Managed by your clinic · until ${formatDayYear(Date.parse(capability.expires_at))}`
+                : 'Managed by your clinic'
               : capability.expires_at !== null
                 ? `Until ${formatDayYear(Date.parse(capability.expires_at))}`
                 : capability.active
