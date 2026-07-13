@@ -20,10 +20,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.models.audit import AuditEvent
+from app.models.clinic import Clinic
+from app.models.connection import ClinicConnection, ConnectionStatus
 from app.models.emr_connection import EmrConnection
 from app.models.observation import Observation, ObservationStatus
 from app.models.patient import Patient
 from app.models.user import User
+from app.repositories.clinic_connection import DuplicateLiveConnectionError
 from app.repositories.emr_connection import ConnectionRecord
 from app.repositories.user import DuplicateEmailError, UserRecord
 from app.services.observation import counts_toward_analysis
@@ -53,6 +56,7 @@ class PostgresUserRepository:
                 display_name=user.display_name,
                 role=user.role,
                 patient_id=user.patient_id,
+                clinic_id=user.clinic_id,
             )
         )
         try:
@@ -69,6 +73,89 @@ class PostgresUserRepository:
     async def get_by_id(self, user_id: uuid.UUID) -> UserRecord | None:
         row = await self._session.get(User, user_id)
         return None if row is None else _user_to_record(row)
+
+    async def get_by_patient_id(self, patient_id: uuid.UUID) -> UserRecord | None:
+        row = await self._session.scalar(select(User).where(User.patient_id == patient_id))
+        return None if row is None else _user_to_record(row)
+
+
+class PostgresClinicRepository:
+    """ClinicRepository over the clinic table."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, clinic: Clinic) -> Clinic:
+        self._session.add(clinic)
+        await self._session.flush()
+        # created_at is a server default; load it so callers see the same shape the
+        # in-memory implementation returns.
+        await self._session.refresh(clinic)
+        return clinic
+
+    async def get(self, clinic_id: uuid.UUID) -> Clinic | None:
+        return await self._session.get(Clinic, clinic_id)
+
+    async def delete(self, clinic_id: uuid.UUID) -> None:
+        row = await self._session.get(Clinic, clinic_id)
+        if row is not None:
+            await self._session.delete(row)
+            await self._session.flush()
+
+
+class PostgresClinicConnectionRepository:
+    """ClinicConnectionRepository over the clinic_connection table."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, connection: ClinicConnection) -> ClinicConnection:
+        # A savepoint scopes the flush: when uq_clinic_connection_live fires, only
+        # this insert rolls back and the caller's transaction stays usable (the
+        # invite flow still writes its audit event after absorbing the duplicate).
+        try:
+            async with self._session.begin_nested():
+                self._session.add(connection)
+                await self._session.flush()
+        except IntegrityError as exc:
+            if "uq_clinic_connection_live" in str(exc.orig):
+                raise DuplicateLiveConnectionError(
+                    connection.patient_id, connection.clinic_id
+                ) from exc
+            raise
+        await self._session.refresh(connection)
+        return connection
+
+    async def get(self, connection_id: uuid.UUID) -> ClinicConnection | None:
+        return await self._session.get(ClinicConnection, connection_id)
+
+    async def list_for_patient(self, patient_id: uuid.UUID) -> list[ClinicConnection]:
+        stmt = (
+            select(ClinicConnection)
+            .where(ClinicConnection.patient_id == patient_id)
+            .order_by(ClinicConnection.created_at)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def list_active_for_clinic(self, clinic_id: uuid.UUID) -> list[ClinicConnection]:
+        stmt = (
+            select(ClinicConnection)
+            .where(
+                ClinicConnection.clinic_id == clinic_id,
+                ClinicConnection.status == ConnectionStatus.active,
+            )
+            .order_by(ClinicConnection.created_at)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def update(self, connection: ClinicConnection) -> None:
+        row = await self._session.get(ClinicConnection, connection.id)
+        if row is None:
+            raise LookupError(f"clinic_connection {connection.id} does not exist")
+        row.status = connection.status
+        row.consent_granted_at = connection.consent_granted_at
+        row.revoked_at = connection.revoked_at
+        await self._session.flush()
 
 
 class PostgresEmrConnectionRepository:
@@ -158,17 +245,6 @@ class PostgresObservationRepository:
             stmt = stmt.limit(limit)
         return list((await self._session.scalars(stmt)).all())
 
-    async def has_import_key(self, patient_id: uuid.UUID, import_key: str) -> bool:
-        stmt = select(
-            exists(
-                select(Observation.id).where(
-                    Observation.patient_id == patient_id,
-                    Observation.import_key == import_key,
-                )
-            )
-        )
-        return bool(await self._session.scalar(stmt))
-
     async def existing_import_keys(self, patient_id: uuid.UUID, import_keys: list[str]) -> set[str]:
         if not import_keys:
             return set()
@@ -225,6 +301,7 @@ def _user_to_record(row: User) -> UserRecord:
         display_name=row.display_name,
         role=row.role,
         patient_id=row.patient_id,
+        clinic_id=row.clinic_id,
     )
 
 

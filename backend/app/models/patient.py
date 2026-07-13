@@ -35,7 +35,9 @@ class Patient(UUIDPrimaryKey, Timestamps, Base):
         default=ConnectionMode.self_connected,
     )
 
-    # Mirrors the currently-active ClinicConnection (null in self-connected mode) so
-    # clinical queries can filter by clinic cheaply. Every patient-scoped query MUST
-    # filter by patient_id; clinical queries also by clinic_id.
+    # RESERVED — not yet maintained. ClinicConnection (judged by
+    # may_transmit_to_clinic) is the sole source of truth for clinic linkage; the
+    # consent lifecycle (ADR-0012) does not write this column or flip
+    # connection_mode, so neither may be queried until a lifecycle hook maintains
+    # them. Every patient-scoped query MUST filter by patient_id.
     clinic_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)

@@ -11,7 +11,7 @@ multi-worker serving.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, BackgroundTasks
 
@@ -20,15 +20,9 @@ from app.api.deps import EmrServiceDep, NarratorDep, PatientUserDep
 from app.core.config import settings
 from app.models.audit import AuditEvent
 from app.schemas.trajectory import Trajectory
-from app.trajectory.engine import compute_trajectory
-from app.trajectory.points import points_from_observations
+from app.services.trajectory import compute_patient_trajectory
 
 router = APIRouter(prefix="/trajectory", tags=["trajectory"])
-
-# Hot-path bound (standards.md read budget): the engine's confidence math saturates at
-# 90-day coverage and 6 points per signal, so a bounded lookback loses no judgment
-# quality while keeping the query small on multi-year histories.
-LOOKBACK = timedelta(days=400)
 
 
 @router.get("", response_model=Trajectory)
@@ -42,8 +36,10 @@ async def get_trajectory(
     and explicit data gaps. Always scoped to the authenticated patient."""
     assert current.patient_id is not None  # guaranteed by require_patient
     now = datetime.now(UTC)
-    observations = await service.observations.list_for_patient(
-        current.patient_id, since=now - LOOKBACK
+    # Shared deterministic computation (services/trajectory.py) — the clinician view
+    # answers from the same helper, so the two surfaces can never drift (ADR-0012).
+    trajectory, observation_count = await compute_patient_trajectory(
+        service.observations, current.patient_id, now=now
     )
     # PHI read — audit-logged like every other health-data access (CLAUDE.md 5).
     await service.audit.add(
@@ -52,10 +48,9 @@ async def get_trajectory(
             actor_role=current.role.value,
             action="read_trajectory",
             patient_id=current.patient_id,
-            detail={"observations": len(observations)},  # counts only, never values
+            detail={"observations": observation_count},  # counts only, never values
         )
     )
-    trajectory = compute_trajectory(points_from_observations(observations), now=now)
     # Deterministic result stands on its own; the narrator may only rephrase it.
     # The LLM is NEVER in the request path (standards.md: async jobs only): a cached
     # accepted narrative is served immediately; otherwise this response ships the

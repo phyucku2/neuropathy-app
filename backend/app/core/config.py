@@ -29,6 +29,11 @@ class Settings(BaseSettings):
 
     jwt_secret: str | None = None
 
+    # Ops bootstrap for provisioning clinician accounts (ADR-0012): clinicians are
+    # never self-registered (ADR-0010). Unset (the default) means the endpoint fails
+    # closed — no token, no provisioning.
+    ops_bootstrap_token: str | None = None
+
     # SMART on FHIR / EMR pull (ADR-0008). Client secret (if any) and OAuth tokens live
     # in a secret manager, never here.
     smart_client_id: str | None = None

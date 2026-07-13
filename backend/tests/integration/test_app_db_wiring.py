@@ -27,6 +27,8 @@ from app.main import create_app
 from app.models.observation import DataOrigin
 from app.repositories.postgres import (
     PostgresAuditEventRepository,
+    PostgresClinicConnectionRepository,
+    PostgresClinicRepository,
     PostgresObservationRepository,
     PostgresUserRepository,
 )
@@ -42,6 +44,7 @@ def _reset_process_singletons() -> None:
     """Drop every process-level cache in deps.py — what a real restart would do."""
     deps._default_auth_service.cache_clear()
     deps._default_emr_service.cache_clear()
+    deps._default_clinic_service.cache_clear()
     deps._process_jwt_secret.cache_clear()
     deps._process_secret_store.cache_clear()
     deps._process_pending_auth.cache_clear()
@@ -228,6 +231,15 @@ def test_db_mode_services_are_request_scoped_but_share_process_state() -> None:
     assert isinstance(auth_a.users, PostgresUserRepository)
     assert auth_a.secret == auth_b.secret  # one signing secret per process
 
+    clinic_a = deps.get_clinic_service(session)
+    clinic_b = deps.get_clinic_service(session)
+    assert clinic_a is not clinic_b  # request-scoped construction
+    assert isinstance(clinic_a.clinics, PostgresClinicRepository)
+    assert isinstance(clinic_a.connections, PostgresClinicConnectionRepository)
+    assert isinstance(clinic_a.users, PostgresUserRepository)
+    assert isinstance(clinic_a.observations, PostgresObservationRepository)
+    assert isinstance(clinic_a.audit, PostgresAuditEventRepository)
+
 
 def test_db_mode_uses_the_configured_jwt_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "jwt_secret", "configured-secret")
@@ -240,3 +252,10 @@ def test_without_a_session_the_cached_singletons_serve() -> None:
     """The in-memory contract is untouched: no session -> the same instances forever."""
     assert deps.get_auth_service() is deps.get_auth_service()
     assert deps.get_emr_service() is deps.get_emr_service()
+    assert deps.get_clinic_service() is deps.get_clinic_service()
+    # The clinic singleton reads/writes the SAME stores auth and EMR use, so a
+    # clinician sees exactly the data the patient's own endpoints wrote.
+    clinic = deps.get_clinic_service()
+    assert clinic.users is deps.get_auth_service().users
+    assert clinic.observations is deps.get_emr_service().observations
+    assert clinic.audit is deps.get_emr_service().audit

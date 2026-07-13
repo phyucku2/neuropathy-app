@@ -72,6 +72,31 @@ class AuthService:
             ) from exc
         return user
 
+    async def create_clinician(
+        self, *, email: str, password: str, display_name: str, clinic_id: uuid.UUID
+    ) -> UserRecord:
+        """Provision a clinician account bound to its clinic (ADR-0010: clinician
+        accounts are provisioned, never self-registered). Mirrors patient
+        registration — Argon2id hash, repository-owned email uniqueness — but links
+        a clinic instead of creating a Patient record."""
+        normalized = email.strip().lower()
+        user = UserRecord(
+            id=uuid.uuid4(),
+            email=normalized,
+            password_hash=hash_password(password),
+            display_name=display_name,
+            role=UserRole.clinician,
+            patient_id=None,
+            clinic_id=clinic_id,
+        )
+        try:
+            await self.users.add(user)
+        except DuplicateEmailError as exc:
+            raise AuthApiError(
+                "An account with this email already exists", status_code=409
+            ) from exc
+        return user
+
     async def login(self, *, email: str, password: str) -> tuple[UserRecord, TokenPair]:
         user = await self.users.get_by_email(email.strip().lower())
         # Same error for unknown email and wrong password — no account enumeration.

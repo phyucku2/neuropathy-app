@@ -7,7 +7,7 @@ from __future__ import annotations
 import enum
 import uuid
 
-from sqlalchemy import Enum, String
+from sqlalchemy import Enum, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -33,3 +33,8 @@ class User(UUIDPrimaryKey, Timestamps, Base):
 
     # Set for patient users; clinician/ops users have no patient record.
     patient_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+
+    # Set for clinician users: the clinic every clinical query is scoped to (ADR-0012).
+    clinic_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("clinic.id"), nullable=True
+    )

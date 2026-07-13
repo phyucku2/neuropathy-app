@@ -19,13 +19,18 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from app.db.base import Base
 from app.ingestion.labs import lab_result_to_observation
 from app.models.audit import AuditEvent
+from app.models.clinic import Clinic
+from app.models.connection import ClinicConnection, ConnectionStatus, Initiator
 from app.models.emr_connection import EmrConnectionStatus
 from app.models.observation import DataOrigin
 from app.models.patient import Patient
 from app.models.user import UserRole
+from app.repositories.clinic_connection import DuplicateLiveConnectionError
 from app.repositories.emr_connection import ConnectionRecord
 from app.repositories.postgres import (
     PostgresAuditEventRepository,
+    PostgresClinicConnectionRepository,
+    PostgresClinicRepository,
     PostgresEmrConnectionRepository,
     PostgresObservationRepository,
     PostgresUserRepository,
@@ -183,6 +188,147 @@ async def test_audit_event_repository_round_trip(
         assert events[0].action == "import_labs"
         assert events[0].detail == {"imported": 2}
         assert await repo.list_for_patient(uuid.uuid4()) == []
+
+
+async def test_clinic_repository_round_trip(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory() as session:
+        repo = PostgresClinicRepository(session)
+        clinic = await repo.add(Clinic(name="Synthetic Neuropathy Clinic"))
+        assert clinic.id is not None and clinic.created_at is not None  # defaults loaded
+        await session.commit()
+
+    async with session_factory() as session:
+        repo = PostgresClinicRepository(session)
+        loaded = await repo.get(clinic.id)
+        assert loaded is not None and loaded.name == "Synthetic Neuropathy Clinic"
+        assert await repo.get(uuid.uuid4()) is None
+        await repo.delete(clinic.id)
+        await session.commit()
+
+    async with session_factory() as session:
+        repo = PostgresClinicRepository(session)
+        assert await repo.get(clinic.id) is None
+        await repo.delete(uuid.uuid4())  # unknown id is a quiet no-op
+
+
+async def test_clinic_connection_repository_consent_lifecycle(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """The storage layer under the consent gate: status/consent_granted_at/revoked_at
+    must round-trip exactly, list_active_for_clinic must track them, and the live
+    unique index must hold (this is what may_transmit_to_clinic judges)."""
+    async with session_factory() as session:
+        patient_id = await _new_patient(session)
+        clinic = await PostgresClinicRepository(session).add(Clinic(name="Synthetic Clinic A"))
+        other_clinic = await PostgresClinicRepository(session).add(
+            Clinic(name="Synthetic Clinic B")
+        )
+        repo = PostgresClinicConnectionRepository(session)
+        connection = await repo.add(
+            ClinicConnection(
+                patient_id=patient_id, clinic_id=clinic.id, initiated_by=Initiator.clinic
+            )
+        )
+        assert connection.status is ConnectionStatus.pending  # default loaded on add
+        later = await repo.add(
+            ClinicConnection(
+                patient_id=patient_id, clinic_id=other_clinic.id, initiated_by=Initiator.clinic
+            )
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        repo = PostgresClinicConnectionRepository(session)
+        # One live connection per patient-clinic pair — the partial unique index.
+        with pytest.raises(DuplicateLiveConnectionError):
+            await repo.add(
+                ClinicConnection(
+                    patient_id=patient_id, clinic_id=clinic.id, initiated_by=Initiator.clinic
+                )
+            )
+        # The savepoint keeps the transaction usable after the absorbed duplicate.
+        rows = await repo.list_for_patient(patient_id)
+        assert [r.id for r in rows] == [connection.id, later.id]  # oldest first
+        assert await repo.list_active_for_clinic(clinic.id) == []  # pending is not active
+
+        loaded = await repo.get(connection.id)
+        assert loaded is not None
+        loaded.status = ConnectionStatus.active
+        loaded.consent_granted_at = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
+        await repo.update(loaded)
+        await session.commit()
+
+    async with session_factory() as session:
+        repo = PostgresClinicConnectionRepository(session)
+        active = await repo.list_active_for_clinic(clinic.id)
+        assert [r.id for r in active] == [connection.id]
+        assert active[0].consent_granted_at == datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
+
+        active[0].status = ConnectionStatus.revoked
+        active[0].revoked_at = datetime(2026, 7, 13, 13, 0, tzinfo=UTC)
+        await repo.update(active[0])
+        await session.commit()
+
+    async with session_factory() as session:
+        repo = PostgresClinicConnectionRepository(session)
+        revoked = await repo.get(connection.id)
+        assert revoked is not None and revoked.status is ConnectionStatus.revoked
+        assert revoked.revoked_at == datetime(2026, 7, 13, 13, 0, tzinfo=UTC)
+        assert await repo.list_active_for_clinic(clinic.id) == []  # revocation cuts the list
+        # The live index only covers non-revoked rows: a fresh invite may follow.
+        replacement = await repo.add(
+            ClinicConnection(
+                patient_id=patient_id, clinic_id=clinic.id, initiated_by=Initiator.clinic
+            )
+        )
+        assert replacement.status is ConnectionStatus.pending
+        with pytest.raises(LookupError):
+            await repo.update(
+                ClinicConnection(
+                    id=uuid.uuid4(),
+                    patient_id=patient_id,
+                    clinic_id=clinic.id,
+                    initiated_by=Initiator.clinic,
+                )
+            )
+
+
+async def test_user_repository_clinician_fields_round_trip(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory() as session:
+        clinic = await PostgresClinicRepository(session).add(Clinic(name="Synthetic Clinic"))
+        patient_record = UserRecord(
+            id=uuid.uuid4(),
+            email=f"pat-{uuid.uuid4().hex[:12]}@example.com",
+            password_hash="argon2-hash-placeholder",
+            display_name="Synthetic Pat",
+            role=UserRole.patient,
+            patient_id=uuid.uuid4(),
+        )
+        clinician_record = UserRecord(
+            id=uuid.uuid4(),
+            email=f"doc-{uuid.uuid4().hex[:12]}@example.com",
+            password_hash="argon2-hash-placeholder",
+            display_name="Synthetic Doc",
+            role=UserRole.clinician,
+            patient_id=None,
+            clinic_id=clinic.id,
+        )
+        repo = PostgresUserRepository(session)
+        await repo.add(patient_record)
+        await repo.add(clinician_record)
+        await session.commit()
+
+    async with session_factory() as session:
+        repo = PostgresUserRepository(session)
+        assert patient_record.patient_id is not None
+        assert await repo.get_by_patient_id(patient_record.patient_id) == patient_record
+        assert await repo.get_by_patient_id(uuid.uuid4()) is None
+        loaded = await repo.get_by_id(clinician_record.id)
+        assert loaded == clinician_record and loaded.clinic_id == clinic.id
 
 
 def _autogenerate_diff(connection: Connection) -> list[object]:

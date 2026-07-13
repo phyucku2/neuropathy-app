@@ -27,6 +27,9 @@ class UserRecord:
     display_name: str
     role: UserRole
     patient_id: uuid.UUID | None
+    # Set for clinician users (ADR-0012); defaulted last so existing constructions
+    # keep working unchanged.
+    clinic_id: uuid.UUID | None = None
 
 
 class UserRepository(Protocol):
@@ -46,6 +49,10 @@ class UserRepository(Protocol):
 
     async def get_by_id(self, user_id: uuid.UUID) -> UserRecord | None:
         """Look up a user by id."""
+        ...
+
+    async def get_by_patient_id(self, patient_id: uuid.UUID) -> UserRecord | None:
+        """Look up the patient user owning a Patient record (clinician panel display)."""
         ...
 
 
@@ -71,3 +78,6 @@ class InMemoryUserRepository:
 
     async def get_by_id(self, user_id: uuid.UUID) -> UserRecord | None:
         return self._by_id.get(user_id)
+
+    async def get_by_patient_id(self, patient_id: uuid.UUID) -> UserRecord | None:
+        return next((u for u in self._by_id.values() if u.patient_id == patient_id), None)

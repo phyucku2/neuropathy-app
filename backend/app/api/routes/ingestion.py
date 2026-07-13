@@ -168,7 +168,9 @@ async def record_adl_check_in(
     )
 
 
-def _to_item(row: Observation) -> ObservationItem:
+def observation_to_item(row: Observation) -> ObservationItem:
+    """Display-safe projection of an analyzable record — shared with the clinician
+    observations view (routes/clinic.py) so both surfaces expose identical fields."""
     display = row.payload.get("display") if isinstance(row.payload, dict) else None
     return ObservationItem(
         code=row.code,
@@ -211,5 +213,5 @@ async def list_observations(
         )
     )
     return ObservationPage(
-        items=[_to_item(row) for row in page], total=total, limit=limit, offset=offset
+        items=[observation_to_item(row) for row in page], total=total, limit=limit, offset=offset
     )

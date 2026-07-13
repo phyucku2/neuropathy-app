@@ -244,8 +244,10 @@ def test_different_days_do_not_supersede(client: TestClient) -> None:
 
 
 def test_adl_check_in_date_cannot_be_in_the_future(client: TestClient) -> None:
-    tomorrow = (NOW + timedelta(days=1)).date().isoformat()
-    resp = client.post("/adl", json=_adl(check_in_date=tomorrow))
+    # The route accepts up to UTC+14 (the furthest-ahead local calendar day), so
+    # "UTC tomorrow" is legitimate for part of every day — two days out never is.
+    day_after_tomorrow = (NOW + timedelta(days=2)).date().isoformat()
+    resp = client.post("/adl", json=_adl(check_in_date=day_after_tomorrow))
     assert resp.status_code == 422
 
 
