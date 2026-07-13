@@ -74,11 +74,11 @@
   .pill.on{background:#e2f0e8;color:#1f6f44}
   .pill.off{background:#eef1f4;color:var(--text2)}
 
-  /* toggle */
+  /* toggle — universal convention: ON = knob RIGHT on the green track, OFF = knob LEFT (ADR-0015 addendum) */
   .tg{width:46px;height:28px;border-radius:999px;background:var(--green);position:relative;flex:none}
   .tg.off{background:#c7d0d9}
-  .tg::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:999px;background:#fff;transition:.15s}
-  .tg.off::after{left:21px}
+  .tg::after{content:"";position:absolute;top:3px;left:21px;width:22px;height:22px;border-radius:999px;background:#fff;transition:.15s}
+  .tg.off::after{left:3px}
 
   /* chart */
   svg{display:block;width:100%;height:auto}

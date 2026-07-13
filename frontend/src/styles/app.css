@@ -1,0 +1,686 @@
+/*
+ * neuropathy-app patient UI — hand-rolled styles on the design tokens
+ * (src/styles/tokens.css, copied verbatim from docs/design/tokens.css — ADR-0002).
+ * Layout and visual language follow the approved mockup, mockups/patient-app.html.
+ */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  font-family: var(--font-body);
+  font-size: var(--text-body);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------- App frame (the mockup's phone body, full-viewport) ---------- */
+
+.app-frame {
+  max-width: 430px;
+  margin: 0 auto;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg);
+}
+
+.status-bar {
+  background: var(--gradient-header);
+  color: var(--color-text-on-dark);
+  padding: 14px 18px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: none;
+}
+
+.status-bar .mark {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 16px;
+  letter-spacing: 0.02em;
+}
+
+.status-bar .avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.25);
+  border: none;
+  color: var(--color-text-on-dark);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-body);
+  cursor: pointer;
+}
+
+.app-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-md);
+}
+
+.tabbar {
+  display: flex;
+  background: var(--color-card);
+  border-top: 1px solid var(--color-border);
+  flex: none;
+}
+
+.tabbar .tab {
+  flex: 1;
+  text-align: center;
+  padding: 10px 0 12px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  min-height: var(--min-touch-target);
+}
+
+.tabbar .tab.active {
+  color: var(--color-text-link);
+  font-weight: 600;
+}
+
+.tabbar .tab .ic {
+  font-size: 18px;
+  display: block;
+  margin-bottom: 2px;
+}
+
+/* ---------- Cards & text ---------- */
+
+.card {
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-md);
+  margin-bottom: 14px;
+  box-shadow: 0 1px 3px rgba(23, 58, 94, 0.05);
+}
+
+h1,
+h2 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  color: var(--color-brand-navy);
+}
+
+h1 {
+  font-size: 22px;
+  margin: 2px 0 10px;
+}
+
+h2 {
+  font-size: 16px;
+  margin: 2px 0 10px;
+}
+
+.eyebrow {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+  margin-bottom: 6px;
+}
+
+.muted {
+  color: var(--color-text-secondary);
+  font-size: 14px;
+}
+
+.centered {
+  text-align: center;
+}
+
+/* ---------- Buttons ---------- */
+
+.btn {
+  display: block;
+  width: 100%;
+  text-align: center;
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: var(--text-body);
+  color: var(--color-text-on-dark);
+  /* Text-bearing surface: the -strong derived token (≥4.5:1 with white). */
+  background: var(--color-action-green-strong);
+  border: none;
+  border-radius: var(--radius-md);
+  padding: 15px;
+  min-height: 52px;
+  cursor: pointer;
+  margin-top: 6px;
+  text-decoration: none;
+}
+
+.btn:hover {
+  background: var(--color-action-green-hover);
+}
+
+.btn.secondary {
+  background: var(--color-brand-blue);
+}
+
+.btn.secondary:hover {
+  background: var(--color-brand-navy);
+}
+
+.btn.ghost {
+  background: transparent;
+  color: var(--color-text-link);
+  border: 1.5px solid var(--color-border);
+}
+
+.btn.ghost:hover {
+  background: var(--color-muted);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-inline {
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--color-text-link);
+  background: var(--color-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  padding: 8px 14px;
+  min-height: 40px;
+  cursor: pointer;
+}
+
+.btn-inline.danger {
+  color: var(--color-status-danger);
+}
+
+/* ---------- Trajectory hero (mockup screen 1) ---------- */
+
+.traj {
+  color: var(--color-text-on-dark);
+  border-radius: 18px;
+  padding: 20px;
+  margin-bottom: 14px;
+}
+
+/*
+ * Hero gradients carry 15px body text, so EVERY stop must hold ≥4.5:1 with
+ * white (WCAG 2.2 AA) — locked by src/styles/contrast.test.ts.
+ */
+.traj.improving {
+  background: linear-gradient(140deg, var(--color-action-green-strong), #1f6f44);
+}
+
+.traj.declining {
+  background: linear-gradient(140deg, #b34e2d, #a23f2c);
+}
+
+.traj.stable {
+  background: linear-gradient(140deg, #2e6da4, #1f4e79);
+}
+
+.traj.insufficient_data {
+  background: linear-gradient(140deg, #556677, #3b4a59);
+}
+
+.traj .eyebrow {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.traj .answer {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 30px;
+  line-height: 1.15;
+  margin: 2px 0 6px;
+}
+
+.traj .sub {
+  font-size: 15px;
+  opacity: 0.95;
+}
+
+.traj .conf {
+  margin-top: 12px;
+  font-size: 13px;
+  opacity: 0.9;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cbar {
+  flex: 1;
+  height: 7px;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+
+.cbar > i {
+  display: block;
+  height: 100%;
+  background: #fff;
+}
+
+.ai-badge {
+  display: inline-block;
+  margin-top: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.2);
+  color: var(--color-text-on-dark);
+}
+
+/* ---------- Signal rows ---------- */
+
+.signal {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.signal:last-child {
+  border-bottom: 0;
+}
+
+.dot {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  color: var(--color-text-on-dark);
+}
+
+.signal .t {
+  flex: 1;
+}
+
+.signal .t b {
+  font-weight: 600;
+}
+
+.signal .arrow {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.up {
+  color: var(--color-status-success);
+}
+
+.down {
+  color: var(--color-status-danger);
+}
+
+.flat {
+  color: var(--color-text-secondary);
+}
+
+.unjudged {
+  color: var(--color-text-secondary);
+}
+
+/* ---------- Source / settings rows (mockup screen 2) ---------- */
+
+.src {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.src:last-child {
+  border-bottom: 0;
+}
+
+.src .ic {
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 19px;
+  color: var(--color-text-on-dark);
+}
+
+.src .info {
+  flex: 1;
+}
+
+.src .info small {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  display: block;
+}
+
+.pill {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+}
+
+.pill.on {
+  background: #e2f0e8;
+  color: #1f6f44;
+}
+
+.pill.off {
+  background: #eef1f4;
+  color: var(--color-text-secondary);
+}
+
+.pill.warn {
+  background: #f7ecdd;
+  color: #8a5313; /* 5.4:1 on #f7ecdd (the lighter #9a6423 was 4.26:1) */
+}
+
+/* ---------- Toggle switch ---------- */
+
+.tg {
+  width: 46px;
+  height: 28px;
+  border-radius: var(--radius-pill);
+  background: #c7d0d9;
+  position: relative;
+  flex: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+.tg[aria-checked='true'] {
+  background: var(--color-action-green);
+}
+
+/*
+ * Universal switch convention: OFF = knob LEFT (grey track), ON = knob RIGHT
+ * (green track). Patients read knob position as on/off, so getting this
+ * backwards is a consent-integrity bug — locked by src/styles/contrast.test.ts.
+ */
+.tg::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-pill);
+  background: #fff;
+  transition: 0.15s;
+}
+
+.tg[aria-checked='true']::after {
+  left: 21px;
+}
+
+.tg:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---------- Chips ---------- */
+
+.chip {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 9px;
+  border-radius: var(--radius-pill);
+  background: var(--color-muted);
+  color: var(--color-text-secondary);
+  margin-right: 6px;
+}
+
+/* ---------- Trends ---------- */
+
+.metric-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.metric-chip {
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 10px 14px;
+  min-height: 44px;
+  border-radius: var(--radius-pill);
+  border: 1.5px solid var(--color-border);
+  background: var(--color-card);
+  color: var(--color-text-link);
+  cursor: pointer;
+}
+
+.metric-chip[aria-pressed='true'] {
+  background: var(--color-brand-blue);
+  border-color: var(--color-brand-blue);
+  color: var(--color-text-on-dark);
+}
+
+.big-value {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.big-value .num {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 40px;
+  color: var(--color-brand-blue);
+}
+
+.big-value .delta {
+  font-weight: 600;
+  font-size: 18px;
+}
+
+.trend-chart {
+  margin: var(--space-sm) 0;
+}
+
+.trend-tooltip {
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 14px;
+  box-shadow: 0 2px 6px rgba(23, 58, 94, 0.12);
+}
+
+.empty-state {
+  background: var(--color-muted);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 26px;
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+
+/* ---------- Forms ---------- */
+
+.field {
+  margin-bottom: var(--space-md);
+}
+
+.field label {
+  display: block;
+  font-size: var(--text-small);
+  font-weight: 600;
+  color: var(--color-brand-navy);
+  margin-bottom: 6px;
+}
+
+.field input {
+  width: 100%;
+  font-family: var(--font-body);
+  font-size: var(--text-body);
+  color: var(--color-text-primary);
+  background: var(--color-muted);
+  border: 1.5px solid var(--color-border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  min-height: var(--min-touch-target);
+}
+
+.field input:focus {
+  outline: 2px solid var(--color-brand-blue-bright);
+  outline-offset: 1px;
+}
+
+.form-error {
+  background: #faeaec;
+  border: 1px solid var(--color-status-danger);
+  color: #8f2d37;
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  font-size: var(--text-small);
+  margin-bottom: var(--space-md);
+}
+
+.form-success {
+  background: #e2f0e8;
+  border: 1px solid var(--color-action-green);
+  color: #1f6f44;
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  font-size: var(--text-small);
+  margin-bottom: var(--space-md);
+}
+
+.auth-frame {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  max-width: 430px;
+  margin: 0 auto;
+  padding: var(--space-lg);
+}
+
+.auth-mark {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 24px;
+  color: var(--color-brand-navy);
+  text-align: center;
+  margin-bottom: var(--space-lg);
+}
+
+.link {
+  color: var(--color-text-link);
+  font-weight: 600;
+}
+
+/* ---------- Check-in segmented answers ---------- */
+
+.seg-group {
+  border: none;
+  padding: 0;
+  margin: 0 0 var(--space-md);
+}
+
+.seg-group legend {
+  font-weight: 600;
+  font-size: var(--text-body);
+  color: var(--color-brand-navy);
+  padding: 0;
+  margin-bottom: 8px;
+}
+
+.seg-row {
+  display: flex;
+  gap: 6px;
+}
+
+.seg {
+  flex: 1;
+  font-family: var(--font-body);
+  font-size: 18px;
+  font-weight: 600;
+  min-height: var(--min-touch-target);
+  border-radius: 10px;
+  border: 1.5px solid var(--color-border);
+  background: var(--color-card);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.seg[aria-checked='true'] {
+  background: var(--color-brand-blue);
+  border-color: var(--color-brand-blue);
+  color: var(--color-text-on-dark);
+}
+
+.seg-anchors {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin-top: 4px;
+}
+
+/* ---------- Upload ---------- */
+
+.file-drop {
+  background: var(--color-muted);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 20px;
+  text-align: center;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-sm);
+}
+
+.file-drop input[type='file'] {
+  font-size: var(--text-small);
+  max-width: 100%;
+}
+
+.warning-list {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  color: #9a6423;
+  font-size: var(--text-small);
+}
+
+.loading {
+  color: var(--color-text-secondary);
+  text-align: center;
+  padding: var(--space-lg);
+}
