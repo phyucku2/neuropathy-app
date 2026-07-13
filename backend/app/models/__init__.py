@@ -2,6 +2,7 @@
 
 from app.models.audit import AuditEvent
 from app.models.capability import Actor, Capability, PatientCapability
+from app.models.clinic import Clinic
 from app.models.connection import ClinicConnection, ConnectionStatus, Initiator
 from app.models.emr_connection import EmrConnection, EmrConnectionStatus
 from app.models.observation import DataOrigin, Observation, ObservationStatus, SourceType
@@ -13,6 +14,7 @@ __all__ = [
     "Actor",
     "Capability",
     "PatientCapability",
+    "Clinic",
     "ClinicConnection",
     "ConnectionStatus",
     "Initiator",

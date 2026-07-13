@@ -56,7 +56,9 @@ un-migrated database fails at the first query, by design.
 Known limitation (even in DB mode): OAuth *pending* auth states and the token secret
 store are process-level in-memory singletons — a durable secret-manager adapter and a
 DB-backed pending store are follow-ups. Configure `JWT_SECRET` so issued tokens
-survive restarts and multiple workers.
+survive restarts and multiple workers. Clinician provisioning (`POST /clinic/clinicians`,
+ADR-0012) requires `OPS_BOOTSTRAP_TOKEN`; leaving it unset keeps the endpoint failing
+closed (403).
 
 ## Run locally
 

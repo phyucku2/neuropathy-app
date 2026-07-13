@@ -20,6 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.models.audit import AuditEvent
+from app.models.clinic import Clinic
+from app.models.connection import ClinicConnection, ConnectionStatus
 from app.models.emr_connection import EmrConnection
 from app.models.observation import Observation, ObservationStatus
 from app.models.patient import Patient
@@ -53,6 +55,7 @@ class PostgresUserRepository:
                 display_name=user.display_name,
                 role=user.role,
                 patient_id=user.patient_id,
+                clinic_id=user.clinic_id,
             )
         )
         try:
@@ -69,6 +72,72 @@ class PostgresUserRepository:
     async def get_by_id(self, user_id: uuid.UUID) -> UserRecord | None:
         row = await self._session.get(User, user_id)
         return None if row is None else _user_to_record(row)
+
+    async def get_by_patient_id(self, patient_id: uuid.UUID) -> UserRecord | None:
+        row = await self._session.scalar(select(User).where(User.patient_id == patient_id))
+        return None if row is None else _user_to_record(row)
+
+
+class PostgresClinicRepository:
+    """ClinicRepository over the clinic table."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, clinic: Clinic) -> Clinic:
+        self._session.add(clinic)
+        await self._session.flush()
+        # created_at is a server default; load it so callers see the same shape the
+        # in-memory implementation returns.
+        await self._session.refresh(clinic)
+        return clinic
+
+    async def get(self, clinic_id: uuid.UUID) -> Clinic | None:
+        return await self._session.get(Clinic, clinic_id)
+
+
+class PostgresClinicConnectionRepository:
+    """ClinicConnectionRepository over the clinic_connection table."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, connection: ClinicConnection) -> ClinicConnection:
+        self._session.add(connection)
+        await self._session.flush()
+        await self._session.refresh(connection)
+        return connection
+
+    async def get(self, connection_id: uuid.UUID) -> ClinicConnection | None:
+        return await self._session.get(ClinicConnection, connection_id)
+
+    async def list_for_patient(self, patient_id: uuid.UUID) -> list[ClinicConnection]:
+        stmt = (
+            select(ClinicConnection)
+            .where(ClinicConnection.patient_id == patient_id)
+            .order_by(ClinicConnection.created_at)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def list_active_for_clinic(self, clinic_id: uuid.UUID) -> list[ClinicConnection]:
+        stmt = (
+            select(ClinicConnection)
+            .where(
+                ClinicConnection.clinic_id == clinic_id,
+                ClinicConnection.status == ConnectionStatus.active,
+            )
+            .order_by(ClinicConnection.created_at)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def update(self, connection: ClinicConnection) -> None:
+        row = await self._session.get(ClinicConnection, connection.id)
+        if row is None:
+            raise LookupError(f"clinic_connection {connection.id} does not exist")
+        row.status = connection.status
+        row.consent_granted_at = connection.consent_granted_at
+        row.revoked_at = connection.revoked_at
+        await self._session.flush()
 
 
 class PostgresEmrConnectionRepository:
@@ -225,6 +294,7 @@ def _user_to_record(row: User) -> UserRecord:
         display_name=row.display_name,
         role=row.role,
         patient_id=row.patient_id,
+        clinic_id=row.clinic_id,
     )
 
 

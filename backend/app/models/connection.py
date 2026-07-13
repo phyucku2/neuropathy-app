@@ -36,7 +36,9 @@ class ClinicConnection(UUIDPrimaryKey, Timestamps, Base):
     patient_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("patient.id"), nullable=False, index=True
     )
-    clinic_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    clinic_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("clinic.id"), nullable=False, index=True
+    )
 
     status: Mapped[ConnectionStatus] = mapped_column(
         Enum(ConnectionStatus, name="connection_status"),

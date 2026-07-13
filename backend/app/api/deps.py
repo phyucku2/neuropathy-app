@@ -37,11 +37,14 @@ from app.emr.transport import HttpxTransport
 from app.models.user import UserRole
 from app.repositories.postgres import (
     PostgresAuditEventRepository,
+    PostgresClinicConnectionRepository,
+    PostgresClinicRepository,
     PostgresEmrConnectionRepository,
     PostgresObservationRepository,
     PostgresUserRepository,
 )
 from app.services.auth import AuthService
+from app.services.clinic import ClinicService
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -81,6 +84,9 @@ class CurrentUser:
     patient_id: uuid.UUID | None
     email: str
     display_name: str
+    # Set for clinician users (ADR-0012); defaulted last so existing constructions
+    # keep working unchanged.
+    clinic_id: uuid.UUID | None = None
 
 
 def _unauthorized(reason: str) -> HTTPException:
@@ -108,6 +114,7 @@ async def get_current_user(
         patient_id=user.patient_id,
         email=user.email,
         display_name=user.display_name,
+        clinic_id=user.clinic_id,
     )
 
 
@@ -122,6 +129,16 @@ def require_patient(current: CurrentUserDep) -> CurrentUser:
 
 
 PatientUserDep = Annotated[CurrentUser, Depends(require_patient)]
+
+
+def require_clinician(current: CurrentUserDep) -> CurrentUser:
+    """Clinician-scoped endpoints: the caller must be a clinician bound to a clinic."""
+    if current.role is not UserRole.clinician or current.clinic_id is None:
+        raise HTTPException(status_code=403, detail="Clinician account required")
+    return current
+
+
+ClinicianUserDep = Annotated[CurrentUser, Depends(require_clinician)]
 
 
 @lru_cache(maxsize=1)
@@ -188,6 +205,34 @@ def get_emr_service(session: DbSessionDep = None) -> EmrService:
 
 
 EmrServiceDep = Annotated[EmrService, Depends(get_emr_service)]
+
+
+@lru_cache(maxsize=1)
+def _default_clinic_service() -> ClinicService:
+    """Process-wide ClinicService for in-memory mode. Users, observations, and audit
+    are the SAME stores auth and EMR use (deps singletons), so a clinician reads
+    exactly the data the patient's own endpoints wrote."""
+    emr = _default_emr_service()
+    return ClinicService(
+        users=_default_auth_service().users,
+        observations=emr.observations,
+        audit=emr.audit,
+    )
+
+
+def get_clinic_service(session: DbSessionDep = None) -> ClinicService:
+    if session is None:
+        return _default_clinic_service()
+    return ClinicService(
+        clinics=PostgresClinicRepository(session),
+        connections=PostgresClinicConnectionRepository(session),
+        users=PostgresUserRepository(session),
+        observations=PostgresObservationRepository(session),
+        audit=PostgresAuditEventRepository(session),
+    )
+
+
+ClinicServiceDep = Annotated[ClinicService, Depends(get_clinic_service)]
 
 
 @lru_cache(maxsize=1)
