@@ -249,6 +249,7 @@ def upgrade() -> None:
         ),
         sa.Column("revises_id", postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column("recorded_by_role", sa.String(length=32), nullable=True),
+        sa.Column("import_key", sa.String(length=300), nullable=True),
         sa.Column("quality", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
         sa.Column("payload", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
         sa.ForeignKeyConstraint(["patient_id"], ["patient.id"]),
@@ -261,6 +262,12 @@ def upgrade() -> None:
         unique=False,
     )
     op.create_index("ix_observation_patient_id", "observation", ["patient_id"], unique=False)
+    op.create_index(
+        "ix_observation_patient_import_key",
+        "observation",
+        ["patient_id", "import_key"],
+        unique=False,
+    )
     op.create_index(
         "ix_observation_patient_revises", "observation", ["patient_id", "revises_id"], unique=False
     )
@@ -292,6 +299,7 @@ def downgrade() -> None:
     op.drop_table("audit_event")
     op.drop_index("ix_observation_status", table_name="observation")
     op.drop_index("ix_observation_patient_revises", table_name="observation")
+    op.drop_index("ix_observation_patient_import_key", table_name="observation")
     op.drop_index("ix_observation_patient_id", table_name="observation")
     op.drop_index("ix_observation_patient_code_time", table_name="observation")
     op.drop_table("observation")

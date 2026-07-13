@@ -31,19 +31,34 @@ class ObservationRepository(Protocol):
         ...
 
     async def list_for_patient(
-        self, patient_id: uuid.UUID, code: str | None = None, since: datetime | None = None
+        self,
+        patient_id: uuid.UUID,
+        code: str | None = None,
+        since: datetime | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+        newest_first: bool = False,
     ) -> list[Observation]:
-        """Analyzable records for one patient (optionally one code), oldest first.
+        """Analyzable records for one patient (optionally one code), oldest first by
+        default (newest first for display pagination).
 
         "Analyzable" = non-errored status AND not superseded by a newer row's
         revises_id (data-standards.md: current records only). `since` bounds the
-        lookback (hot-path budget) by effective_at; supersession is still computed
-        over the patient's full history so a recent correction hides an old original.
+        lookback (hot-path budget); `limit`/`offset` push pagination into storage so
+        a 50-row page never materializes a multi-year history (standards.md).
         """
         ...
 
     async def has_import_key(self, patient_id: uuid.UUID, import_key: str) -> bool:
         """Whether a record with this import idempotency key already exists."""
+        ...
+
+    async def existing_import_keys(self, patient_id: uuid.UUID, import_keys: list[str]) -> set[str]:
+        """The subset of `import_keys` already on file — ONE probe per batch, not N."""
+        ...
+
+    async def count_for_patient(self, patient_id: uuid.UUID, code: str | None = None) -> int:
+        """Total analyzable records (pagination totals without loading rows)."""
         ...
 
 
@@ -61,7 +76,13 @@ class InMemoryObservationRepository:
         return observation
 
     async def list_for_patient(
-        self, patient_id: uuid.UUID, code: str | None = None, since: datetime | None = None
+        self,
+        patient_id: uuid.UUID,
+        code: str | None = None,
+        since: datetime | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+        newest_first: bool = False,
     ) -> list[Observation]:
         superseded = {
             o.revises_id
@@ -77,10 +98,23 @@ class InMemoryObservationRepository:
             and o.id not in superseded
             and (since is None or _aware(o.effective_at) >= since)
         ]
-        return sorted(rows, key=lambda o: _aware(o.effective_at))
+        rows.sort(key=lambda o: _aware(o.effective_at), reverse=newest_first)
+        if limit is None:
+            return rows[offset:] if offset else rows
+        return rows[offset : offset + limit]
 
     async def has_import_key(self, patient_id: uuid.UUID, import_key: str) -> bool:
         return any(
-            o.patient_id == patient_id and o.payload.get("import_key") == import_key
-            for o in self._observations
+            o.patient_id == patient_id and o.import_key == import_key for o in self._observations
         )
+
+    async def existing_import_keys(self, patient_id: uuid.UUID, import_keys: list[str]) -> set[str]:
+        wanted = set(import_keys)
+        return {
+            o.import_key
+            for o in self._observations
+            if o.patient_id == patient_id and o.import_key in wanted and o.import_key is not None
+        }
+
+    async def count_for_patient(self, patient_id: uuid.UUID, code: str | None = None) -> int:
+        return len(await self.list_for_patient(patient_id, code=code))

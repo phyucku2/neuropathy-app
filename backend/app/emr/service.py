@@ -81,8 +81,8 @@ class InMemorySecretStore:
         self._secrets[ref] = tokens
         return ref
 
-    def get(self, ref: str) -> dict[str, str]:
-        return self._secrets[ref]
+    def get(self, ref: str) -> dict[str, str] | None:
+        return self._secrets.get(ref)
 
 
 @dataclass
@@ -178,6 +178,15 @@ class EmrService:
             raise EmrError("Connection is missing tokens or patient id", status_code=409)
 
         tokens = self.secret_store.get(record.token_ref)
+        if tokens is None:
+            # The connection row is durable but its vaulted tokens are process-local
+            # until the secret-manager adapter lands: after a restart the reference
+            # dangles. Tell the patient to re-link instead of a bare 500 (review
+            # finding).
+            raise EmrError(
+                "EMR tokens are no longer available on this server; please reconnect your EMR",
+                status_code=409,
+            )
         client = EmrClient(record.fhir_base, self.transport)
         results = await client.fetch_lab_observations(
             patient_fhir_id=record.patient_fhir_id, access_token=tokens["access_token"]
@@ -196,11 +205,14 @@ class EmrService:
         Provenance (data-standards.md): origin=ehr_imported, recorded by the system,
         source system named in quality. The PHI write is audit-logged (CLAUDE.md §5).
         """
+        keys = [lab_import_key(result) for result in results]
+        on_file = await self.observations.existing_import_keys(record.patient_id, keys)
         imported = 0
-        for result in results:
-            import_key = lab_import_key(result, fhir_base=record.fhir_base)
-            if await self.observations.has_import_key(record.patient_id, import_key):
+        seen: set[str] = set()
+        for result, import_key in zip(results, keys, strict=True):
+            if import_key in on_file or import_key in seen:
                 continue
+            seen.add(import_key)
             await self.observations.add(
                 lab_result_to_observation(
                     result,

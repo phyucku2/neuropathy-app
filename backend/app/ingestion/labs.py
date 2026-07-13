@@ -56,11 +56,11 @@ def lab_result_to_observation(
         recorded_at=recorded_at or datetime.now(UTC),
         status=_STATUS_MAP[result.status],
         recorded_by_role=recorded_by_role,
+        import_key=import_key,
         quality=quality or {},
         payload={
             "display": result.display,
             "source_record_id": result.source_record_id,
-            "import_key": import_key,
             "reference_range": result.reference_range.model_dump()
             if result.reference_range
             else None,
@@ -70,16 +70,13 @@ def lab_result_to_observation(
     )
 
 
-def lab_import_key(result: LabResultIn, *, fhir_base: str | None = None) -> str:
-    """Stable idempotency key for one imported lab record.
-
-    EMR pulls pass `fhir_base` so the source's own FHIR Observation id (globally
-    stable per source system) wins; patient uploads (and EMR records without ids)
-    key on the result's clinical content identity, so re-importing the same panel
-    never duplicates the analyzable dataset.
+def lab_import_key(result: LabResultIn) -> str:
+    """Stable idempotency key for one imported lab record: its clinical content
+    identity. ONE keyspace for every path (EMR pull, patient upload), so the same
+    real-world lab arriving twice — even via different routes — is never
+    double-counted in the analyzable dataset (review finding). The source's own
+    FHIR id stays in provenance (payload.source_record_id), not in the key.
     """
-    if fhir_base is not None and result.source_record_id:
-        return f"fhir:{fhir_base}:{result.source_record_id}"
     return (
         f"content:{result.loinc_code}:{result.effective_at.isoformat()}"
         f":{result.value}:{result.unit}:{result.value_text}"

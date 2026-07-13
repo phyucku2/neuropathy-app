@@ -93,6 +93,10 @@ class Observation(UUIDPrimaryKey, Timestamps, Base):
     # Attribution (ALCOA: Attributable) — who/what recorded it.
     recorded_by_role: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
+    # Import idempotency key (content identity — app/ingestion/labs.lab_import_key).
+    # A real indexed column, not JSONB, so existence probes are index hits (hot path).
+    import_key: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
     # Quality/provenance detail: instrument/protocol version, device, method, extraction
     # confidence, calibration state, human_confirmed flag. Required, not optional.
     quality: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
@@ -105,4 +109,6 @@ class Observation(UUIDPrimaryKey, Timestamps, Base):
         Index("ix_observation_status", "status"),
         # The superseded-row anti-join probes revises_id per candidate row (hot path).
         Index("ix_observation_patient_revises", "patient_id", "revises_id"),
+        # Import-idempotency existence probes (both ingest paths).
+        Index("ix_observation_patient_import_key", "patient_id", "import_key"),
     )

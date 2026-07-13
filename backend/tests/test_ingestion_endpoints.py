@@ -95,7 +95,7 @@ async def test_lab_upload_persists_research_grade_rows(
         assert row.origin is DataOrigin.document_imported
         assert row.recorded_by_role == "patient"
         assert row.quality == {"human_confirmed": True}
-        assert row.payload["import_key"].startswith("content:")
+        assert row.import_key is not None and row.import_key.startswith("content:")
         assert row.status is ObservationStatus.final
         assert row.recorded_at is not None
 
@@ -364,3 +364,62 @@ def test_clinician_cannot_use_patient_ingestion(client: TestClient) -> None:
     assert client.post("/labs", json={"results": [_lab()]}).status_code == 403
     assert client.post("/adl", json=_adl()).status_code == 403
     assert client.get("/observations").status_code == 403
+
+
+async def test_non_final_status_upload_is_rejected(client: TestClient) -> None:
+    """Uploads are on-device-confirmed values: only status=final is accepted. A
+    non-final row would consume the idempotency key and permanently block the real
+    value (review finding, verified live)."""
+    bad = _lab()
+    bad["status"] = "entered_in_error"
+    resp = client.post("/labs", json={"results": [bad]})
+    assert resp.status_code == 422
+    # Nothing was persisted and the key is not consumed: the real value imports fine.
+    good = client.post("/labs", json={"results": [_lab()]})
+    assert good.json() == {"imported": 1, "skipped": 0}
+
+
+async def test_emr_pull_and_upload_share_one_idempotency_keyspace(
+    client: TestClient, service: EmrService
+) -> None:
+    """The same real-world lab arriving via EMR pull AND patient upload must not be
+    double-counted (review finding: fhir:-vs-content: keys let it through)."""
+    from app.ingestion.labs import lab_import_key, lab_result_to_observation
+    from app.models.observation import DataOrigin
+    from app.schemas.lab import LabResultIn
+
+    pulled = LabResultIn.model_validate(
+        {**_lab(), "source_record_id": "obs-123"}  # EMR supplied its own FHIR id
+    )
+    await service.observations.add(
+        lab_result_to_observation(
+            pulled,
+            patient_id=PATIENT.patient_id,
+            origin=DataOrigin.ehr_imported,
+            recorded_by_role="system",
+            import_key=lab_import_key(pulled),
+        )
+    )
+    # The patient now uploads the identical result from a paper copy: skipped.
+    resp = client.post("/labs", json={"results": [_lab()]})
+    assert resp.json() == {"imported": 0, "skipped": 1}
+    rows = await service.observations.list_for_patient(PATIENT.patient_id)
+    assert len(rows) == 1  # one clinical fact, one analyzable row
+
+
+async def test_adl_accepts_local_today_ahead_of_utc(client: TestClient) -> None:
+    """A patient at UTC+14 sends their local date (up to a day ahead of UTC) — must
+    not be rejected as 'future' (review finding)."""
+    from datetime import UTC, datetime, timedelta
+
+    local_tomorrow = (datetime.now(UTC) + timedelta(hours=14)).date()
+    resp = client.post(
+        "/adl",
+        json={
+            "walking": 3,
+            "stairs": 2,
+            "balance_confidence": 4,
+            "check_in_date": local_tomorrow.isoformat(),
+        },
+    )
+    assert resp.status_code == 200

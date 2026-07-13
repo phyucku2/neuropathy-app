@@ -14,7 +14,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import exists, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -123,11 +123,18 @@ class PostgresObservationRepository:
         return observation
 
     async def list_for_patient(
-        self, patient_id: uuid.UUID, code: str | None = None, since: datetime | None = None
+        self,
+        patient_id: uuid.UUID,
+        code: str | None = None,
+        since: datetime | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+        newest_first: bool = False,
     ) -> list[Observation]:
         # "Current" records only: exclude rows superseded by a newer row's revises_id
         # (corrections replace their target in the analyzable dataset).
         newer = aliased(Observation)
+        order = Observation.effective_at.desc() if newest_first else Observation.effective_at
         stmt = (
             select(Observation)
             .where(
@@ -139,12 +146,16 @@ class PostgresObservationRepository:
                     )
                 ),
             )
-            .order_by(Observation.effective_at)
+            .order_by(order)
         )
         if code is not None:
             stmt = stmt.where(Observation.code == code)
         if since is not None:
             stmt = stmt.where(Observation.effective_at >= since)
+        if offset:
+            stmt = stmt.offset(offset)
+        if limit is not None:
+            stmt = stmt.limit(limit)
         return list((await self._session.scalars(stmt)).all())
 
     async def has_import_key(self, patient_id: uuid.UUID, import_key: str) -> bool:
@@ -152,11 +163,35 @@ class PostgresObservationRepository:
             exists(
                 select(Observation.id).where(
                     Observation.patient_id == patient_id,
-                    Observation.payload["import_key"].astext == import_key,
+                    Observation.import_key == import_key,
                 )
             )
         )
         return bool(await self._session.scalar(stmt))
+
+    async def existing_import_keys(self, patient_id: uuid.UUID, import_keys: list[str]) -> set[str]:
+        if not import_keys:
+            return set()
+        stmt = select(Observation.import_key).where(
+            Observation.patient_id == patient_id,
+            Observation.import_key.in_(import_keys),
+        )
+        return {key for key in (await self._session.scalars(stmt)).all() if key is not None}
+
+    async def count_for_patient(self, patient_id: uuid.UUID, code: str | None = None) -> int:
+        newer = aliased(Observation)
+        stmt = select(func.count(Observation.id)).where(
+            Observation.patient_id == patient_id,
+            Observation.status.in_(_ANALYZABLE_STATUSES),
+            ~exists(
+                select(newer.id).where(
+                    newer.patient_id == patient_id, newer.revises_id == Observation.id
+                )
+            ),
+        )
+        if code is not None:
+            stmt = stmt.where(Observation.code == code)
+        return int(await self._session.scalar(stmt) or 0)
 
 
 class PostgresAuditEventRepository:

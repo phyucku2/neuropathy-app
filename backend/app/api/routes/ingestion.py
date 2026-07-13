@@ -18,7 +18,7 @@ Contracts:
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query
@@ -37,6 +37,7 @@ from app.schemas.ingestion import (
     ObservationItem,
     ObservationPage,
 )
+from app.schemas.lab import LabStatus
 
 router = APIRouter(tags=["ingestion"])
 
@@ -51,12 +52,23 @@ async def import_labs(
     panel (a retry, a re-scan of the same report) skips rows already on file.
     """
     assert current.patient_id is not None  # guaranteed by require_patient
+    # This endpoint receives values the patient has ALREADY confirmed on-device: only
+    # final results are accepted. Anything else (preliminary, entered_in_error) would
+    # enter the record branded human-confirmed and consume its idempotency key,
+    # permanently blocking the real value (review finding, verified live).
+    if any(result.status is not LabStatus.final for result in body.results):
+        raise HTTPException(
+            status_code=422,
+            detail="Only confirmed (status=final) results may be uploaded",
+        )
+    keys = [lab_import_key(result) for result in body.results]
+    # ONE existence probe for the whole batch (indexed column), not N queries.
+    on_file = await service.observations.existing_import_keys(current.patient_id, keys)
     imported = 0
     skipped = 0
     seen: set[str] = set()
-    for result in body.results:
-        key = lab_import_key(result)
-        if key in seen or await service.observations.has_import_key(current.patient_id, key):
+    for result, key in zip(body.results, keys, strict=True):
+        if key in seen or key in on_file:
             skipped += 1
             continue
         seen.add(key)
@@ -126,7 +138,10 @@ async def record_adl_check_in(
     assert current.patient_id is not None  # guaranteed by require_patient
     now = datetime.now(UTC)
     day = body.check_in_date or now.date()
-    if day > now.date():
+    # check_in_date is the patient's LOCAL calendar day; a UTC-based "future" check
+    # would reject valid mornings west of the date line (review finding). Accept up
+    # to UTC+14 — the furthest-ahead local date on Earth.
+    if day > (now + timedelta(hours=14)).date():
         raise HTTPException(status_code=422, detail="check_in_date cannot be in the future")
 
     start, end = day_bounds_utc(day)
@@ -179,9 +194,12 @@ async def list_observations(
     newest first for display. Offset-paginated: limit 1-100 (default 50), offset >= 0;
     optional exact `code` filter (e.g. "4548-4" or "adl_daily_score")."""
     assert current.patient_id is not None  # guaranteed by require_patient
-    rows = await service.observations.list_for_patient(current.patient_id, code=code)
-    rows.reverse()  # repository returns oldest first; display wants newest first
-    page = rows[offset : offset + limit]
+    # Pagination is pushed into storage (LIMIT/OFFSET + count) so a 50-row page never
+    # materializes a multi-year history (review finding; standards.md read budget).
+    page = await service.observations.list_for_patient(
+        current.patient_id, code=code, limit=limit, offset=offset, newest_first=True
+    )
+    total = await service.observations.count_for_patient(current.patient_id, code=code)
     # PHI read — audit-logged like every other health-data access, counts only.
     await service.audit.add(
         AuditEvent(
@@ -189,9 +207,9 @@ async def list_observations(
             actor_role=current.role.value,
             action="read_observations",
             patient_id=current.patient_id,
-            detail={"returned": len(page), "total": len(rows)},
+            detail={"returned": len(page), "total": total},
         )
     )
     return ObservationPage(
-        items=[_to_item(row) for row in page], total=len(rows), limit=limit, offset=offset
+        items=[_to_item(row) for row in page], total=total, limit=limit, offset=offset
     )

@@ -16,6 +16,12 @@ from app import models  # noqa: F401  (import registers all models on Base.metad
 from app.core.config import settings
 from app.db.base import Base
 
+if settings.database_url is None:
+    raise SystemExit(
+        "DATABASE_URL is not set. Migrations run against a real database: "
+        "export DATABASE_URL=postgresql+asyncpg://... and re-run alembic."
+    )
+
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

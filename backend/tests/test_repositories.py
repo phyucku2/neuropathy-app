@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from app.emr.service import EmrService, InMemorySecretStore
+from app.emr.service import EmrError, EmrService, InMemorySecretStore
 from app.ingestion.labs import lab_result_to_observation
 from app.models.audit import AuditEvent
 from app.models.emr_connection import EmrConnectionStatus
@@ -292,14 +292,16 @@ async def test_callback_for_vanished_connection_is_404() -> None:
     assert exc_info.value.status_code == 404
 
 
-def test_import_key_prefers_source_record_id() -> None:
-    """The EMR's own FHIR id wins; content identity is the fallback (dedup design)."""
+def test_import_key_is_one_content_identity_keyspace() -> None:
+    """EVERY import path keys on clinical content identity, so the same real-world lab
+    arriving via EMR pull AND patient upload dedupes across paths (review finding —
+    the old fhir:-vs-content: split double-counted trajectories). The FHIR id stays
+    in provenance only."""
     from datetime import UTC, datetime
 
     from app.ingestion.labs import lab_import_key
     from app.schemas.lab import LabResultIn
 
-    fhir_base = "https://ehr.example/fhir"
     with_id = LabResultIn(
         loinc_code="4548-4",
         source_record_id="obs-123",
@@ -309,7 +311,26 @@ def test_import_key_prefers_source_record_id() -> None:
         effective_at=datetime(2026, 6, 15, tzinfo=UTC),
     )
     without_id = with_id.model_copy(update={"source_record_id": None})
-    assert lab_import_key(with_id, fhir_base=fhir_base) == "fhir:https://ehr.example/fhir:obs-123"
-    assert lab_import_key(without_id, fhir_base=fhir_base).startswith("content:4548-4:2026-06-15")
-    # Patient uploads pass no fhir_base: content identity keys the whole panel.
+    assert lab_import_key(with_id) == lab_import_key(without_id)
     assert lab_import_key(with_id).startswith("content:4548-4:2026-06-15")
+
+
+async def test_pull_with_lost_vaulted_tokens_is_a_clean_409() -> None:
+    """A durable active connection whose process-local tokens vanished (restart,
+    other worker) must ask the patient to reconnect — never a bare 500 KeyError
+    (review finding, verified live)."""
+    service = EmrService(transport=_PullOnlyEmr(), client_id="c", redirect_uri="https://a/cb")
+    record = ConnectionRecord(
+        id=uuid.uuid4(),
+        patient_id=PATIENT_ID,
+        fhir_base="https://ehr.example/fhir",
+        provider_name=None,
+        status=EmrConnectionStatus.active,
+        patient_fhir_id="fhir-patient-9",
+        token_ref="secret::gone-after-restart",
+    )
+    await service.connections.add(record)
+    with pytest.raises(EmrError) as exc_info:
+        await service.pull_labs(record.id)
+    assert exc_info.value.status_code == 409
+    assert "reconnect" in exc_info.value.reason
