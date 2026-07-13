@@ -38,3 +38,7 @@ class Trajectory(BaseModel):
     data_gaps: list[str] = Field(
         default_factory=list, description="What's missing/inactive that limits confidence"
     )
+    narrative_source: str = Field(
+        default="deterministic",
+        description="'deterministic' (template) or 'ai' (validated model rephrasing, ADR-0011)",
+    )

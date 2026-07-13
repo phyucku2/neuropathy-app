@@ -42,7 +42,12 @@ class ReferenceRange(BaseModel):
 class LabResultIn(BaseModel):
     """One lab analyte result on intake (FHIR Observation, category = laboratory)."""
 
-    loinc_code: str = Field(..., description="LOINC code (FHIR Observation.code)")
+    # Strict LOINC shape (digits-dash-digit). This is research-grade coding AND the
+    # injection guard: codes flow into signal labels and (via facts) the AI narrative
+    # prompt, so free text here is not acceptable (ADR-0011 review finding).
+    loinc_code: str = Field(
+        ..., pattern=r"^\d{1,7}-\d$", description="LOINC code (FHIR Observation.code)"
+    )
     source_record_id: str | None = Field(
         default=None, description="The source system's own record id (FHIR Observation.id)"
     )

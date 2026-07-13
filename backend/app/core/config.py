@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     # External providers — must be BAA-covered before any PHI flows (ADR-0003).
     ai_provider: str | None = None
     ai_api_key: str | None = None
+    # Explicit operator attestation that a BAA covers the AI provider account.
+    # The narrative layer stays OFF without it, even with a key (ADR-0011).
+    ai_baa_confirmed: bool = False
+    ai_model: str = "claude-haiku-4-5-20251001"
     ocr_provider: str | None = None
 
     jwt_secret: str | None = None

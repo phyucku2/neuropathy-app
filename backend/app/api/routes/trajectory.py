@@ -13,9 +13,11 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter
+from fastapi import APIRouter, BackgroundTasks
 
-from app.api.deps import EmrServiceDep, PatientUserDep
+from app.ai.narrative import NARRATIVE_CACHE, narrate_into_cache, narrative_cache_key
+from app.api.deps import EmrServiceDep, NarratorDep, PatientUserDep
+from app.core.config import settings
 from app.models.audit import AuditEvent
 from app.schemas.trajectory import Trajectory
 from app.trajectory.engine import compute_trajectory
@@ -30,7 +32,12 @@ LOOKBACK = timedelta(days=400)
 
 
 @router.get("", response_model=Trajectory)
-async def get_trajectory(current: PatientUserDep, service: EmrServiceDep) -> Trajectory:
+async def get_trajectory(
+    current: PatientUserDep,
+    service: EmrServiceDep,
+    narrator: NarratorDep,
+    background: BackgroundTasks,
+) -> Trajectory:
     """The patient's own health trajectory: direction, confidence, sourced signals,
     and explicit data gaps. Always scoped to the authenticated patient."""
     assert current.patient_id is not None  # guaranteed by require_patient
@@ -48,4 +55,29 @@ async def get_trajectory(current: PatientUserDep, service: EmrServiceDep) -> Tra
             detail={"observations": len(observations)},  # counts only, never values
         )
     )
-    return compute_trajectory(points_from_observations(observations), now=now)
+    trajectory = compute_trajectory(points_from_observations(observations), now=now)
+    # Deterministic result stands on its own; the narrator may only rephrase it.
+    # The LLM is NEVER in the request path (standards.md: async jobs only): a cached
+    # accepted narrative is served immediately; otherwise this response ships the
+    # template summary and narration runs as a background task AFTER the response —
+    # outside the request's DB transaction (ADR-0011 rev. 2, review findings).
+    if narrator is not None:
+        key = narrative_cache_key(trajectory, settings.ai_model)
+        known, cached = NARRATIVE_CACHE.lookup(key)
+        if cached is not None:
+            trajectory = trajectory.model_copy(update={"summary": cached, "narrative_source": "ai"})
+        elif not known and NARRATIVE_CACHE.begin(key):
+            # The scheduled provider call is a PHI-derived disclosure: audit it NOW,
+            # within this request's transaction, so error/rejection paths are never
+            # unaccounted (review finding: disclosure must not depend on acceptance).
+            await service.audit.add(
+                AuditEvent(
+                    actor_id=current.user_id,
+                    actor_role=current.role.value,
+                    action="ai_narrative",
+                    patient_id=current.patient_id,
+                    detail={"model": settings.ai_model, "event": "requested"},  # never content
+                )
+            )
+            background.add_task(narrate_into_cache, narrator, trajectory, key, NARRATIVE_CACHE)
+    return trajectory

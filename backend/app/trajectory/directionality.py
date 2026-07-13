@@ -13,6 +13,7 @@ details never surface raw codes to patients.
 from __future__ import annotations
 
 import enum
+import re
 from dataclasses import dataclass
 
 
@@ -84,17 +85,25 @@ _REGISTRY: dict[str, SignalInfo] = {
 }
 
 
+_SAFE_LABEL = re.compile(r"^[a-z0-9][a-z0-9 \-]{0,39}$")
+
+
 def signal_info(code: str) -> SignalInfo:
     """Look up a signal's polarity + label; unknown codes get a safe default.
 
-    Unknown codes are labeled from the code itself (underscores become spaces) —
-    that label may appear in per-signal details and data gaps, but an unjudged
-    signal never drives the summary sentence.
+    Labels reach per-signal details, data gaps, and (via the facts payload) the AI
+    narrative prompt, so a label derived from an unknown code is sanitized: short,
+    lowercase alphanumerics only — anything else gets a generic label. Codes are
+    validated at intake too (schemas/lab.py); this is defense in depth against
+    prompt injection through free-text codes (ADR-0011 review finding).
     """
     known = _REGISTRY.get(code.lower())
     if known is not None:
         return known
-    return SignalInfo(Polarity.unknown, code.replace("_", " "))
+    candidate = code.replace("_", " ").replace(".", " ").lower().strip()
+    if _SAFE_LABEL.fullmatch(candidate):
+        return SignalInfo(Polarity.unknown, candidate)
+    return SignalInfo(Polarity.unknown, "one of your results")
 
 
 def polarity_for(code: str) -> Polarity:

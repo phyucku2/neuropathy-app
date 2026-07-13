@@ -28,6 +28,7 @@ from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.narrative import AnthropicNarrator, Narrator
 from app.core.config import settings
 from app.core.security import AuthError, TokenKind, decode_token
 from app.db.session import get_db_session
@@ -187,3 +188,22 @@ def get_emr_service(session: DbSessionDep = None) -> EmrService:
 
 
 EmrServiceDep = Annotated[EmrService, Depends(get_emr_service)]
+
+
+@lru_cache(maxsize=1)
+def _default_narrator() -> AnthropicNarrator | None:
+    """The AI narrative layer activates ONLY with a key AND the operator's explicit
+    BAA attestation (ADR-0011) — a key alone keeps it off, fail-safe."""
+    provider_ok = settings.ai_provider in (None, "", "anthropic")
+    if settings.ai_api_key and settings.ai_baa_confirmed and provider_ok:
+        return AnthropicNarrator(api_key=settings.ai_api_key, model=settings.ai_model)
+    # Any other configured provider: stay off — the BAA attestation is bound to the
+    # endpoint actually called, and we only ship an Anthropic narrator (review finding).
+    return None
+
+
+def get_narrator() -> Narrator | None:
+    return _default_narrator()
+
+
+NarratorDep = Annotated[Narrator | None, Depends(get_narrator)]
