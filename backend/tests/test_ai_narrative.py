@@ -218,6 +218,23 @@ def test_key_without_baa_attestation_keeps_narrator_off(
         deps._default_narrator.cache_clear()
 
 
+def test_key_with_baa_attestation_activates_the_anthropic_narrator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.api import deps
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "ai_api_key", "sk-something")
+    monkeypatch.setattr(settings, "ai_baa_confirmed", True)
+    deps._default_narrator.cache_clear()
+    try:
+        narrator = deps.get_narrator()
+        assert isinstance(narrator, AnthropicNarrator)  # both gates open -> ON
+        assert narrator._model == settings.ai_model  # noqa: SLF001 — wiring assertion
+    finally:
+        deps._default_narrator.cache_clear()
+
+
 class _NoNetwork:
     async def get_json(self, url: str, *, access_token: str | None = None) -> dict[str, Any]:
         raise AssertionError("no network")

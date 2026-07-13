@@ -237,6 +237,26 @@ def test_failed_provisioning_leaves_no_orphan_clinic(
     assert len(clinic_service.clinics._clinics) == 1  # only the first clinic remains
 
 
+def test_failed_join_of_existing_clinic_keeps_the_clinic(
+    client: TestClient, clinic_service: ClinicService
+) -> None:
+    """409 while JOINING (not founding) a clinic must not delete anything: the
+    clinic pre-existed the failed request and other clinicians depend on it."""
+    _, clinic_id, _ = _create_clinician(client)
+    resp = client.post(
+        "/clinic/clinicians",
+        headers=BOOTSTRAP,
+        json={
+            "email": "dr@example.com",  # duplicate — provisioning fails
+            "password": "another-pass-1",
+            "display_name": "Dr Again",
+            "clinic_id": str(clinic_id),
+        },
+    )
+    assert resp.status_code == 409
+    assert len(clinic_service.clinics._clinics) == 1  # the joined clinic survives
+
+
 # ---------------------------------------------------------------- invitations
 
 
@@ -351,6 +371,34 @@ async def test_invitation_absorbs_a_lost_duplicate_race() -> None:
     (event,) = await service.audit.list_for_patient(patient_id)
     assert event.detail["matched"] is True
     assert event.detail["created"] is False
+
+
+async def test_panel_defense_in_depth_skips_unconsented_and_userless_rows() -> None:
+    """`may_transmit_to_clinic` re-judges every row even after the storage-level
+    status filter, and a connection whose patient user vanished is skipped: rows the
+    API cannot produce today must still never leak if storage ever holds them."""
+    service = ClinicService()
+    clinic_id = uuid.uuid4()
+    # Active but never consented — list_active_for_clinic returns it; the gate must not.
+    await service.connections.add(
+        ClinicConnection(
+            patient_id=uuid.uuid4(),
+            clinic_id=clinic_id,
+            status=ConnectionStatus.active,
+            initiated_by=Initiator.clinic,
+        )
+    )
+    # Active and consented, but no user record owns the patient id.
+    await service.connections.add(
+        ClinicConnection(
+            patient_id=uuid.uuid4(),
+            clinic_id=clinic_id,
+            status=ConnectionStatus.active,
+            consent_granted_at=NOW,
+            initiated_by=Initiator.clinic,
+        )
+    )
+    assert await service.panel(clinic_id=clinic_id) == []
 
 
 # ---------------------------------------------------------------- consent lifecycle

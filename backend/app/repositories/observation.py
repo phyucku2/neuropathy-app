@@ -49,10 +49,6 @@ class ObservationRepository(Protocol):
         """
         ...
 
-    async def has_import_key(self, patient_id: uuid.UUID, import_key: str) -> bool:
-        """Whether a record with this import idempotency key already exists."""
-        ...
-
     async def existing_import_keys(self, patient_id: uuid.UUID, import_keys: list[str]) -> set[str]:
         """The subset of `import_keys` already on file — ONE probe per batch, not N."""
         ...
@@ -102,11 +98,6 @@ class InMemoryObservationRepository:
         if limit is None:
             return rows[offset:] if offset else rows
         return rows[offset : offset + limit]
-
-    async def has_import_key(self, patient_id: uuid.UUID, import_key: str) -> bool:
-        return any(
-            o.patient_id == patient_id and o.import_key == import_key for o in self._observations
-        )
 
     async def existing_import_keys(self, patient_id: uuid.UUID, import_keys: list[str]) -> set[str]:
         wanted = set(import_keys)

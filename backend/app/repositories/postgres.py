@@ -245,17 +245,6 @@ class PostgresObservationRepository:
             stmt = stmt.limit(limit)
         return list((await self._session.scalars(stmt)).all())
 
-    async def has_import_key(self, patient_id: uuid.UUID, import_key: str) -> bool:
-        stmt = select(
-            exists(
-                select(Observation.id).where(
-                    Observation.patient_id == patient_id,
-                    Observation.import_key == import_key,
-                )
-            )
-        )
-        return bool(await self._session.scalar(stmt))
-
     async def existing_import_keys(self, patient_id: uuid.UUID, import_keys: list[str]) -> set[str]:
         if not import_keys:
             return set()

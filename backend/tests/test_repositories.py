@@ -13,9 +13,13 @@ import pytest
 from app.emr.service import EmrError, EmrService, InMemorySecretStore
 from app.ingestion.labs import lab_result_to_observation
 from app.models.audit import AuditEvent
+from app.models.clinic import Clinic
+from app.models.connection import ClinicConnection, ConnectionStatus, Initiator
 from app.models.emr_connection import EmrConnectionStatus
 from app.models.observation import DataOrigin
 from app.repositories.audit import InMemoryAuditEventRepository
+from app.repositories.clinic import InMemoryClinicRepository
+from app.repositories.clinic_connection import InMemoryClinicConnectionRepository
 from app.repositories.emr_connection import ConnectionRecord, InMemoryEmrConnectionRepository
 from app.repositories.observation import InMemoryObservationRepository
 from app.schemas.lab import LabResultIn, LabStatus
@@ -334,3 +338,39 @@ async def test_pull_with_lost_vaulted_tokens_is_a_clean_409() -> None:
         await service.pull_labs(record.id)
     assert exc_info.value.status_code == 409
     assert "reconnect" in exc_info.value.reason
+
+
+async def test_in_memory_adds_preserve_preset_identity_fields() -> None:
+    """The in-memory stores mirror DB column defaults (id, created_at, occurred_at)
+    ONLY when unset — rows arriving with identity already assigned (parity with what
+    a flush would have produced) must keep it, never get re-stamped."""
+    preset = uuid.uuid4()
+    stamped = datetime(2026, 7, 1, 8, 0, tzinfo=UTC)
+
+    event = await InMemoryAuditEventRepository().add(
+        AuditEvent(id=preset, occurred_at=stamped, actor_role="system", action="x", detail={})
+    )
+    assert event.id == preset and event.occurred_at == stamped
+
+    clinic = await InMemoryClinicRepository().add(
+        Clinic(id=preset, created_at=stamped, name="Preset Clinic")
+    )
+    assert clinic.id == preset and clinic.created_at == stamped
+
+    connection = await InMemoryClinicConnectionRepository().add(
+        ClinicConnection(
+            id=preset,
+            created_at=stamped,
+            patient_id=uuid.uuid4(),
+            clinic_id=uuid.uuid4(),
+            status=ConnectionStatus.pending,
+            initiated_by=Initiator.clinic,
+        )
+    )
+    assert connection.id == preset and connection.created_at == stamped
+
+    observation = await InMemoryObservationRepository().add(
+        _observation(_lab("4548-4", 7.0), patient_id=uuid.uuid4())
+    )
+    re_added = await InMemoryObservationRepository().add(observation)
+    assert re_added.id == observation.id  # already-assigned id is preserved
