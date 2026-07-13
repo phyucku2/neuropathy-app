@@ -15,7 +15,14 @@ from fastapi.testclient import TestClient
 from app.api.deps import get_auth_service, get_clinic_service
 from app.core.config import settings
 from app.main import app
+from app.models.connection import ClinicConnection, ConnectionStatus, Initiator
 from app.models.observation import DataOrigin, Observation, ObservationStatus, SourceType
+from app.models.user import UserRole
+from app.repositories.clinic_connection import (
+    DuplicateLiveConnectionError,
+    InMemoryClinicConnectionRepository,
+)
+from app.repositories.user import UserRecord
 from app.services.auth import AuthService
 from app.services.clinic import ClinicService
 
@@ -210,6 +217,26 @@ def test_bootstrap_duplicate_email_is_409(client: TestClient) -> None:
     assert resp.status_code == 409
 
 
+def test_failed_provisioning_leaves_no_orphan_clinic(
+    client: TestClient, clinic_service: ClinicService
+) -> None:
+    """A clinic founded in a provisioning request that 409s must not survive it —
+    otherwise retries accumulate same-name duplicates (review finding)."""
+    _create_clinician(client)
+    resp = client.post(
+        "/clinic/clinicians",
+        headers=BOOTSTRAP,
+        json={
+            "email": "dr@example.com",  # duplicate — provisioning fails
+            "password": "another-pass-1",
+            "display_name": "Dr Again",
+            "clinic_name": "Orphan Clinic",
+        },
+    )
+    assert resp.status_code == 409
+    assert len(clinic_service.clinics._clinics) == 1  # only the first clinic remains
+
+
 # ---------------------------------------------------------------- invitations
 
 
@@ -251,6 +278,79 @@ def test_invitations_require_clinician(client: TestClient) -> None:
     resp = client.post("/clinic/invitations", headers=patient, json={"email": "x@example.com"})
     assert resp.status_code == 403
     assert resp.json()["detail"] == "Clinician account required"
+
+
+async def test_storage_rejects_second_live_connection_per_patient_clinic_pair() -> None:
+    """The in-memory twin of the uq_clinic_connection_live partial unique index:
+    one live connection per patient-clinic pair, fresh ones allowed after revocation."""
+    repo = InMemoryClinicConnectionRepository()
+    patient_id, clinic_id = uuid.uuid4(), uuid.uuid4()
+    first = await repo.add(
+        ClinicConnection(
+            patient_id=patient_id,
+            clinic_id=clinic_id,
+            status=ConnectionStatus.pending,
+            initiated_by=Initiator.clinic,
+        )
+    )
+    with pytest.raises(DuplicateLiveConnectionError):
+        await repo.add(
+            ClinicConnection(
+                patient_id=patient_id,
+                clinic_id=clinic_id,
+                status=ConnectionStatus.pending,
+                initiated_by=Initiator.clinic,
+            )
+        )
+    # A different clinic is a different pair — allowed.
+    await repo.add(
+        ClinicConnection(
+            patient_id=patient_id,
+            clinic_id=uuid.uuid4(),
+            status=ConnectionStatus.pending,
+            initiated_by=Initiator.clinic,
+        )
+    )
+    # Revoked rows leave the index: the patient may reconnect later.
+    first.status = ConnectionStatus.revoked
+    await repo.update(first)
+    await repo.add(
+        ClinicConnection(
+            patient_id=patient_id,
+            clinic_id=clinic_id,
+            status=ConnectionStatus.pending,
+            initiated_by=Initiator.clinic,
+        )
+    )
+
+
+async def test_invitation_absorbs_a_lost_duplicate_race() -> None:
+    """When a concurrent invitation wins the check-then-insert race, storage raises
+    DuplicateLiveConnectionError and the invite absorbs it: no error escapes (the 202
+    stays identical) and the audit trail records created=False."""
+
+    class RacedRepository(InMemoryClinicConnectionRepository):
+        async def add(self, connection: ClinicConnection) -> ClinicConnection:
+            raise DuplicateLiveConnectionError(connection.patient_id, connection.clinic_id)
+
+    service = ClinicService(connections=RacedRepository())
+    patient_id = uuid.uuid4()
+    await service.users.add(
+        UserRecord(
+            id=uuid.uuid4(),
+            email="race@example.com",
+            password_hash="synthetic-hash",
+            display_name="Race",
+            role=UserRole.patient,
+            patient_id=patient_id,
+        )
+    )
+    await service.invite_patient(
+        clinic_id=uuid.uuid4(), actor_id=uuid.uuid4(), email="race@example.com"
+    )
+    (event,) = await service.audit.list_for_patient(patient_id)
+    assert event.detail["matched"] is True
+    assert event.detail["created"] is False
 
 
 # ---------------------------------------------------------------- consent lifecycle

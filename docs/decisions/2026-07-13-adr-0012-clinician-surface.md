@@ -34,11 +34,26 @@ A `Clinic` model plus a clinician router, with five postures:
    endpoint calls, so the two can never drift) and NEVER invokes the AI narrator;
    `narrative_source` stays `deterministic`. ADR-0011's narration is a warmth layer
    for the patient's own view; clinicians get the computed facts.
-4. **Non-enumerating invitations.** `POST /clinic/invitations` answers an identical
-   202 whether or not the email matches a patient account; a match creates a pending,
-   clinic-initiated connection that only patient consent activates. The clinician
-   surface must not become an account-probing oracle.
-5. **Clinician-actor audit.** Every clinician read of patient data writes an audit
+4. **Non-enumerating invitations.** `POST /clinic/invitations` answers a
+   byte-identical 202 whether or not the email matches a patient account; a match
+   creates a pending, clinic-initiated connection that only patient consent
+   activates. The clinician surface must not become an account-probing oracle.
+   Query work is equalized across the matched/unmatched branches so steady-state
+   response timing does not reveal a match either; the one-time INSERT on a first
+   successful invite remains a residual single-shot timing signal (adversarial
+   review), accepted because it cannot be sampled repeatedly — full elimination
+   would require queueing invitations off-request and is deferred with rate
+   limiting to the hardening pass.
+5. **One live connection per patient-clinic pair — enforced in storage.** The invite
+   flow's check-then-insert cannot hold under concurrent requests (adversarial
+   review: duplicate connections would let a clinic keep reading after the patient
+   revoked "the" connection). A partial unique index
+   (`uq_clinic_connection_live` on `(patient_id, clinic_id) WHERE status !=
+   'revoked'`) backstops it; both repository implementations raise
+   `DuplicateLiveConnectionError`, which the invite absorbs (identical 202, audit
+   records `created=false`). Revoked rows leave the index, so patients can
+   reconnect.
+6. **Clinician-actor audit.** Every clinician read of patient data writes an audit
    event with the clinician as actor and the patient as subject (counts and
    references only, never values — CLAUDE.md §5); invitations, consent grants, and
    revocations are audited too. Clinician provisioning is ops-gated: a
@@ -49,9 +64,22 @@ A `Clinic` model plus a clinician router, with five postures:
 ## Consequences
 
 - Data model: new `clinic` table; `app_user.clinic_id` FK; `clinic_connection.clinic_id`
-  FK (migration 0002 — pre-launch, so no backfill needed). `CurrentUser` and
-  `UserRecord` gain a defaulted trailing `clinic_id`, so existing constructions are
-  untouched.
+  FK; `uq_clinic_connection_live` partial unique index (migration 0002). The
+  migration backfills placeholder clinic rows for any pre-existing
+  `clinic_connection.clinic_id` values and revokes duplicate live connections
+  (keeping the oldest) before its constraints land, so populated dev/staging
+  databases upgrade cleanly; its downgrade refuses while `clinic_connection` rows
+  exist rather than orphaning consent records and bricking re-upgrade (adversarial
+  review). `CurrentUser` and `UserRecord` gain a defaulted trailing `clinic_id`, so
+  existing constructions are untouched.
+- A clinic founded by a provisioning request that then fails (e.g. duplicate email)
+  is rolled back in both storage modes — Postgres via the request transaction,
+  in-memory via explicit `ClinicRepository.delete` — so retries never accumulate
+  same-name orphan clinics (adversarial review).
+- `Patient.clinic_id` / `connection_mode` are explicitly documented as RESERVED and
+  unmaintained: `ClinicConnection` + `may_transmit_to_clinic` are the sole source of
+  truth for clinic linkage; a mirror would be a dual-write to keep consistent, and
+  nothing reads it yet (adversarial review).
 - Endpoints: `/clinic/clinicians`, `/clinic/invitations`, `/clinic/patients`,
   `/clinic/patients/{id}/trajectory|observations`; patient-side `/connections` list,
   `/connections/{id}/consent`, and `DELETE /connections/{id}` (idempotent revoke).

@@ -26,6 +26,7 @@ from app.models.emr_connection import EmrConnection
 from app.models.observation import Observation, ObservationStatus
 from app.models.patient import Patient
 from app.models.user import User
+from app.repositories.clinic_connection import DuplicateLiveConnectionError
 from app.repositories.emr_connection import ConnectionRecord
 from app.repositories.user import DuplicateEmailError, UserRecord
 from app.services.observation import counts_toward_analysis
@@ -95,6 +96,12 @@ class PostgresClinicRepository:
     async def get(self, clinic_id: uuid.UUID) -> Clinic | None:
         return await self._session.get(Clinic, clinic_id)
 
+    async def delete(self, clinic_id: uuid.UUID) -> None:
+        row = await self._session.get(Clinic, clinic_id)
+        if row is not None:
+            await self._session.delete(row)
+            await self._session.flush()
+
 
 class PostgresClinicConnectionRepository:
     """ClinicConnectionRepository over the clinic_connection table."""
@@ -103,8 +110,19 @@ class PostgresClinicConnectionRepository:
         self._session = session
 
     async def add(self, connection: ClinicConnection) -> ClinicConnection:
-        self._session.add(connection)
-        await self._session.flush()
+        # A savepoint scopes the flush: when uq_clinic_connection_live fires, only
+        # this insert rolls back and the caller's transaction stays usable (the
+        # invite flow still writes its audit event after absorbing the duplicate).
+        try:
+            async with self._session.begin_nested():
+                self._session.add(connection)
+                await self._session.flush()
+        except IntegrityError as exc:
+            if "uq_clinic_connection_live" in str(exc.orig):
+                raise DuplicateLiveConnectionError(
+                    connection.patient_id, connection.clinic_id
+                ) from exc
+            raise
         await self._session.refresh(connection)
         return connection
 

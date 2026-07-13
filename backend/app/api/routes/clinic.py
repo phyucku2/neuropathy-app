@@ -73,6 +73,7 @@ async def create_clinician(
     """Provision a clinician account (ops/bootstrap): join an existing clinic by id
     or found a new one by name."""
     _require_bootstrap_token(x_bootstrap_token)
+    founded = body.clinic_id is None
     if body.clinic_id is not None:
         clinic = await service.clinics.get(body.clinic_id)
         if clinic is None:
@@ -88,6 +89,12 @@ async def create_clinician(
             clinic_id=clinic.id,
         )
     except AuthApiError as exc:
+        if founded:
+            # Provisioning failed (e.g. duplicate email): a clinic founded in this
+            # request must not survive it, or retries accumulate same-name orphans.
+            # Postgres mode also rolls back via the request transaction; this keeps
+            # in-memory mode equally clean (review finding).
+            await service.clinics.delete(clinic.id)
         raise HTTPException(status_code=exc.status_code, detail=exc.reason) from exc
     # Provisioning is a privileged config change — audited like any other (CLAUDE.md §5).
     await service.audit.add(

@@ -30,6 +30,7 @@ from app.repositories.audit import AuditEventRepository, InMemoryAuditEventRepos
 from app.repositories.clinic import ClinicRepository, InMemoryClinicRepository
 from app.repositories.clinic_connection import (
     ClinicConnectionRepository,
+    DuplicateLiveConnectionError,
     InMemoryClinicConnectionRepository,
 )
 from app.repositories.observation import InMemoryObservationRepository, ObservationRepository
@@ -65,32 +66,48 @@ class ClinicService:
     ) -> None:
         """Invite a patient by email; clinic-initiated pending connection on a match.
 
-        Deliberately returns nothing: the route answers 202 either way, so the
-        endpoint cannot be used to probe which emails hold accounts. Duplicate
-        invitations are absorbed — an existing non-revoked connection to this clinic
-        is left untouched. The attempt is audited whether or not it matched.
+        Deliberately returns nothing: the route answers 202 with a byte-identical
+        body either way, and the connection lookup runs for matched and unmatched
+        emails alike so steady-state response timing does not reveal a match (the
+        one-time INSERT on a first successful invite remains a residual single-shot
+        signal — ADR-0012). Duplicate invitations are absorbed: the check here plus
+        the storage-level unique index (DuplicateLiveConnectionError) guarantee one
+        live connection per patient-clinic pair even under concurrent requests. The
+        attempt is audited whether or not it matched.
         """
         user = await self.users.get_by_email(email.strip().lower())
         matched = user is not None and user.role is UserRole.patient and user.patient_id is not None
         created = False
         patient_id: uuid.UUID | None = None
+        # Equalized work: unmatched emails look up a connection list too (for a
+        # patient id that cannot exist), keeping per-probe query cost branch-free.
+        lookup_id = (
+            user.patient_id
+            if matched and user is not None and user.patient_id is not None
+            else uuid.uuid4()
+        )
+        existing = await self.connections.list_for_patient(lookup_id)
         if matched:
             assert user is not None and user.patient_id is not None  # narrowed by `matched`
             patient_id = user.patient_id
-            existing = await self.connections.list_for_patient(patient_id)
             if not any(
                 c.clinic_id == clinic_id and c.status is not ConnectionStatus.revoked
                 for c in existing
             ):
-                await self.connections.add(
-                    ClinicConnection(
-                        patient_id=patient_id,
-                        clinic_id=clinic_id,
-                        status=ConnectionStatus.pending,
-                        initiated_by=Initiator.clinic,
+                try:
+                    await self.connections.add(
+                        ClinicConnection(
+                            patient_id=patient_id,
+                            clinic_id=clinic_id,
+                            status=ConnectionStatus.pending,
+                            initiated_by=Initiator.clinic,
+                        )
                     )
-                )
-                created = True
+                    created = True
+                except DuplicateLiveConnectionError:
+                    # A concurrent invitation won the race; absorbing it keeps the
+                    # response identical and the audit trail truthful.
+                    created = False
         await self.audit.add(
             AuditEvent(
                 actor_id=actor_id,

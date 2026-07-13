@@ -14,11 +14,29 @@ from typing import Protocol
 from app.models.connection import ClinicConnection, ConnectionStatus
 
 
+class DuplicateLiveConnectionError(Exception):
+    """A non-revoked connection already links this patient and clinic.
+
+    The storage backstop for the invite flow's check-then-insert (ADR-0012): both
+    implementations raise it from `add`, mirroring the `uq_clinic_connection_live`
+    partial unique index, so concurrent invitations can never create duplicates.
+    """
+
+    def __init__(self, patient_id: uuid.UUID, clinic_id: uuid.UUID) -> None:
+        super().__init__(
+            f"live connection already exists: patient {patient_id}, clinic {clinic_id}"
+        )
+
+
 class ClinicConnectionRepository(Protocol):
     """Persistence contract for patient-clinic connections."""
 
     async def add(self, connection: ClinicConnection) -> ClinicConnection:
-        """Persist a newly created connection."""
+        """Persist a newly created connection.
+
+        Raises DuplicateLiveConnectionError when a non-revoked connection for the
+        same (patient_id, clinic_id) already exists.
+        """
         ...
 
     async def get(self, connection_id: uuid.UUID) -> ClinicConnection | None:
@@ -50,6 +68,15 @@ class InMemoryClinicConnectionRepository:
         self._connections: dict[uuid.UUID, ClinicConnection] = {}
 
     async def add(self, connection: ClinicConnection) -> ClinicConnection:
+        # Mirror the uq_clinic_connection_live partial unique index so in-memory and
+        # Postgres modes enforce the same invariant.
+        for existing in self._connections.values():
+            if (
+                existing.patient_id == connection.patient_id
+                and existing.clinic_id == connection.clinic_id
+                and existing.status is not ConnectionStatus.revoked
+            ):
+                raise DuplicateLiveConnectionError(connection.patient_id, connection.clinic_id)
         # Column defaults (id, created_at) only apply on DB flush; mirror them here.
         if connection.id is None:
             connection.id = uuid.uuid4()

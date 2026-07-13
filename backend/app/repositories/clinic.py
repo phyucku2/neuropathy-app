@@ -24,6 +24,15 @@ class ClinicRepository(Protocol):
         """Fetch a clinic by id."""
         ...
 
+    async def delete(self, clinic_id: uuid.UUID) -> None:
+        """Remove a clinic (quietly ignores an unknown id).
+
+        Exists for one caller: rolling back a clinic founded in a provisioning
+        request that then failed, so no orphan survives in in-memory mode (Postgres
+        mode also rolls back via the request transaction).
+        """
+        ...
+
 
 class InMemoryClinicRepository:
     """Dict-backed store for unit tests and DB-less development."""
@@ -42,3 +51,6 @@ class InMemoryClinicRepository:
 
     async def get(self, clinic_id: uuid.UUID) -> Clinic | None:
         return self._clinics.get(clinic_id)
+
+    async def delete(self, clinic_id: uuid.UUID) -> None:
+        self._clinics.pop(clinic_id, None)
