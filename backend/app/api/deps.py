@@ -5,11 +5,13 @@ Two storage modes, selected per request by `get_db_session` (app/db/session.py):
 
 - **Postgres mode** (DATABASE_URL configured — the dependency yields a session):
   services are constructed per request on Postgres repositories bound to the
-  request-scoped transaction. State that must outlive one request — the JWT signing
-  secret, the OAuth state->PKCE-verifier map, and the token secret store — is hoisted
-  to the process-level singletons below and shared by every request-scoped instance.
-  Documented limitation: pending auth states and OAuth tokens are still per-process;
-  a durable secret-manager adapter and a DB-backed pending store are follow-ups.
+  request-scoped transaction. OAuth pending-auth states live in the DB-backed
+  single-use store and — when SECRET_STORE_KEY is configured — OAuth tokens live in
+  the encrypted-at-rest Postgres vault, so both survive restarts and multi-worker
+  deployments (ADR-0017). Without a key the token vault stays the per-process
+  in-memory singleton, fail closed: plaintext secrets never reach the database
+  (tokens then don't survive restarts — configure the key). The JWT signing secret
+  remains the process-level singleton below.
 - **In-memory mode** (no DATABASE_URL — the dependency yields None): the lru_cache
   service singletons serve every request, exactly as before. Unit tests and DB-less
   development are unchanged, and tests keep overriding get_auth_service /
@@ -18,6 +20,7 @@ Two storage modes, selected per request by `get_db_session` (app/db/session.py):
 
 from __future__ import annotations
 
+import logging
 import secrets as pysecrets
 import uuid
 from collections.abc import Awaitable, Callable
@@ -26,6 +29,7 @@ from datetime import UTC, datetime
 from functools import lru_cache
 from typing import Annotated
 
+from cryptography.fernet import Fernet
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,7 +38,12 @@ from app.ai.narrative import AnthropicNarrator, Narrator
 from app.core.config import settings
 from app.core.security import AuthError, TokenKind, decode_token
 from app.db.session import get_db_session
-from app.emr.service import EmrService, InMemorySecretStore, PendingAuthStore
+from app.emr.service import (
+    EmrService,
+    InMemoryPendingAuthStore,
+    InMemorySecretStore,
+    SecretStore,
+)
 from app.emr.transport import HttpxTransport
 from app.models.user import UserRole
 from app.repositories.postgres import (
@@ -45,6 +54,8 @@ from app.repositories.postgres import (
     PostgresEmrConnectionRepository,
     PostgresObservationRepository,
     PostgresPatientCapabilityRepository,
+    PostgresPendingAuthStore,
+    PostgresSecretStore,
     PostgresUserRepository,
 )
 from app.services.auth import AuthService
@@ -52,6 +63,7 @@ from app.services.capability import CapabilityService
 from app.services.clinic import ClinicService
 
 _bearer = HTTPBearer(auto_error=False)
+_log = logging.getLogger(__name__)
 
 # None = no database configured -> in-memory mode. The default lets tests (and the
 # cached-singleton contract) call the providers directly, without a request.
@@ -154,20 +166,43 @@ def _process_transport() -> HttpxTransport:
 
 @lru_cache(maxsize=1)
 def _process_secret_store() -> InMemorySecretStore:
-    """Process-wide OAuth token vault shared by every request-scoped EmrService.
-
-    Per-request stores would lose tokens between requests. Still per-process (a
-    documented limitation) — the durable secret-manager adapter is a follow-up.
-    """
+    """Process-wide OAuth token vault for in-memory mode — and the fail-closed
+    fallback for DB mode without a SECRET_STORE_KEY (ADR-0017): tokens must never
+    land in the database unencrypted, so no key means they stay in this process."""
     return InMemorySecretStore()
 
 
 @lru_cache(maxsize=1)
-def _process_pending_auth() -> PendingAuthStore:
-    """Process-wide OAuth state->verifier map: connect and callback are separate
-    requests, so pending state must outlive each. Still per-process (a documented
-    limitation) — a DB-backed pending store is a follow-up."""
-    return {}
+def _process_pending_auth() -> InMemoryPendingAuthStore:
+    """Process-wide OAuth state->verifier store for in-memory mode: connect and
+    callback are separate requests, so pending state must outlive each. DB mode uses
+    the durable Postgres store instead (ADR-0017)."""
+    return InMemoryPendingAuthStore()
+
+
+@lru_cache(maxsize=1)
+def _process_fernet() -> Fernet | None:
+    """The token-vault key, parsed once per process. None = no key configured; the
+    shape was already validated at settings load (app/core/config.py)."""
+    if not settings.secret_store_key:
+        if settings.database_url:
+            _log.warning(
+                "SECRET_STORE_KEY is not configured: EMR OAuth tokens stay in the "
+                "per-process in-memory vault and will not survive a restart or reach "
+                "other workers. Configure the key to enable the encrypted DB vault "
+                "(ADR-0017); plaintext tokens are never written to the database."
+            )
+        return None
+    return Fernet(settings.secret_store_key)
+
+
+def _secret_store_for(session: AsyncSession) -> SecretStore:
+    """DB mode's vault: encrypted-at-rest Postgres when the key is configured,
+    otherwise the fail-closed per-process store (never plaintext in the DB)."""
+    fernet = _process_fernet()
+    if fernet is None:
+        return _process_secret_store()
+    return PostgresSecretStore(session, fernet)
 
 
 def _smart_client_config() -> tuple[str, str]:
@@ -201,11 +236,13 @@ def get_emr_service(session: DbSessionDep = None) -> EmrService:
         transport=_process_transport(),
         client_id=client_id,
         redirect_uri=redirect_uri,
-        secret_store=_process_secret_store(),
+        secret_store=_secret_store_for(session),
         connections=PostgresEmrConnectionRepository(session),
         observations=PostgresObservationRepository(session),
         audit=PostgresAuditEventRepository(session),
-        _pending=_process_pending_auth(),
+        # Durable + single-use across processes/workers (ADR-0017): the connect and
+        # callback requests may land anywhere, so pending state lives in the DB.
+        _pending=PostgresPendingAuthStore(session),
     )
 
 

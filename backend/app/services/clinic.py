@@ -12,6 +12,11 @@ in routes:
   way; a matching patient email creates a pending connection, a non-matching one only
   writes an audit event. The HTTP response is identical in both cases.
 
+Invitations are additionally rate-limited per clinician (ADR-0012 deferral ->
+ADR-0017): the sliding-window limiter counts prior 'invite_patient' audit events and
+fires BEFORE the email lookup, so a refusal can never depend on — or reveal — whether
+the probed email matches an account.
+
 Consent grants/revocations and invitations are audit-logged here so no route can
 perform them unaccounted (CLAUDE.md §5).
 """
@@ -20,8 +25,9 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
+from app.core.config import settings
 from app.models.audit import AuditEvent
 from app.models.clinic import Clinic
 from app.models.connection import ClinicConnection, ConnectionStatus, Initiator
@@ -36,8 +42,22 @@ from app.repositories.clinic_connection import (
 from app.repositories.observation import InMemoryObservationRepository, ObservationRepository
 from app.repositories.user import InMemoryUserRepository, UserRecord, UserRepository
 from app.services.connection import may_transmit_to_clinic
+from app.services.rate_limit import RateLimitExceededError, SlidingWindowRateLimiter
 
-__all__ = ["ClinicService", "PanelEntry"]
+__all__ = ["ClinicService", "PanelEntry", "invitation_rate_limiter"]
+
+
+def invitation_rate_limiter(counter: AuditEventRepository) -> SlidingWindowRateLimiter:
+    """The settings-driven per-clinician invitation limiter (ADR-0017), counting the
+    'invite_patient' audit events the invite flow already writes — one per ACCEPTED
+    attempt, matched or not ('rate_limited' refusals deliberately do not count, so a
+    refused clinician's budget still frees up as the window slides)."""
+    return SlidingWindowRateLimiter(
+        counter=counter,
+        action="invite_patient",
+        max_events=settings.invite_rate_limit_max,
+        window=timedelta(seconds=settings.invite_rate_limit_window_seconds),
+    )
 
 
 @dataclass(frozen=True)
@@ -74,7 +94,29 @@ class ClinicService:
         the storage-level unique index (DuplicateLiveConnectionError) guarantee one
         live connection per patient-clinic pair even under concurrent requests. The
         attempt is audited whether or not it matched.
+
+        Rate limiting (ADR-0017) runs FIRST — before the email is even looked up —
+        so a 429 carries zero information about the probed address and slows an
+        enumeration campaign to the window budget. Refusals are audited with counts
+        only, never the email.
         """
+        now = datetime.now(UTC)
+        if not await invitation_rate_limiter(self.audit).allow(actor_id, now=now):
+            await self.audit.add(
+                AuditEvent(
+                    actor_id=actor_id,
+                    actor_role=UserRole.clinician.value,
+                    action="rate_limited",
+                    patient_id=None,
+                    # Counts/config only — the probed email was never even looked up.
+                    detail={
+                        "clinic_id": str(clinic_id),
+                        "limit": settings.invite_rate_limit_max,
+                        "window_seconds": settings.invite_rate_limit_window_seconds,
+                    },
+                )
+            )
+            raise RateLimitExceededError
         user = await self.users.get_by_email(email.strip().lower())
         matched = user is not None and user.role is UserRole.patient and user.patient_id is not None
         created = False

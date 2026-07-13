@@ -3,12 +3,12 @@
 Storage posture: connections live behind the injected `EmrConnectionRepository` and
 pulled labs are persisted as research-grade Observations through the injected
 `ObservationRepository` (in-memory defaults for unit tests and DB-less development;
-Postgres in deployment). OAuth tokens live in a SecretStore (in-memory now, secret
-manager later); pending auth states (`PendingAuthStore`) span the connect and callback
-requests, so when services are built per request (DB mode, app/api/deps.py) both the
-secret store and the pending store are process-level singletons shared across
-instances — still per-process, never per-request. Swapping storage changes
-implementations, not this flow or the API contract.
+Postgres in deployment). OAuth tokens live behind the `SecretStore` protocol and
+pending auth states — which span the connect and callback requests — behind
+`PendingAuthStore`; DB mode wires their Postgres implementations (encrypted-at-rest
+vault + durable single-use state rows, ADR-0017) while in-memory mode keeps
+process-level singletons. Swapping storage changes implementations, not this flow or
+the API contract.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ import secrets as pysecrets
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Protocol
 
 from app.emr.client import EmrClient
 from app.emr.smart import (
@@ -38,14 +38,24 @@ from app.repositories.emr_connection import (
     InMemoryEmrConnectionRepository,
 )
 from app.repositories.observation import InMemoryObservationRepository, ObservationRepository
+from app.repositories.pending_auth import (
+    InMemoryPendingAuthStore,
+    PendingAuth,
+    PendingAuthStore,
+    pending_auth_ttl,
+)
 from app.schemas.lab import LabResultIn
 
 __all__ = [
     "ConnectionRecord",
     "EmrError",
     "EmrService",
+    "InMemoryPendingAuthStore",
     "InMemorySecretStore",
+    "PendingAuth",
     "PendingAuthStore",
+    "SecretStore",
+    "pending_auth_ttl",
 ]
 
 
@@ -58,30 +68,31 @@ class EmrError(Exception):
         self.status_code = status_code
 
 
-@dataclass
-class _PendingAuth:
-    connection_id: uuid.UUID
-    code_verifier: str
-    token_endpoint: str
+class SecretStore(Protocol):
+    """Token vault contract: put secret material, get it back by opaque reference."""
 
+    async def put(self, tokens: dict[str, str]) -> str:
+        """Vault the tokens; returns the reference to store on the connection."""
+        ...
 
-# state -> pending PKCE exchange. The map must outlive a single request (connect and
-# callback arrive separately), so DB-mode wiring injects one process-level instance.
-PendingAuthStore = dict[str, _PendingAuth]
+    async def get(self, ref: str) -> dict[str, str] | None:
+        """The vaulted tokens, or None when the ref is unknown (or undecryptable)."""
+        ...
 
 
 class InMemorySecretStore:
-    """Token vault stand-in: same put/get contract the secret manager adapter will have."""
+    """Dict-backed vault for unit tests, DB-less development, and DB mode without a
+    configured SECRET_STORE_KEY (fail closed: never plaintext secrets in the DB)."""
 
     def __init__(self) -> None:
         self._secrets: dict[str, dict[str, str]] = {}
 
-    def put(self, tokens: dict[str, str]) -> str:
+    async def put(self, tokens: dict[str, str]) -> str:
         ref = f"secret::{uuid.uuid4()}"
         self._secrets[ref] = tokens
         return ref
 
-    def get(self, ref: str) -> dict[str, str] | None:
+    async def get(self, ref: str) -> dict[str, str] | None:
         return self._secrets.get(ref)
 
 
@@ -90,11 +101,11 @@ class EmrService:
     transport: HttpTransport
     client_id: str
     redirect_uri: str
-    secret_store: InMemorySecretStore = field(default_factory=InMemorySecretStore)
+    secret_store: SecretStore = field(default_factory=InMemorySecretStore)
     connections: EmrConnectionRepository = field(default_factory=InMemoryEmrConnectionRepository)
     observations: ObservationRepository = field(default_factory=InMemoryObservationRepository)
     audit: AuditEventRepository = field(default_factory=InMemoryAuditEventRepository)
-    _pending: PendingAuthStore = field(default_factory=dict)
+    _pending: PendingAuthStore = field(default_factory=InMemoryPendingAuthStore)
 
     async def start_connect(
         self, *, patient_id: uuid.UUID, fhir_base: str, provider_name: str | None
@@ -114,8 +125,12 @@ class EmrService:
 
         verifier = generate_code_verifier()
         state = pysecrets.token_urlsafe(32)
-        self._pending[state] = _PendingAuth(
-            connection_id=record.id, code_verifier=verifier, token_endpoint=token_endpoint
+        await self._pending.put(
+            state,
+            PendingAuth(
+                connection_id=record.id, code_verifier=verifier, token_endpoint=token_endpoint
+            ),
+            now=datetime.now(UTC),
         )
         url = build_authorize_url(
             authorization_endpoint=authorization_endpoint,
@@ -128,10 +143,14 @@ class EmrService:
         return record, url, state
 
     async def complete_callback(self, *, state: str, code: str) -> ConnectionRecord:
-        """Validate state, exchange the code (PKCE), vault the tokens, activate."""
-        pending = self._pending.pop(state, None)
+        """Validate state, exchange the code (PKCE), vault the tokens, activate.
+
+        `consume` is atomic and single-use: expired states and replays — including
+        two concurrent callbacks racing on the same state — answer the same 404.
+        """
+        pending = await self._pending.consume(state, now=datetime.now(UTC))
         if pending is None:
-            raise EmrError("Unknown or already-used state", status_code=404)
+            raise EmrError("Unknown, expired, or already-used state", status_code=404)
 
         token_response: dict[str, Any] = await self.transport.post_form(
             pending.token_endpoint,
@@ -152,7 +171,7 @@ class EmrService:
         tokens = {"access_token": str(access_token)}
         if token_response.get("refresh_token"):
             tokens["refresh_token"] = str(token_response["refresh_token"])
-        record.token_ref = self.secret_store.put(tokens)
+        record.token_ref = await self.secret_store.put(tokens)
         record.patient_fhir_id = (
             str(token_response["patient"]) if token_response.get("patient") else None
         )
@@ -177,11 +196,11 @@ class EmrService:
         if record.token_ref is None or record.patient_fhir_id is None:
             raise EmrError("Connection is missing tokens or patient id", status_code=409)
 
-        tokens = self.secret_store.get(record.token_ref)
+        tokens = await self.secret_store.get(record.token_ref)
         if tokens is None:
-            # The connection row is durable but its vaulted tokens are process-local
-            # until the secret-manager adapter lands: after a restart the reference
-            # dangles. Tell the patient to re-link instead of a bare 500 (review
+            # A dangling reference: tokens vaulted in a process-local store before a
+            # restart, or ciphertext an unconfigured/rotated SECRET_STORE_KEY can no
+            # longer open. Tell the patient to re-link instead of a bare 500 (review
             # finding).
             raise EmrError(
                 "EMR tokens are no longer available on this server; please reconnect your EMR",

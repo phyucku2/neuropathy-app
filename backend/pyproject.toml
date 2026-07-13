@@ -20,6 +20,9 @@ dependencies = [
                                  # >=5.1 for its decompression-output limits (ADR-0014)
     "httpx>=0.27",                   # EMR transport (BSD)
     "pyjwt[crypto]>=2.8",            # SMART Backend Services client assertion (MIT)
+    "cryptography>=42",              # Fernet encryption for the DB token vault, ADR-0017
+                                 # (Apache-2.0 OR BSD-3-Clause; was already a transitive
+                                 # dep via pyjwt[crypto], now a direct import)
     "argon2-cffi>=23.1",             # password hashing, Argon2id (MIT)
     "email-validator>=2.1",          # pydantic EmailStr (CC0/Unlicense)
 ]

@@ -24,6 +24,18 @@ class AuditEventRepository(Protocol):
         """Events touching one patient's record, oldest first."""
         ...
 
+    async def count_actor_events_since(
+        self, *, actor_id: uuid.UUID, action: str, since: datetime
+    ) -> int:
+        """How many events one actor produced for one action at/after `since`.
+
+        This makes the append-only audit log double as the durable sliding-window
+        rate-limit counter (ADR-0017): every accepted invitation is already exactly
+        one 'invite_patient' event, so no separate rate-limit table can drift from
+        the audited truth.
+        """
+        ...
+
 
 class InMemoryAuditEventRepository:
     """List-backed store for unit tests and DB-less development."""
@@ -43,3 +55,12 @@ class InMemoryAuditEventRepository:
     async def list_for_patient(self, patient_id: uuid.UUID) -> list[AuditEvent]:
         rows = [e for e in self._events if e.patient_id == patient_id]
         return sorted(rows, key=lambda e: e.occurred_at)
+
+    async def count_actor_events_since(
+        self, *, actor_id: uuid.UUID, action: str, since: datetime
+    ) -> int:
+        return sum(
+            1
+            for e in self._events
+            if e.actor_id == actor_id and e.action == action and e.occurred_at >= since
+        )

@@ -1,6 +1,8 @@
 # Secrets / env — never commit
 .env
 .env.*
+# ...but the template (placeholders only, never real values) is part of the repo.
+!.env.example
 *.pem
 *.key
 

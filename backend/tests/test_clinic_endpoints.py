@@ -22,12 +22,15 @@ from app.repositories.clinic_connection import (
     DuplicateLiveConnectionError,
     InMemoryClinicConnectionRepository,
 )
-from app.repositories.user import UserRecord
+from app.repositories.user import InMemoryUserRepository, UserRecord
 from app.services.auth import AuthService
 from app.services.clinic import ClinicService
+from app.services.rate_limit import RateLimitExceededError
 
 NOW = datetime.now(UTC)
-BOOTSTRAP = {"X-Bootstrap-Token": "test-bootstrap-value"}
+# ≥ 32 chars — the settings-load minimum a real deployment must meet (ADR-0017).
+BOOTSTRAP_TOKEN = "synthetic-bootstrap-token-0123456789abcdef"
+BOOTSTRAP = {"X-Bootstrap-Token": BOOTSTRAP_TOKEN}
 
 
 @pytest.fixture()
@@ -39,7 +42,7 @@ def clinic_service() -> ClinicService:
 def client(clinic_service: ClinicService, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     # Auth and clinic flows share ONE user store, exactly like the deps wiring does.
     auth = AuthService(secret="endpoint-test-secret", users=clinic_service.users)
-    monkeypatch.setattr(settings, "ops_bootstrap_token", "test-bootstrap-value")
+    monkeypatch.setattr(settings, "ops_bootstrap_token", BOOTSTRAP_TOKEN)
     app.dependency_overrides[get_auth_service] = lambda: auth
     app.dependency_overrides[get_clinic_service] = lambda: clinic_service
     try:
@@ -257,6 +260,50 @@ def test_failed_join_of_existing_clinic_keeps_the_clinic(
     assert len(clinic_service.clinics._clinics) == 1  # the joined clinic survives
 
 
+def test_failed_bootstrap_attempts_are_audited_without_token_material(
+    client: TestClient, clinic_service: ClinicService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every FAILED bootstrap attempt writes a bootstrap_denied audit event (ADR-0017)
+    recording only the failure shape — never the presented or configured token."""
+    body = {
+        "email": "dr@example.com",
+        "password": "a-strong-password",
+        "display_name": "Dr",
+        "clinic_name": "C",
+    }
+    assert (
+        client.post(
+            "/clinic/clinicians", headers={"X-Bootstrap-Token": "wrong-token"}, json=body
+        ).status_code
+        == 403
+    )
+    assert client.post("/clinic/clinicians", json=body).status_code == 403
+    monkeypatch.setattr(settings, "ops_bootstrap_token", None)
+    assert client.post("/clinic/clinicians", headers=BOOTSTRAP, json=body).status_code == 403
+
+    denied = [e for e in clinic_service.audit._events if e.action == "bootstrap_denied"]
+    assert [e.detail for e in denied] == [
+        {"configured": True, "token_presented": True},  # wrong token
+        {"configured": True, "token_presented": False},  # missing token
+        {"configured": False, "token_presented": True},  # gate unconfigured (fail closed)
+    ]
+    for event in denied:
+        assert event.actor_id is None
+        assert event.actor_role == "ops"
+        assert event.patient_id is None
+        assert "wrong-token" not in str(event.detail)
+        assert BOOTSTRAP_TOKEN not in str(event.detail)
+
+
+def test_successful_bootstrap_writes_no_denied_event(
+    client: TestClient, clinic_service: ClinicService
+) -> None:
+    _create_clinician(client)
+    actions = [e.action for e in clinic_service.audit._events]
+    assert "create_clinician" in actions
+    assert "bootstrap_denied" not in actions
+
+
 # ---------------------------------------------------------------- invitations
 
 
@@ -399,6 +446,81 @@ async def test_panel_defense_in_depth_skips_unconsented_and_userless_rows() -> N
         )
     )
     assert await service.panel(clinic_id=clinic_id) == []
+
+
+# ---------------------------------------------------------------- rate limiting (ADR-0017)
+
+
+def test_invitations_over_budget_answer_429_and_audit_counts_only(
+    client: TestClient, clinic_service: ClinicService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Over the sliding-window budget every invitation — matched or unmatched alike —
+    answers a byte-identical friendly 429, audited with counts only, never the email."""
+    monkeypatch.setattr(settings, "invite_rate_limit_max", 2)
+    clinician, clinic_id, clinician_user_id = _create_clinician(client)
+    _register_patient(client, email="real@example.com")
+
+    for email in ("real@example.com", "nobody@example.com"):  # spends the budget of 2
+        resp = client.post("/clinic/invitations", headers=clinician, json={"email": email})
+        assert resp.status_code == 202
+    refused_matched = client.post(
+        "/clinic/invitations", headers=clinician, json={"email": "real@example.com"}
+    )
+    refused_unmatched = client.post(
+        "/clinic/invitations", headers=clinician, json={"email": "unknown@example.com"}
+    )
+    assert refused_matched.status_code == refused_unmatched.status_code == 429
+    # Byte-identical refusals: a 429 must not become the new enumeration oracle.
+    assert refused_matched.content == refused_unmatched.content
+    assert "try again" in refused_matched.json()["detail"]  # friendly, retriable
+
+    refusals = [e for e in clinic_service.audit._events if e.action == "rate_limited"]
+    assert len(refusals) == 2
+    for event in refusals:
+        assert event.actor_id == clinician_user_id
+        assert event.actor_role == "clinician"
+        assert event.patient_id is None  # the email was never resolved to a patient
+        assert event.detail == {"clinic_id": str(clinic_id), "limit": 2, "window_seconds": 3600}
+        assert "example.com" not in str(event.detail)  # counts only, never the address
+
+
+def test_rate_limit_budget_is_per_clinician(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "invite_rate_limit_max", 1)
+    clinician_a, _, _ = _create_clinician(client)
+    clinician_b, _, _ = _create_clinician(client, email="dr-b@example.com", clinic_name="Other")
+    invite = {"email": "somebody@example.com"}
+    assert client.post("/clinic/invitations", headers=clinician_a, json=invite).status_code == 202
+    assert client.post("/clinic/invitations", headers=clinician_a, json=invite).status_code == 429
+    # Another clinician's budget is untouched by A's exhaustion.
+    assert client.post("/clinic/invitations", headers=clinician_b, json=invite).status_code == 202
+
+
+async def test_rate_limited_invitation_never_looks_up_the_email(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """THE non-enumeration ordering (ADR-0017): the limiter fires BEFORE the email
+    lookup, so a refusal cannot depend on — or leak — whether the address matches."""
+
+    class LookupCountingUsers(InMemoryUserRepository):
+        def __init__(self) -> None:
+            super().__init__()
+            self.email_lookups = 0
+
+        async def get_by_email(self, email: str) -> UserRecord | None:
+            self.email_lookups += 1
+            return await super().get_by_email(email)
+
+    monkeypatch.setattr(settings, "invite_rate_limit_max", 0)  # every attempt refused
+    users = LookupCountingUsers()
+    service = ClinicService(users=users)
+    with pytest.raises(RateLimitExceededError):
+        await service.invite_patient(
+            clinic_id=uuid.uuid4(), actor_id=uuid.uuid4(), email="probe@example.com"
+        )
+    assert users.email_lookups == 0  # refused before the address was ever resolved
+    assert [e.action for e in service.audit._events] == ["rate_limited"]
 
 
 # ---------------------------------------------------------------- consent lifecycle

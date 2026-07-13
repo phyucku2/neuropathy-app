@@ -10,6 +10,7 @@ run. All data is synthetic — no real patient data (CLAUDE.md §5).
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import uuid
 from collections.abc import Iterator
@@ -22,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.api import deps
 from app.core.config import settings
+from app.emr.service import InMemorySecretStore
 from app.ingestion.labs import lab_result_to_observation
 from app.main import create_app
 from app.models.observation import DataOrigin
@@ -32,6 +34,8 @@ from app.repositories.postgres import (
     PostgresClinicRepository,
     PostgresObservationRepository,
     PostgresPatientCapabilityRepository,
+    PostgresPendingAuthStore,
+    PostgresSecretStore,
     PostgresUserRepository,
 )
 from app.schemas.lab import LabResultIn, LabStatus
@@ -51,6 +55,7 @@ def _reset_process_singletons() -> None:
     deps._process_jwt_secret.cache_clear()
     deps._process_secret_store.cache_clear()
     deps._process_pending_auth.cache_clear()
+    deps._process_fernet.cache_clear()
     deps._process_transport.cache_clear()
 
 
@@ -256,14 +261,20 @@ def test_in_memory_fallback_serves_requests_without_a_database(
 
 def test_db_mode_services_are_request_scoped_but_share_process_state() -> None:
     """With a session, providers build fresh services on Postgres repositories while
-    OAuth pending state, the token vault, and the JWT secret stay process-wide."""
+    the JWT secret stays process-wide. OAuth pending state is DB-backed per request
+    (ADR-0017); the token vault WITHOUT a key falls back to the shared process store
+    (fail closed — never plaintext in the DB)."""
     session = cast(AsyncSession, object())
     emr_a = deps.get_emr_service(session)
     emr_b = deps.get_emr_service(session)
     assert emr_a is not emr_b  # request-scoped construction
     assert isinstance(emr_a.observations, PostgresObservationRepository)
+    # Pending auth is durable: DB-backed store per request, not a process dict.
+    assert isinstance(emr_a._pending, PostgresPendingAuthStore)
+    assert emr_a._pending is not emr_b._pending
+    # No SECRET_STORE_KEY here: both requests share the fail-closed process vault.
+    assert isinstance(emr_a.secret_store, InMemorySecretStore)
     assert emr_a.secret_store is emr_b.secret_store  # tokens survive across requests
-    assert emr_a._pending is emr_b._pending  # connect/callback span requests
 
     auth_a = deps.get_auth_service(session)
     auth_b = deps.get_auth_service(session)
@@ -296,12 +307,47 @@ def test_db_mode_uses_the_configured_jwt_secret(monkeypatch: pytest.MonkeyPatch)
     assert deps.get_auth_service(session).secret == "configured-secret"
 
 
+def test_db_mode_with_a_key_uses_the_encrypted_postgres_vault(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With SECRET_STORE_KEY configured, DB mode vaults tokens encrypted at rest —
+    a request-scoped PostgresSecretStore over the one process-parsed key (ADR-0017)."""
+    from cryptography.fernet import Fernet
+
+    monkeypatch.setattr(settings, "secret_store_key", Fernet.generate_key().decode())
+    _reset_process_singletons()
+    session = cast(AsyncSession, object())
+    emr_a = deps.get_emr_service(session)
+    emr_b = deps.get_emr_service(session)
+    assert isinstance(emr_a.secret_store, PostgresSecretStore)
+    assert isinstance(emr_b.secret_store, PostgresSecretStore)
+    assert emr_a.secret_store is not emr_b.secret_store  # bound to each request's session
+
+
+def test_db_mode_without_a_key_logs_and_keeps_the_process_vault(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Fail closed (ADR-0017): no key means the in-memory vault — with a clear
+    warning — and NEVER plaintext token rows in the database."""
+    monkeypatch.setattr(settings, "secret_store_key", None)
+    monkeypatch.setattr(settings, "database_url", "postgresql+asyncpg://synthetic-only/db")
+    _reset_process_singletons()
+    with caplog.at_level(logging.WARNING):
+        assert deps._process_fernet() is None
+    assert any("SECRET_STORE_KEY" in record.message for record in caplog.records)
+    session = cast(AsyncSession, object())
+    assert deps.get_emr_service(session).secret_store is deps._process_secret_store()
+
+
 def test_without_a_session_the_cached_singletons_serve() -> None:
     """The in-memory contract is untouched: no session -> the same instances forever."""
     assert deps.get_auth_service() is deps.get_auth_service()
     assert deps.get_emr_service() is deps.get_emr_service()
     assert deps.get_clinic_service() is deps.get_clinic_service()
     assert deps.get_capability_service() is deps.get_capability_service()
+    # In-memory mode keeps the process-level pending store: connect and callback
+    # still meet in one process (the ADR-0017 DB store is a DB-mode concern).
+    assert deps.get_emr_service()._pending is deps._process_pending_auth()
     # The clinic singleton reads/writes the SAME stores auth and EMR use, so a
     # clinician sees exactly the data the patient's own endpoints wrote.
     clinic = deps.get_clinic_service()

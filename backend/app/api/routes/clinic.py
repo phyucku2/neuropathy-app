@@ -23,6 +23,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi.responses import JSONResponse
 
 from app.api.deps import AuthDep, ClinicianUserDep, ClinicServiceDep, CurrentUser
 from app.api.routes.ingestion import observation_to_item
@@ -41,26 +42,44 @@ from app.schemas.ingestion import ObservationPage
 from app.schemas.trajectory import Trajectory
 from app.services.auth import AuthApiError
 from app.services.clinic import ClinicService
+from app.services.rate_limit import RateLimitExceededError
 from app.services.trajectory import compute_patient_trajectory
 
 router = APIRouter(prefix="/clinic", tags=["clinic"])
 
 
-def _require_bootstrap_token(provided: str | None) -> None:
+async def _bootstrap_denial(provided: str | None, service: ClinicService) -> JSONResponse | None:
     """Ops gate for clinician provisioning: fail closed when unconfigured.
 
-    Clinicians are provisioned, never self-registered (ADR-0010). Until a dedicated
-    ops-auth surface exists, provisioning requires the settings-provided
-    OPS_BOOTSTRAP_TOKEN; no token configured means no provisioning at all. Constant-
-    time comparison, same 403 for missing and wrong tokens.
+    Clinicians are provisioned, never self-registered (ADR-0010). Until the dedicated
+    ops-auth surface replaces this gate (ADR-0017), provisioning requires the
+    settings-provided OPS_BOOTSTRAP_TOKEN (min length enforced at settings load); no
+    token configured means no provisioning at all. Constant-time comparison, same 403
+    for missing and wrong tokens — and every FAILED attempt is audited (no token
+    material, only which failure class) so brute-forcing the gate leaves a trail.
+
+    The denial is RETURNED, not raised: an HTTPException would propagate through the
+    request-transaction dependency and roll the just-written audit event back in DB
+    mode; a returned response commits it.
     """
     configured = settings.ops_bootstrap_token
     if (
-        not configured
-        or provided is None
-        or not pysecrets.compare_digest(configured.encode(), provided.encode())
+        configured
+        and provided is not None
+        and pysecrets.compare_digest(configured.encode(), provided.encode())
     ):
-        raise HTTPException(status_code=403, detail="Bootstrap token required")
+        return None
+    await service.audit.add(
+        AuditEvent(
+            actor_id=None,
+            actor_role="ops",
+            action="bootstrap_denied",
+            patient_id=None,
+            # Never the tokens themselves — only the shape of the failure.
+            detail={"configured": bool(configured), "token_presented": provided is not None},
+        )
+    )
+    return JSONResponse(status_code=403, content={"detail": "Bootstrap token required"})
 
 
 @router.post("/clinicians", response_model=ClinicianOut, status_code=201)
@@ -69,10 +88,12 @@ async def create_clinician(
     service: ClinicServiceDep,
     auth: AuthDep,
     x_bootstrap_token: Annotated[str | None, Header()] = None,
-) -> ClinicianOut:
+) -> ClinicianOut | JSONResponse:
     """Provision a clinician account (ops/bootstrap): join an existing clinic by id
     or found a new one by name."""
-    _require_bootstrap_token(x_bootstrap_token)
+    denial = await _bootstrap_denial(x_bootstrap_token, service)
+    if denial is not None:
+        return denial
     founded = body.clinic_id is None
     if body.clinic_id is not None:
         clinic = await service.clinics.get(body.clinic_id)
@@ -118,16 +139,29 @@ async def create_clinician(
 @router.post("/invitations", response_model=InvitationOut, status_code=202)
 async def invite_patient(
     body: InvitationIn, current: ClinicianUserDep, service: ClinicServiceDep
-) -> InvitationOut:
+) -> InvitationOut | JSONResponse:
     """Invite a patient by email to connect to this clinician's clinic.
 
     NON-ENUMERATING: the 202 response is byte-identical whether or not the email
     matches a patient account. A match creates a pending, clinic-initiated
-    connection the patient must consent to before any data flows (ADR-0005)."""
+    connection the patient must consent to before any data flows (ADR-0005). Over
+    the per-clinician budget the answer is 429 (ADR-0017) — the limiter fires before
+    the email lookup, so the refusal reveals nothing about the address either. The
+    429 is returned rather than raised so the refusal's audit event commits with the
+    request transaction instead of rolling back with an HTTPException."""
     assert current.clinic_id is not None  # guaranteed by require_clinician
-    await service.invite_patient(
-        clinic_id=current.clinic_id, actor_id=current.user_id, email=body.email
-    )
+    try:
+        await service.invite_patient(
+            clinic_id=current.clinic_id, actor_id=current.user_id, email=body.email
+        )
+    except RateLimitExceededError:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "detail": "Too many invitations from this account right now — "
+                "please try again in a little while"
+            },
+        )
     return InvitationOut()
 
 

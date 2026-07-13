@@ -53,12 +53,15 @@ at startup. Before the first boot with a database — and after every schema cha
 a human runs `alembic upgrade head` against that `DATABASE_URL`. Booting against an
 un-migrated database fails at the first query, by design.
 
-Known limitation (even in DB mode): OAuth *pending* auth states and the token secret
-store are process-level in-memory singletons — a durable secret-manager adapter and a
-DB-backed pending store are follow-ups. Configure `JWT_SECRET` so issued tokens
-survive restarts and multiple workers. Clinician provisioning (`POST /clinic/clinicians`,
-ADR-0012) requires `OPS_BOOTSTRAP_TOKEN`; leaving it unset keeps the endpoint failing
-closed (403).
+In DB mode, OAuth *pending* auth states live in the durable, single-use `pending_auth`
+table, and — when `SECRET_STORE_KEY` (a Fernet key; see `.env.example`) is configured —
+EMR OAuth tokens live encrypted at rest in the `secret` table (ADR-0017). Without that
+key the token vault stays a per-process in-memory singleton, fail closed: plaintext
+tokens are never written to the database, and tokens then do not survive a restart.
+Configure `JWT_SECRET` so issued tokens survive restarts and multiple workers.
+Clinician provisioning (`POST /clinic/clinicians`, ADR-0012) requires
+`OPS_BOOTSTRAP_TOKEN` (min 32 chars, enforced at startup — ADR-0017); leaving it unset
+keeps the endpoint failing closed (403).
 
 ## Run locally
 
