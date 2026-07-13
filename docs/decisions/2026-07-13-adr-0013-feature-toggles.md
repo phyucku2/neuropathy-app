@@ -69,12 +69,34 @@ A code-registry + lazy rows + one effective-state predicate, with five postures:
 
 **Enforcement seam.** `require_capability(key)` (app/api/deps.py) is a route
 dependency that answers 409 "This feature is turned off" when the capability is
-effectively off for the authenticated patient. First two consumers: `POST /adl`
-(`ingest_adl`) and `POST /labs` (`ingest_labs`). Deliberately NOT wired in this PR:
-auth, connections (revocation must never be blockable by a toggle), trajectory reads
-(`emr_connect` gating on /emr/*, `ai_narrative` gating of the narrator, and
+effectively off for the authenticated patient. Consumers: `POST /adl`
+(`ingest_adl`), `POST /labs` and `POST /emr/connections/{id}/pull` (both
+`ingest_labs` — the pull writes lab Observations, the same data class as the upload,
+so one toggle governs both writers; adversarial review found the ungated pull would
+have defeated a clinician's `ingest_labs=off` order and the kill switch).
+Deliberately NOT wired in this PR: auth, connections (revocation must never be
+blockable by a toggle — including EMR revoke), trajectory reads (`emr_connect`
+gating of the connect flow itself, `ai_narrative` gating of the narrator, and
 `share_with_clinic` gating of clinician reads are the follow-ups — each needs its
 own interaction decision with existing gates before adoption).
+
+**Unwired toggles are read-only (`enforced` flag).** A settable toggle whose feature
+ignores it is a false promise — a patient who switched `ai_narrative` off while the
+narrator kept running would be misled about what is processed and disclosed
+(adversarial review, high). Each `CapabilitySpec` therefore carries `enforced`;
+writes to `enforced=False` keys (`emr_connect`, `ai_narrative`,
+`share_with_clinic`) answer 409 "not changeable yet" for patients AND clinicians,
+and the flag is exposed in `GET /capabilities` so clients render them read-only.
+Each key flips to `enforced=True` in the PR that wires its consumer.
+
+**Expiry pairs only with enable.** `active=false` + `expires_at` would read as
+"suspended until <date>" but expiry only ever deactivates — the schema refuses the
+combination (422) instead of storing a false promise (adversarial review).
+
+**Authority check is race-free in Postgres.** The patient-write path judges
+`is_clinically_managed` with a FOR SHARE read (`list_for_patient(for_share=True)`),
+so a toggle write cannot slip past a concurrent consent grant: it either commits
+strictly before the consent or sees it and is refused (adversarial review).
 
 ## Consequences
 

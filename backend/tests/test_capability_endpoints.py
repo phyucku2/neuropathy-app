@@ -168,22 +168,62 @@ def test_b2c_patient_sees_all_defaults_on(client: TestClient) -> None:
 
 def test_b2c_patient_toggles_own_capability(client: TestClient) -> None:
     patient, _ = _register_patient(client)
-    off = client.put("/capabilities/ai_narrative", headers=patient, json={"active": False})
+    off = client.put("/capabilities/ingest_adl", headers=patient, json={"active": False})
     assert off.status_code == 200
     assert off.json() == {
-        "key": "ai_narrative",
-        "name": "AI trajectory narration",
+        "key": "ingest_adl",
+        "name": "Daily function check-in",
         "active": False,
         "managed_by": "patient",
         "expires_at": None,
+        "enforced": True,
     }
     states = _states(client, patient)
-    assert states["ai_narrative"]["active"] is False
-    assert states["ingest_adl"]["active"] is True  # others untouched
+    assert states["ingest_adl"]["active"] is False
+    assert states["ingest_labs"]["active"] is True  # others untouched
 
-    on = client.put("/capabilities/ai_narrative", headers=patient, json={"active": True})
+    on = client.put("/capabilities/ingest_adl", headers=patient, json={"active": True})
     assert on.status_code == 200 and on.json()["active"] is True
-    assert _states(client, patient)["ai_narrative"]["active"] is True
+    assert _states(client, patient)["ingest_adl"]["active"] is True
+
+
+def test_unenforced_toggles_are_read_only(client: TestClient) -> None:
+    """A stored "off" that the feature ignores would be a false promise: keys whose
+    consumers are not wired yet are visible (enforced=false) but refuse writes —
+    for the patient AND for the clinician (review finding)."""
+    patient, _ = _register_patient(client)
+    states = _states(client, patient)
+    assert states["ai_narrative"]["enforced"] is False
+    assert states["share_with_clinic"]["enforced"] is False
+    assert states["emr_connect"]["enforced"] is False
+    assert states["ingest_labs"]["enforced"] is True
+    assert states["ingest_adl"]["enforced"] is True
+
+    refused = client.put("/capabilities/ai_narrative", headers=patient, json={"active": False})
+    assert refused.status_code == 409
+    assert "not changeable yet" in refused.json()["detail"]
+
+    clinician, _, _ = _create_clinician(client)
+    _, patient_id, _ = _connect_consented_patient(client, clinician, email="managed@example.com")
+    refused = client.put(
+        f"/clinic/patients/{patient_id}/capabilities/share_with_clinic",
+        headers=clinician,
+        json={"active": False},
+    )
+    assert refused.status_code == 409
+
+
+def test_clinician_cannot_pair_expiry_with_disable(client: TestClient) -> None:
+    """Expiry deactivates, it never re-enables: active=false + expires_at would read
+    as "suspended until <date>" but silently be permanent-off — refused (422)."""
+    clinician, _, _ = _create_clinician(client)
+    _, patient_id, _ = _connect_consented_patient(client, clinician)
+    resp = client.put(
+        f"/clinic/patients/{patient_id}/capabilities/ingest_adl",
+        headers=clinician,
+        json={"active": False, "expires_at": (NOW + timedelta(days=30)).isoformat()},
+    )
+    assert resp.status_code == 422
 
 
 def test_patient_cannot_smuggle_an_expiry(client: TestClient) -> None:
@@ -446,7 +486,7 @@ async def test_every_toggle_change_is_audited(
     client.put(
         f"/clinic/patients/{patient_id}/capabilities/ingest_adl",
         headers=clinician,
-        json={"active": False, "expires_at": expiry},
+        json={"active": True, "expires_at": expiry},
     )
     client.delete(f"/connections/{connection_id}", headers=patient)
     me = client.get("/auth/me", headers=patient).json()
@@ -463,7 +503,7 @@ async def test_every_toggle_change_is_audited(
     assert by_clinician.actor_role == "clinician"
     assert by_clinician.patient_id == patient_id
     assert by_clinician.detail["key"] == "ingest_adl"
-    assert by_clinician.detail["active"] is False
+    assert by_clinician.detail["active"] is True
     assert by_clinician.detail["set_by"] == "clinician"
     assert by_clinician.detail["expires_at"] is not None
     assert by_clinician.detail["connection_id"] == connection_id

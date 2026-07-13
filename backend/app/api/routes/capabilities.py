@@ -39,6 +39,7 @@ def _to_out(state: EffectiveCapability) -> CapabilityStateOut:
         active=state.active,
         managed_by=state.managed_by,
         expires_at=state.expires_at,
+        enforced=state.enforced,
     )
 
 

@@ -131,12 +131,18 @@ class PostgresClinicConnectionRepository:
     async def get(self, connection_id: uuid.UUID) -> ClinicConnection | None:
         return await self._session.get(ClinicConnection, connection_id)
 
-    async def list_for_patient(self, patient_id: uuid.UUID) -> list[ClinicConnection]:
+    async def list_for_patient(
+        self, patient_id: uuid.UUID, *, for_share: bool = False
+    ) -> list[ClinicConnection]:
         stmt = (
             select(ClinicConnection)
             .where(ClinicConnection.patient_id == patient_id)
             .order_by(ClinicConnection.created_at)
         )
+        if for_share:
+            # FOR SHARE: blocks a concurrent consent grant's row UPDATE until this
+            # transaction ends, closing the authority-check TOCTOU (ADR-0013).
+            stmt = stmt.with_for_update(read=True)
         return list((await self._session.scalars(stmt)).all())
 
     async def list_active_for_clinic(self, clinic_id: uuid.UUID) -> list[ClinicConnection]:

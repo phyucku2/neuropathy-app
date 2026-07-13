@@ -50,6 +50,7 @@ __all__ = [
     "CapabilityApiError",
     "CapabilityService",
     "CapabilitySpec",
+    "CapabilityNotEnforcedError",
     "CapabilityUnavailableError",
     "ClinicallyManagedError",
     "EffectiveCapability",
@@ -63,23 +64,34 @@ ManagedBy = Literal["patient", "clinic"]
 
 @dataclass(frozen=True)
 class CapabilitySpec:
-    """One registry entry: the stable key, display name, and no-row default."""
+    """One registry entry: the stable key, display name, no-row default, and whether
+    the toggle is actually wired to its feature yet (`enforced`)."""
 
     key: str
     name: str
     default: bool
+    enforced: bool
 
 
 # The canonical registry — every feature the app ships today. Defaults are all True:
 # absence of a PatientCapability row means "works exactly as before toggles existed"
 # (back-compat, ADR-0013). The DB row's `available` flag is the ops kill switch; the
 # default lives here in code because it is a product decision, not per-deployment state.
+# `enforced=False` keys are visible but NOT yet settable: a stored "off" the feature
+# ignores would be a false promise about what is processed/disclosed (review finding);
+# each key flips to enforced=True in the PR that wires its consumer.
 CAPABILITIES: tuple[CapabilitySpec, ...] = (
-    CapabilitySpec(key="ingest_labs", name="Lab result upload", default=True),
-    CapabilitySpec(key="ingest_adl", name="Daily function check-in", default=True),
-    CapabilitySpec(key="emr_connect", name="Medical record connection", default=True),
-    CapabilitySpec(key="ai_narrative", name="AI trajectory narration", default=True),
-    CapabilitySpec(key="share_with_clinic", name="Share data with my clinic", default=True),
+    CapabilitySpec(key="ingest_labs", name="Lab result upload", default=True, enforced=True),
+    CapabilitySpec(key="ingest_adl", name="Daily function check-in", default=True, enforced=True),
+    CapabilitySpec(
+        key="emr_connect", name="Medical record connection", default=True, enforced=False
+    ),
+    CapabilitySpec(
+        key="ai_narrative", name="AI trajectory narration", default=True, enforced=False
+    ),
+    CapabilitySpec(
+        key="share_with_clinic", name="Share data with my clinic", default=True, enforced=False
+    ),
 )
 
 _SPEC_BY_KEY: dict[str, CapabilitySpec] = {spec.key: spec for spec in CAPABILITIES}
@@ -113,6 +125,15 @@ class ClinicallyManagedError(CapabilityApiError):
         )
 
 
+class CapabilityNotEnforcedError(CapabilityApiError):
+    """Writes to a not-yet-wired toggle are refused: storing an "off" the feature
+    would ignore misleads the patient about what is actually processed or disclosed
+    (review finding). The key becomes settable when its consumer is wired."""
+
+    def __init__(self, key: str) -> None:
+        super().__init__(f"This setting is not changeable yet: {key}", status_code=409)
+
+
 @dataclass(frozen=True)
 class EffectiveCapability:
     """One capability's server-judged state for one patient."""
@@ -122,6 +143,7 @@ class EffectiveCapability:
     active: bool
     managed_by: ManagedBy
     expires_at: datetime | None
+    enforced: bool
 
 
 def is_effectively_active(
@@ -176,12 +198,17 @@ class CapabilityService:
                 assert row is not None  # the duplicate error guarantees the winner's row
         return row, spec
 
-    async def is_clinically_managed(self, patient_id: uuid.UUID) -> bool:
+    async def is_clinically_managed(self, patient_id: uuid.UUID, *, lock: bool = False) -> bool:
         """THE authority rule (ADR-0013): clinically managed iff at least one clinic
         connection currently permits transmission — judged per connection by
         `may_transmit_to_clinic`, never re-derived. Revocation flips authority back
-        to the patient instantly."""
-        connections = await self.connections.list_for_patient(patient_id)
+        to the patient instantly.
+
+        `lock=True` (write flows) takes a FOR SHARE read in Postgres so the check
+        cannot race a concurrent consent grant — the patient's toggle write either
+        commits strictly before consent or sees it and is refused (review finding).
+        """
+        connections = await self.connections.list_for_patient(patient_id, for_share=lock)
         return any(may_transmit_to_clinic(connection) for connection in connections)
 
     async def effective_states(
@@ -207,6 +234,7 @@ class CapabilityService:
                     active=is_effectively_active(capability, row, default=spec.default, now=now),
                     managed_by=managed_by,
                     expires_at=row.expires_at if row is not None else None,
+                    enforced=spec.enforced,
                 )
             )
         return states
@@ -235,9 +263,11 @@ class CapabilityService:
         order-like. Patients can never set expiry; their write clears any stale
         clinician expiry along with the row it rode in on."""
         capability, spec = await self._ensure(key)
+        if not spec.enforced:
+            raise CapabilityNotEnforcedError(key)
         if not capability.available:
             raise CapabilityUnavailableError(key)
-        if await self.is_clinically_managed(patient_id):
+        if await self.is_clinically_managed(patient_id, lock=True):
             raise ClinicallyManagedError()
         row = await self.patient_capabilities.upsert(
             patient_id=patient_id,
@@ -255,6 +285,7 @@ class CapabilityService:
             active=is_effectively_active(capability, row, default=spec.default, now=now),
             managed_by="patient",
             expires_at=None,
+            enforced=spec.enforced,
         )
 
     async def set_for_clinician(
@@ -277,6 +308,8 @@ class CapabilityService:
         if not may_transmit_to_clinic(connection):
             return None
         capability, spec = await self._ensure(key)
+        if not spec.enforced:
+            raise CapabilityNotEnforcedError(key)
         if not capability.available:
             raise CapabilityUnavailableError(key)
         row = await self.patient_capabilities.upsert(
@@ -300,6 +333,7 @@ class CapabilityService:
             active=is_effectively_active(capability, row, default=spec.default, now=now),
             managed_by="clinic",
             expires_at=row.expires_at,
+            enforced=spec.enforced,
         )
 
     async def _audit_change(
