@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import (
     CurrentUser,
     PatientUserDep,
     get_emr_service,
+    require_capability,
 )
 from app.api.deps import (
     EmrServiceDep as ServiceDep,
@@ -114,7 +115,15 @@ async def oauth_callback(
     return _to_out(record)
 
 
-@router.post("/connections/{connection_id}/pull", response_model=PullOut)
+# The pull writes lab Observations — the SAME data class as POST /labs — so the
+# ingest_labs toggle and its kill switch govern both writers (ADR-0013 review
+# finding: an ungated pull would defeat a clinician's ingest_labs=off order).
+# Connect/callback/revoke stay ungated: revocation must never be toggle-blockable.
+@router.post(
+    "/connections/{connection_id}/pull",
+    response_model=PullOut,
+    dependencies=[Depends(require_capability("ingest_labs"))],
+)
 async def pull_labs(
     connection_id: uuid.UUID, service: ServiceDep, current: PatientUserDep
 ) -> PullOut:

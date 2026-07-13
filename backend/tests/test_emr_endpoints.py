@@ -337,3 +337,44 @@ def test_clinician_cannot_use_patient_endpoints(client: TestClient) -> None:
     )
     _sign_in_as(clinician)
     assert client.post("/emr/connect", json={"fhir_base": FHIR_BASE}).status_code == 403
+
+
+async def test_pull_is_gated_by_the_ingest_labs_toggle(client: TestClient) -> None:
+    """EMR pull writes lab Observations — the same data class as POST /labs — so
+    ingest_labs=off refuses it too; an ungated pull would defeat a clinician's
+    ingest_labs=off order and the ops kill switch (ADR-0013 review finding).
+    Revocation stays ungated: turning off a toggle must never trap a connection."""
+    from datetime import UTC, datetime
+
+    from app.api.deps import get_capability_service
+    from app.services.capability import CapabilityService
+
+    capability_service = CapabilityService()
+    assert USER_A.patient_id is not None
+    await capability_service.set_for_patient(
+        patient_id=USER_A.patient_id,
+        actor_id=USER_A.user_id,
+        key="ingest_labs",
+        active=False,
+        now=datetime.now(UTC),
+    )
+    app.dependency_overrides[get_capability_service] = lambda: capability_service
+
+    # The gate fires before the handler: even an unknown connection id answers 409.
+    refused = client.post(f"/emr/connections/{uuid4()}/pull")
+    assert refused.status_code == 409
+    assert "turned off" in refused.json()["detail"]
+    # Revoke is NOT toggle-gated — unknown id keeps answering 404, never 409.
+    assert client.delete(f"/emr/connections/{uuid4()}").status_code == 404
+
+    await capability_service.set_for_patient(
+        patient_id=USER_A.patient_id,
+        actor_id=USER_A.user_id,
+        key="ingest_labs",
+        active=True,
+        now=datetime.now(UTC),
+    )
+    connection_id, state = _connect(client)
+    assert client.get("/emr/callback", params={"state": state, "code": "c"}).status_code == 200
+    resp = client.post(f"/emr/connections/{connection_id}/pull")
+    assert resp.status_code == 200  # re-enabled: the pull works again

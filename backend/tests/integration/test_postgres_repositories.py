@@ -19,20 +19,24 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from app.db.base import Base
 from app.ingestion.labs import lab_result_to_observation
 from app.models.audit import AuditEvent
+from app.models.capability import Actor, Capability
 from app.models.clinic import Clinic
 from app.models.connection import ClinicConnection, ConnectionStatus, Initiator
 from app.models.emr_connection import EmrConnectionStatus
 from app.models.observation import DataOrigin
 from app.models.patient import Patient
 from app.models.user import UserRole
+from app.repositories.capability import DuplicateCapabilityKeyError
 from app.repositories.clinic_connection import DuplicateLiveConnectionError
 from app.repositories.emr_connection import ConnectionRecord
 from app.repositories.postgres import (
     PostgresAuditEventRepository,
+    PostgresCapabilityRepository,
     PostgresClinicConnectionRepository,
     PostgresClinicRepository,
     PostgresEmrConnectionRepository,
     PostgresObservationRepository,
+    PostgresPatientCapabilityRepository,
     PostgresUserRepository,
 )
 from app.repositories.user import UserRecord
@@ -329,6 +333,81 @@ async def test_user_repository_clinician_fields_round_trip(
         assert await repo.get_by_patient_id(uuid.uuid4()) is None
         loaded = await repo.get_by_id(clinician_record.id)
         assert loaded == clinician_record and loaded.clinic_id == clinic.id
+
+
+async def test_capability_repository_round_trip(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """The registry storage under the lazy get-or-create: add/get_by_key/list, the
+    unique key constraint (absorbed via savepoint so the transaction stays usable),
+    and the loaded column defaults."""
+    key = f"synthetic_{uuid.uuid4().hex[:8]}"
+    async with session_factory() as session:
+        repo = PostgresCapabilityRepository(session)
+        capability = await repo.add(Capability(key=key, name="Synthetic capability"))
+        assert capability.available is True  # default loaded on add
+        assert capability.created_at is not None
+        await session.commit()
+
+    async with session_factory() as session:
+        repo = PostgresCapabilityRepository(session)
+        with pytest.raises(DuplicateCapabilityKeyError):
+            await repo.add(Capability(key=key, name="Synthetic capability again"))
+        # The savepoint keeps the transaction usable after the absorbed duplicate.
+        loaded = await repo.get_by_key(key)
+        assert loaded is not None and loaded.id == capability.id
+        assert await repo.get_by_key("never_registered") is None
+        assert key in [c.key for c in await repo.list()]
+
+
+async def test_patient_capability_repository_upsert_round_trip(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """uq_patient_capability under the upsert: the first write inserts, every later
+    write is absorbed by the savepoint and updates the ONE row in place — active,
+    set_by, and expires_at all follow the latest write (the race-losing insert takes
+    exactly this path, mirroring the DuplicateLiveConnectionError absorption)."""
+    expiry = datetime(2026, 8, 1, 9, 0, tzinfo=UTC)
+    async with session_factory() as session:
+        patient_id = await _new_patient(session)
+        capability = await PostgresCapabilityRepository(session).add(
+            Capability(key=f"synthetic_{uuid.uuid4().hex[:8]}", name="Synthetic capability")
+        )
+        repo = PostgresPatientCapabilityRepository(session)
+        first = await repo.upsert(
+            patient_id=patient_id,
+            capability_id=capability.id,
+            active=True,
+            set_by=Actor.patient,
+            expires_at=None,
+        )
+        assert first.created_at is not None  # defaults loaded on add
+        await session.commit()
+
+    async with session_factory() as session:
+        repo = PostgresPatientCapabilityRepository(session)
+        second = await repo.upsert(
+            patient_id=patient_id,
+            capability_id=capability.id,
+            active=False,
+            set_by=Actor.clinician,
+            expires_at=expiry,
+        )
+        assert second.id == first.id  # updated in place, never a second row
+        # The savepoint keeps the transaction usable after the absorbed insert.
+        rows = await repo.list_for_patient(patient_id)
+        assert [r.id for r in rows] == [first.id]
+        await session.commit()
+
+    async with session_factory() as session:
+        repo = PostgresPatientCapabilityRepository(session)
+        loaded = await repo.get(patient_id, capability.id)
+        assert loaded is not None
+        assert loaded.active is False
+        assert loaded.set_by is Actor.clinician
+        assert loaded.expires_at == expiry
+        assert await repo.get(patient_id, uuid.uuid4()) is None
+        assert await repo.list_for_patient(uuid.uuid4()) == []
 
 
 def _autogenerate_diff(connection: Connection) -> list[object]:

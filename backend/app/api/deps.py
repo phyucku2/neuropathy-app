@@ -20,7 +20,9 @@ from __future__ import annotations
 
 import secrets as pysecrets
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from functools import lru_cache
 from typing import Annotated
 
@@ -37,13 +39,16 @@ from app.emr.transport import HttpxTransport
 from app.models.user import UserRole
 from app.repositories.postgres import (
     PostgresAuditEventRepository,
+    PostgresCapabilityRepository,
     PostgresClinicConnectionRepository,
     PostgresClinicRepository,
     PostgresEmrConnectionRepository,
     PostgresObservationRepository,
+    PostgresPatientCapabilityRepository,
     PostgresUserRepository,
 )
 from app.services.auth import AuthService
+from app.services.capability import CapabilityService
 from app.services.clinic import ClinicService
 
 _bearer = HTTPBearer(auto_error=False)
@@ -233,6 +238,46 @@ def get_clinic_service(session: DbSessionDep = None) -> ClinicService:
 
 
 ClinicServiceDep = Annotated[ClinicService, Depends(get_clinic_service)]
+
+
+@lru_cache(maxsize=1)
+def _default_capability_service() -> CapabilityService:
+    """Process-wide CapabilityService for in-memory mode. Connections and audit are
+    the SAME stores the clinic service uses (deps singletons), so toggle authority
+    tracks exactly the consent state the connection endpoints wrote."""
+    clinic = _default_clinic_service()
+    return CapabilityService(connections=clinic.connections, audit=clinic.audit)
+
+
+def get_capability_service(session: DbSessionDep = None) -> CapabilityService:
+    if session is None:
+        return _default_capability_service()
+    return CapabilityService(
+        capabilities=PostgresCapabilityRepository(session),
+        patient_capabilities=PostgresPatientCapabilityRepository(session),
+        connections=PostgresClinicConnectionRepository(session),
+        audit=PostgresAuditEventRepository(session),
+    )
+
+
+CapabilityServiceDep = Annotated[CapabilityService, Depends(get_capability_service)]
+
+
+def require_capability(key: str) -> Callable[[CurrentUser, CapabilityService], Awaitable[None]]:
+    """The enforcement seam (ADR-0013): a dependency that refuses the request (409)
+    when the named capability is effectively off for the authenticated patient.
+
+    Feature endpoints adopt it incrementally:
+    `dependencies=[Depends(require_capability("ingest_adl"))]`. Absence of a toggle
+    row means the registry default, so unwired and never-toggled features behave
+    exactly as before."""
+
+    async def _gate(current: PatientUserDep, service: CapabilityServiceDep) -> None:
+        assert current.patient_id is not None  # guaranteed by require_patient
+        if not await service.is_active(current.patient_id, key, now=datetime.now(UTC)):
+            raise HTTPException(status_code=409, detail="This feature is turned off")
+
+    return _gate
 
 
 @lru_cache(maxsize=1)

@@ -27,9 +27,11 @@ from app.main import create_app
 from app.models.observation import DataOrigin
 from app.repositories.postgres import (
     PostgresAuditEventRepository,
+    PostgresCapabilityRepository,
     PostgresClinicConnectionRepository,
     PostgresClinicRepository,
     PostgresObservationRepository,
+    PostgresPatientCapabilityRepository,
     PostgresUserRepository,
 )
 from app.schemas.lab import LabResultIn, LabStatus
@@ -45,6 +47,7 @@ def _reset_process_singletons() -> None:
     deps._default_auth_service.cache_clear()
     deps._default_emr_service.cache_clear()
     deps._default_clinic_service.cache_clear()
+    deps._default_capability_service.cache_clear()
     deps._process_jwt_secret.cache_clear()
     deps._process_secret_store.cache_clear()
     deps._process_pending_auth.cache_clear()
@@ -145,6 +148,43 @@ def test_registration_survives_a_process_restart(db_url: str) -> None:
 
 
 @requires_postgres
+def test_capability_toggle_survives_a_process_restart(db_url: str) -> None:
+    """Toggle off in one 'process'; after a restart the durable row still refuses the
+    feature (ADR-0013) and the change audit is on file (CLAUDE.md §5)."""
+    email = f"toggle-{uuid.uuid4().hex[:12]}@example.com"
+    with TestClient(create_app()) as first_process:
+        tokens = _register(first_process, email, SYNTHETIC_PASSWORD)
+        headers = _auth_header(tokens["access_token"])
+        me = first_process.get("/auth/me", headers=headers).json()
+        patient_id = uuid.UUID(me["patient_id"])
+        user_id = uuid.UUID(me["user_id"])
+        resp = first_process.put(
+            "/capabilities/ingest_adl", headers=headers, json={"active": False}
+        )
+        assert resp.status_code == 200, resp.text
+
+    _reset_process_singletons()
+
+    with TestClient(create_app()) as second_process:
+        login = second_process.post(
+            "/auth/login", json={"email": email, "password": SYNTHETIC_PASSWORD}
+        )
+        headers = _auth_header(login.json()["access_token"])
+        states = second_process.get("/capabilities", headers=headers).json()["capabilities"]
+        by_key = {c["key"]: c for c in states}
+        assert by_key["ingest_adl"]["active"] is False  # the toggle outlived the restart
+        assert by_key["ingest_labs"]["active"] is True  # absence of a row = default
+        adl = second_process.post(
+            "/adl", headers=headers, json={"walking": 3, "stairs": 2, "balance_confidence": 4}
+        )
+        assert adl.status_code == 409  # the enforcement seam reads the durable row
+
+    # The config-change audit was committed by the request transaction and is durable.
+    events = asyncio.run(_audit_events(db_url, patient_id))
+    assert ("set_capability", user_id) in events
+
+
+@requires_postgres
 def test_observations_persist_and_flow_through_the_trajectory_api(db_url: str) -> None:
     """Repository-ingested observations are visible via GET /trajectory, and the PHI
     read lands in the persisted audit log (CLAUDE.md §5)."""
@@ -240,6 +280,14 @@ def test_db_mode_services_are_request_scoped_but_share_process_state() -> None:
     assert isinstance(clinic_a.observations, PostgresObservationRepository)
     assert isinstance(clinic_a.audit, PostgresAuditEventRepository)
 
+    capability_a = deps.get_capability_service(session)
+    capability_b = deps.get_capability_service(session)
+    assert capability_a is not capability_b  # request-scoped construction
+    assert isinstance(capability_a.capabilities, PostgresCapabilityRepository)
+    assert isinstance(capability_a.patient_capabilities, PostgresPatientCapabilityRepository)
+    assert isinstance(capability_a.connections, PostgresClinicConnectionRepository)
+    assert isinstance(capability_a.audit, PostgresAuditEventRepository)
+
 
 def test_db_mode_uses_the_configured_jwt_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "jwt_secret", "configured-secret")
@@ -253,9 +301,15 @@ def test_without_a_session_the_cached_singletons_serve() -> None:
     assert deps.get_auth_service() is deps.get_auth_service()
     assert deps.get_emr_service() is deps.get_emr_service()
     assert deps.get_clinic_service() is deps.get_clinic_service()
+    assert deps.get_capability_service() is deps.get_capability_service()
     # The clinic singleton reads/writes the SAME stores auth and EMR use, so a
     # clinician sees exactly the data the patient's own endpoints wrote.
     clinic = deps.get_clinic_service()
     assert clinic.users is deps.get_auth_service().users
     assert clinic.observations is deps.get_emr_service().observations
     assert clinic.audit is deps.get_emr_service().audit
+    # The capability singleton judges toggle authority on the SAME connection store
+    # the clinic service maintains, and audits into the same log.
+    capability = deps.get_capability_service()
+    assert capability.connections is clinic.connections
+    assert capability.audit is clinic.audit

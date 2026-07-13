@@ -43,8 +43,16 @@ class ClinicConnectionRepository(Protocol):
         """Fetch a connection by id."""
         ...
 
-    async def list_for_patient(self, patient_id: uuid.UUID) -> list[ClinicConnection]:
-        """All of one patient's connections (every status), oldest first."""
+    async def list_for_patient(
+        self, patient_id: uuid.UUID, *, for_share: bool = False
+    ) -> list[ClinicConnection]:
+        """All of one patient's connections (every status), oldest first.
+
+        `for_share=True` (write flows judging authority) takes a shared row lock in
+        Postgres so a concurrent consent grant cannot slip between the check and the
+        dependent write (ADR-0013 review finding); in-memory mode has no concurrent
+        transactions to defend against and ignores it.
+        """
         ...
 
     async def list_active_for_clinic(self, clinic_id: uuid.UUID) -> list[ClinicConnection]:
@@ -88,7 +96,11 @@ class InMemoryClinicConnectionRepository:
     async def get(self, connection_id: uuid.UUID) -> ClinicConnection | None:
         return self._connections.get(connection_id)
 
-    async def list_for_patient(self, patient_id: uuid.UUID) -> list[ClinicConnection]:
+    async def list_for_patient(
+        self, patient_id: uuid.UUID, *, for_share: bool = False
+    ) -> list[ClinicConnection]:
+        # for_share is a Postgres-transaction concern; single-process dict storage
+        # has nothing to lock.
         rows = [c for c in self._connections.values() if c.patient_id == patient_id]
         return sorted(rows, key=lambda c: c.created_at)
 
