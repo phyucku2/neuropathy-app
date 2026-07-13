@@ -21,9 +21,9 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.api.deps import EmrServiceDep, PatientUserDep
+from app.api.deps import EmrServiceDep, PatientUserDep, require_capability
 from app.ingestion.adl import ADL_CODES, adl_check_in_to_observations, day_bounds_utc
 from app.ingestion.labs import lab_import_key, lab_result_to_observation
 from app.models.audit import AuditEvent
@@ -42,7 +42,14 @@ from app.schemas.lab import LabStatus
 router = APIRouter(tags=["ingestion"])
 
 
-@router.post("/labs", response_model=LabImportOut)
+# The capability gates are the enforcement seam's first two consumers (ADR-0013):
+# server-side toggles refuse the write with 409 when the feature is off; absence of a
+# toggle row means the registry default, so untouched accounts behave exactly as before.
+@router.post(
+    "/labs",
+    response_model=LabImportOut,
+    dependencies=[Depends(require_capability("ingest_labs"))],
+)
 async def import_labs(
     body: LabImportIn, current: PatientUserDep, service: EmrServiceDep
 ) -> LabImportOut:
@@ -128,7 +135,11 @@ def _aware(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value
 
 
-@router.post("/adl", response_model=AdlCheckInOut)
+@router.post(
+    "/adl",
+    response_model=AdlCheckInOut,
+    dependencies=[Depends(require_capability("ingest_adl"))],
+)
 async def record_adl_check_in(
     body: AdlCheckInIn, current: PatientUserDep, service: EmrServiceDep
 ) -> AdlCheckInOut:

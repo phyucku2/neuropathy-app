@@ -20,12 +20,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.models.audit import AuditEvent
+from app.models.capability import Actor, Capability, PatientCapability
 from app.models.clinic import Clinic
 from app.models.connection import ClinicConnection, ConnectionStatus
 from app.models.emr_connection import EmrConnection
 from app.models.observation import Observation, ObservationStatus
 from app.models.patient import Patient
 from app.models.user import User
+from app.repositories.capability import DuplicateCapabilityKeyError
 from app.repositories.clinic_connection import DuplicateLiveConnectionError
 from app.repositories.emr_connection import ConnectionRecord
 from app.repositories.user import DuplicateEmailError, UserRecord
@@ -289,6 +291,97 @@ class PostgresAuditEventRepository:
             select(AuditEvent)
             .where(AuditEvent.patient_id == patient_id)
             .order_by(AuditEvent.occurred_at)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+
+class PostgresCapabilityRepository:
+    """CapabilityRepository over the capability table."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get_by_key(self, key: str) -> Capability | None:
+        stmt = select(Capability).where(Capability.key == key)
+        return (await self._session.scalars(stmt)).first()
+
+    async def add(self, capability: Capability) -> Capability:
+        # A savepoint scopes the flush: when the unique key constraint fires, only
+        # this insert rolls back and the caller's transaction stays usable (the lazy
+        # get-or-create in CapabilityService re-fetches the winner's row).
+        try:
+            async with self._session.begin_nested():
+                self._session.add(capability)
+                await self._session.flush()
+        except IntegrityError as exc:
+            if "capability_key_key" in str(exc.orig):
+                raise DuplicateCapabilityKeyError(capability.key) from exc
+            raise
+        await self._session.refresh(capability)
+        return capability
+
+    async def list(self) -> list[Capability]:
+        stmt = select(Capability).order_by(Capability.key)
+        return list((await self._session.scalars(stmt)).all())
+
+
+class PostgresPatientCapabilityRepository:
+    """PatientCapabilityRepository over the patient_capability table."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get(
+        self, patient_id: uuid.UUID, capability_id: uuid.UUID
+    ) -> PatientCapability | None:
+        stmt = select(PatientCapability).where(
+            PatientCapability.patient_id == patient_id,
+            PatientCapability.capability_id == capability_id,
+        )
+        return (await self._session.scalars(stmt)).first()
+
+    async def upsert(
+        self,
+        *,
+        patient_id: uuid.UUID,
+        capability_id: uuid.UUID,
+        active: bool,
+        set_by: Actor,
+        expires_at: datetime | None,
+    ) -> PatientCapability:
+        # Insert-first, mirroring PostgresClinicConnectionRepository.add: the
+        # savepoint absorbs uq_patient_capability (whether the row pre-existed or a
+        # concurrent upsert won the race) and the update path takes over, so exactly
+        # one row per pair survives and the caller's transaction stays usable.
+        row = PatientCapability(
+            patient_id=patient_id,
+            capability_id=capability_id,
+            active=active,
+            set_by=set_by,
+            expires_at=expires_at,
+        )
+        try:
+            async with self._session.begin_nested():
+                self._session.add(row)
+                await self._session.flush()
+        except IntegrityError as exc:
+            if "uq_patient_capability" not in str(exc.orig):
+                raise
+            existing = await self.get(patient_id, capability_id)
+            assert existing is not None  # the fired constraint guarantees the row
+            existing.active = active
+            existing.set_by = set_by
+            existing.expires_at = expires_at
+            await self._session.flush()
+            return existing
+        await self._session.refresh(row)
+        return row
+
+    async def list_for_patient(self, patient_id: uuid.UUID) -> list[PatientCapability]:
+        stmt = (
+            select(PatientCapability)
+            .where(PatientCapability.patient_id == patient_id)
+            .order_by(PatientCapability.created_at)
         )
         return list((await self._session.scalars(stmt)).all())
 

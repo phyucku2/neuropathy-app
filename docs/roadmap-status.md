@@ -23,7 +23,7 @@ review findings fixed), **Merged** (on `main`).
 
 | # | Portion | Built | Tested | Merged | Notes |
 |---|---|---|---|---|---|
-| 1 | Feature toggles API — expose Capability/PatientCapability (model exists, no endpoints); patient self-toggles (B2C) + clinician-managed toggles, consent-aware | ◻️ | ◻️ | ◻️ | ADR needed |
+| 1 | Feature toggles API — expose Capability/PatientCapability (model exists, no endpoints); patient self-toggles (B2C) + clinician-managed toggles, consent-aware | ✅ | ✅ 100% cov | ◻️ | ADR-0013; enforcement seam live on POST /adl + /labs, remaining consumers noted in the ADR |
 | 2 | BioMech PDF ingest module (V1) — parse balance/gait report PDFs into research-grade Observations (SourceType.biomech); ingest + graph only | ◻️ | ◻️ | ◻️ | Separate module by design |
 | 3 | Patient graphing/trends UI — from mockups/patient-app.html against the existing API | ◻️ | ◻️ | ◻️ | Mockup approved |
 | 4 | Clinician UI — from mockups/clinician-app.html (panel, cross-source trend table, non-diagnostic) | ◻️ | ◻️ | ◻️ | Mockup approved |
