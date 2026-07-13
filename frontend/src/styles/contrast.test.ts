@@ -102,6 +102,34 @@ describe('WCAG 2.2 AA contrast locks', () => {
     const color = resolveColor(declaration('.pill.warn', 'color'));
     expect(contrastRatio(color, background)).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
   });
+
+  it('clinician disclaimer text on its background passes AA', () => {
+    const background = resolveColor(declaration('.disclaimer', 'background'));
+    const color = resolveColor(declaration('.disclaimer', 'color'));
+    expect(contrastRatio(color, background)).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
+  });
+
+  it('trend-table judgment words — "better" green and "worse" red — pass AA on white', () => {
+    // "better" in the 14px table uses the strong green, NOT brand green (4.04:1).
+    const better = resolveColor(declaration('.data-table .up', 'color'));
+    expect(better).toBe(tokenValue('--color-action-green-strong'));
+    expect(contrastRatio(better, WHITE)).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
+    // "worse" red already passes — locked so it stays that way.
+    expect(
+      contrastRatio(resolveColor(declaration('.down', 'color')), WHITE),
+    ).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
+  });
+
+  it('order-expiry note text passes AA on the white card', () => {
+    expect(
+      contrastRatio(resolveColor(declaration('.expiry', 'color')), WHITE),
+    ).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
+  });
+
+  it('panel avatar initials pass AA on the brand-blue disc', () => {
+    const background = resolveColor(declaration('.prow .ava', 'background'));
+    expect(contrastRatio(background, WHITE)).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
+  });
 });
 
 describe('toggle switch knob convention', () => {

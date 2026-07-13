@@ -27,3 +27,10 @@ export function formatDayYear(timestamp: number): string {
 export function formatValue(value: number): string {
   return String(Math.round(value * 100) / 100);
 }
+
+/** Up to two uppercase initials for an avatar, '?' when there is no name. */
+export function initials(displayName: string): string {
+  const parts = displayName.trim().split(/\s+/).filter(Boolean);
+  const letters = parts.slice(0, 2).map((part) => part.charAt(0).toUpperCase());
+  return letters.join('') || '?';
+}

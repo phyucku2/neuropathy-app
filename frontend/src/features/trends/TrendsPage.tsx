@@ -23,12 +23,17 @@ import { TrendChart, type TrendPoint } from './TrendChart';
 
 const PAGE_LIMIT = 100;
 
+/** A chartable point that keeps its reading's raw unit string. */
+export interface SeriesPoint extends TrendPoint {
+  unit: string | null;
+}
+
 interface MetricSeries {
   code: string;
   name: string;
   unitText: string;
   source: string;
-  points: TrendPoint[]; // ascending by time
+  points: SeriesPoint[]; // ascending by time
   latestAt: number;
 }
 
@@ -51,7 +56,11 @@ export function groupByCode(items: ObservationItem[]): MetricSeries[] {
   const series: MetricSeries[] = [];
   for (const [code, group] of byCode) {
     const points = group.items
-      .map((item) => ({ t: Date.parse(item.effective_at), value: item.value as number }))
+      .map((item) => ({
+        t: Date.parse(item.effective_at),
+        value: item.value as number,
+        unit: item.unit,
+      }))
       .sort((a, b) => a.t - b.t);
     series.push({
       code,
@@ -65,13 +74,34 @@ export function groupByCode(items: ObservationItem[]): MetricSeries[] {
   return series.sort((a, b) => b.latestAt - a.latestAt);
 }
 
-function DeltaBadge({ code, points, unitText }: MetricSeries) {
+/**
+ * Change between the two most recent readings — the ONE delta both surfaces
+ * (patient DeltaBadge, clinician TrendTable) show. When the readings carry
+ * different unit strings (e.g. HbA1c arriving as '%' then 'mmol/mol'), the
+ * numbers are incomparable: no delta is produced and callers show a
+ * "unit changed" note instead of a judgment.
+ */
+export function changeSincePrevious(points: SeriesPoint[]): {
+  delta: number | null;
+  unitChanged: boolean;
+} {
   const last = points[points.length - 1];
   const previous = points[points.length - 2];
+  if (last === undefined || previous === undefined) {
+    return { delta: null, unitChanged: false };
+  }
+  if (last.unit !== previous.unit) {
+    return { delta: null, unitChanged: true };
+  }
+  return { delta: last.value - previous.value, unitChanged: false };
+}
+
+function DeltaBadge({ code, points, unitText }: MetricSeries) {
+  const last = points[points.length - 1];
   if (last === undefined) {
     return null;
   }
-  const delta = previous === undefined ? null : last.value - previous.value;
+  const { delta, unitChanged } = changeSincePrevious(points);
   const judged = delta === null ? 'neutral' : judgeChange(code, delta);
   const deltaClass =
     judged === 'better' ? 'delta up' : judged === 'worse' ? 'delta down' : 'delta flat';
@@ -95,6 +125,7 @@ function DeltaBadge({ code, points, unitText }: MetricSeries) {
           {judgedWord !== null && ` · ${judgedWord}`}
         </span>
       )}
+      {unitChanged && <span className="muted">unit changed — change not judged</span>}
       <span className="muted">latest, {formatDayYear(last.t)}</span>
     </div>
   );

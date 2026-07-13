@@ -70,17 +70,38 @@ describe('request', () => {
     await expect(revokeConnection('any-id')).resolves.toBeUndefined();
   });
 
-  it('falls back to a generic message for non-JSON and non-string error bodies', async () => {
+  it('falls back to a generic message for non-JSON and unusable error bodies', async () => {
     storeSession({ access_token: TEST_ACCESS_TOKEN, refresh_token: TEST_REFRESH_TOKEN });
     server.use(http.get('/trajectory', () => new HttpResponse('boom', { status: 500 })));
     await expect(request('/trajectory')).rejects.toThrow('Something went wrong');
 
+    // An array detail without msg strings has nothing to surface.
     server.use(
       http.get('/trajectory', () =>
-        HttpResponse.json({ detail: [{ msg: 'validation' }] }, { status: 422 }),
+        HttpResponse.json({ detail: [{ loc: ['body'] }, null] }, { status: 422 }),
       ),
     );
     await expect(request('/trajectory')).rejects.toThrow('Something went wrong');
+
+    server.use(http.get('/trajectory', () => HttpResponse.json({ detail: 42 }, { status: 500 })));
+    await expect(request('/trajectory')).rejects.toThrow('Something went wrong');
+  });
+
+  it('surfaces FastAPI 422 validation messages verbatim', async () => {
+    storeSession({ access_token: TEST_ACCESS_TOKEN, refresh_token: TEST_REFRESH_TOKEN });
+    server.use(
+      http.get('/trajectory', () =>
+        HttpResponse.json(
+          {
+            detail: [
+              { type: 'value_error', loc: ['body'], msg: 'Value error, expiry needs active=true' },
+            ],
+          },
+          { status: 422 },
+        ),
+      ),
+    );
+    await expect(request('/trajectory')).rejects.toThrow('Value error, expiry needs active=true');
   });
 });
 

@@ -8,6 +8,7 @@ import type {
   ConnectionOut,
   MeOut,
   ObservationItem,
+  PanelOut,
   Trajectory,
 } from '../api/types';
 
@@ -161,6 +162,71 @@ export const CAPABILITIES: CapabilityStateOut[] = [
     name: 'Medical record connection',
     active: true,
     managed_by: 'patient',
+    expires_at: null,
+    enforced: false,
+  },
+];
+
+// ---- clinician surface ----
+
+export const CLINICIAN_ME: MeOut = {
+  user_id: '99999999-9999-4999-8999-999999999999',
+  email: 'dr.rivera@example.com',
+  display_name: 'Dr. Rivera',
+  role: 'clinician',
+  patient_id: null,
+};
+
+/** The consented patient the default clinic handlers serve; any other id is 404. */
+export const PANEL_PATIENT_ID = '22222222-2222-4222-8222-222222222222';
+
+export const PANEL: PanelOut = {
+  patients: [
+    {
+      patient_id: PANEL_PATIENT_ID,
+      display_name: 'Pat Example',
+      connection_id: '55555555-5555-4555-8555-555555555555',
+      consent_granted_at: '2026-06-01T12:00:00Z',
+    },
+    {
+      patient_id: '77777777-7777-4777-8777-777777777777',
+      display_name: 'Jordan Marsh',
+      connection_id: '88888888-8888-4888-8888-888888888888',
+      consent_granted_at: '2026-05-20T09:00:00Z',
+    },
+  ],
+};
+
+export const CLINIC_CAPABILITIES: CapabilityStateOut[] = [
+  {
+    key: 'ingest_biomech',
+    name: 'BioMech report upload',
+    active: true,
+    managed_by: 'clinic',
+    expires_at: '2026-08-06T23:59:59Z',
+    enforced: true,
+  },
+  {
+    key: 'ingest_labs',
+    name: 'Lab result upload',
+    active: true,
+    managed_by: 'clinic',
+    expires_at: null,
+    enforced: true,
+  },
+  {
+    key: 'ingest_adl',
+    name: 'Daily function check-in',
+    active: false,
+    managed_by: 'clinic',
+    expires_at: null,
+    enforced: true,
+  },
+  {
+    key: 'ai_narrative',
+    name: 'AI trajectory summary',
+    active: true,
+    managed_by: 'clinic',
     expires_at: null,
     enforced: false,
   },
