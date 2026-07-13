@@ -210,6 +210,25 @@ def test_oversized_upload_is_422(client: TestClient, monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(settings, "biomech_max_pdf_bytes", 64)
     resp = _upload(client, _balance_report())
     assert resp.status_code == 422
+    # The spooled-size guard fired BEFORE the body was read into memory.
+    assert "size cap" in resp.json()["detail"]
+
+
+def test_over_declared_upload_is_refused_before_body_parsing(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The middleware rejects on the declared Content-Length before the multipart
+    body is parsed or spooled (review finding: the byte cap must bound network and
+    disk work too, not just memory)."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "biomech_max_pdf_bytes", 64)
+    huge = "Balance Score: 82\n" * 5000  # body far beyond cap + multipart overhead
+    resp = _upload(client, huge)
+    assert resp.status_code == 422
+    # The middleware's message — distinct from the route's "size cap" detail —
+    # proves the request never reached body parsing.
+    assert resp.json()["detail"] == "Upload exceeds the PDF size cap"
 
 
 async def test_capability_off_refuses_with_409(

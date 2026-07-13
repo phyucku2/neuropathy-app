@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     # never renders or executes anything in the document.
     biomech_max_pdf_bytes: int = 10 * 1024 * 1024  # ~10 MB
     biomech_max_pdf_pages: int = 30
+    # Bounds EXTRACTED text, not file size: a small PDF can decompress to
+    # gigabytes of text (decompression bomb — ADR-0014 review finding).
+    biomech_max_pdf_text_chars: int = 5_000_000
 
 
 settings = Settings()

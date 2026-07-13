@@ -164,3 +164,39 @@ def test_registry_polarities_agree_with_directionality() -> None:
     }
     for spec in METRICS:
         assert polarity_for(spec.code) == expected[spec.higher_is_better], spec.code
+
+
+def _balance_line(value_text: str) -> str:
+    return "\n".join(
+        [
+            "BioMech Balance Assessment Report",
+            "Assessment Date: 2026-06-15T09:30:00",
+            f"Sway Area: {value_text}",
+        ]
+    )
+
+
+def test_grouped_and_decimal_comma_values_are_normalized_never_truncated() -> None:
+    """A prefix match would turn '1,234.5' into 1.0 — a corrupted measurement that
+    LOOKS valid (review finding). Explicit grouping formats normalize; nothing else."""
+    assert _by_code(parse_report(_balance_line("1,234.5 mm2"))) == {"biomech_sway_area": 1234.5}
+    assert _by_code(parse_report(_balance_line("12,340 mm2"))) == {"biomech_sway_area": 12340.0}
+    # European decimal comma.
+    assert _by_code(parse_report(_balance_line("1,05 mm2"))) == {"biomech_sway_area": 1.05}
+
+
+def test_empty_value_after_the_label_is_skipped_with_a_warning() -> None:
+    report = parse_report(_balance_line(""))
+    assert _by_code(report) == {}
+    assert any("no numeric value found" in warning for warning in report.warnings)
+
+
+def test_ambiguous_numeric_formats_are_skipped_with_a_warning() -> None:
+    """Scientific notation, space-grouped digits, malformed grouping, and attached
+    units are ambiguous: research-grade data is skipped, never guessed."""
+    for value_text in ("3.2e3 mm2", "1 234.5 mm2", "1,0,5 mm2", "340/500"):
+        report = parse_report(_balance_line(value_text))
+        assert _by_code(report) == {}, value_text
+        assert any("not an unambiguous number" in warning for warning in report.warnings), (
+            value_text
+        )

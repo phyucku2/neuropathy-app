@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import EmrServiceDep, PatientUserDep, require_capability
 from app.biomech.ingest import (
@@ -27,6 +28,7 @@ from app.biomech.ingest import (
 )
 from app.biomech.parser import parse_report
 from app.biomech.pdf import BiomechPdfError, extract_text
+from app.core.config import settings
 from app.models.audit import AuditEvent
 from app.schemas.biomech import BiomechImportOut
 
@@ -51,9 +53,19 @@ async def import_biomech_report(
     report content identity.
     """
     assert current.patient_id is not None  # guaranteed by require_patient
-    data = await file.read()
+    max_bytes = settings.biomech_max_pdf_bytes
+    # Starlette has already spooled the multipart part, so `size` is the actual byte
+    # count: reject an oversized upload before ANY of it is materialized in memory
+    # (review finding: a cap that fires after full buffering bounds nothing).
+    if file.size is not None and file.size > max_bytes:
+        raise HTTPException(status_code=422, detail=f"PDF exceeds the {max_bytes}-byte size cap")
+    # Bounded read even when size is unknown: at most cap+1 bytes reach memory, and
+    # extract_text rejects the overflow byte.
+    data = await file.read(max_bytes + 1)
     try:
-        text = extract_text(data)
+        # pypdf is synchronous — a worker thread keeps extraction (the expensive step
+        # of this request) off the event loop (review finding).
+        text = await run_in_threadpool(extract_text, data)
     except BiomechPdfError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

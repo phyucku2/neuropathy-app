@@ -9,7 +9,11 @@ never a 500 and never a path that treats the bytes as anything but a document to
 Guards, all before or during a read that stays in memory:
 - size cap (settings.biomech_max_pdf_bytes) — reject oversized uploads;
 - magic-byte check — reject anything that is not a PDF;
-- page cap (settings.biomech_max_pdf_pages) — bound the work per upload;
+- page cap (settings.biomech_max_pdf_pages) — bound the number of streams read;
+- extracted-text cap (settings.biomech_max_pdf_text_chars) — bound the OUTPUT: a
+  well-formed PDF under both caps can still be a decompression bomb whose content
+  streams inflate to gigabytes of text (review finding), so accumulation aborts past
+  the cap;
 - any pypdf failure is caught and re-raised as BiomechPdfError, so a broken document
   is a client error, not a server fault.
 """
@@ -47,6 +51,7 @@ def extract_text(data: bytes) -> str:
         raise BiomechPdfError("Upload is not a PDF (missing %PDF- header)")
 
     max_pages = settings.biomech_max_pdf_pages
+    max_chars = settings.biomech_max_pdf_text_chars
     try:
         reader = PdfReader(io.BytesIO(data))
         page_count = len(reader.pages)
@@ -54,7 +59,15 @@ def extract_text(data: bytes) -> str:
             raise BiomechPdfError("PDF has no pages")
         if page_count > max_pages:
             raise BiomechPdfError(f"PDF has {page_count} pages; the cap is {max_pages}")
-        parts = [page.extract_text() or "" for page in reader.pages]
+        parts: list[str] = []
+        total = 0
+        for page in reader.pages:
+            piece = page.extract_text() or ""
+            total += len(piece)
+            if total > max_chars:
+                # Decompression bomb posture: bound the OUTPUT, abort mid-document.
+                raise BiomechPdfError(f"PDF text exceeds the {max_chars}-character cap")
+            parts.append(piece)
     except BiomechPdfError:
         raise
     except Exception as exc:

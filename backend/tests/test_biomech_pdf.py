@@ -57,3 +57,12 @@ def test_pdf_header_but_corrupt_body_is_a_typed_error() -> None:
 def test_zero_page_pdf_is_rejected() -> None:
     with pytest.raises(BiomechPdfError, match="no pages"):
         extract_text(blank_pdf(0))
+
+
+def test_extracted_text_cap_stops_decompression_bombs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A well-formed PDF under the byte and page caps can still inflate to unbounded
+    TEXT during extraction (review finding): accumulation aborts past the char cap."""
+    monkeypatch.setattr(settings, "biomech_max_pdf_text_chars", 16)
+    inflating = build_pdf("Balance Score: 82 -- far more text than sixteen characters")
+    with pytest.raises(BiomechPdfError, match="character cap"):
+        extract_text(inflating)

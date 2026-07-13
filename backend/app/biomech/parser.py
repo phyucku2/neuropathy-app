@@ -136,9 +136,38 @@ _DEVICE_LABELS = frozenset({"device", "instrument", "system", "source", "device 
 # clinical report exports and are not ISO, so they need explicit patterns.
 _DATE_FORMATS = ("%m/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M", "%m/%d/%Y")
 
-# First signed number on a line — the metric value. Units/ranges ("82 / 100") keep the
-# first token, which is the measurement.
+# A metric value must be the FULLY-CONSUMED first token of the value side — a prefix
+# match would silently truncate "1,234.5" to 1.0 and store a corrupted measurement
+# while reporting success (review finding). Thousands grouping and decimal commas are
+# normalized explicitly; anything else numeric-ish but ambiguous (scientific notation,
+# space-grouped digits, attached units) is skipped with a warning, never coerced.
+# Units/ranges ("82 / 100") keep the first token, which is the measurement.
 _NUMBER = re.compile(r"[-+]?\d+(?:\.\d+)?")
+_THOUSANDS_GROUPED = re.compile(r"[-+]?\d{1,3}(?:,\d{3})+(?:\.\d+)?")
+_DECIMAL_COMMA = re.compile(r"[-+]?\d+,\d+")
+
+
+def _metric_value(raw_value: str) -> float | None:
+    """The unambiguous numeric value of a metric line, or None (research-grade: skip,
+    never guess). "82 / 100" -> 82.0; "1,234.5" -> 1234.5; "1,05" -> 1.05;
+    "3.2e3", "1 234.5", "1,0,5", "82/100" -> None."""
+    tokens = raw_value.split()
+    if not tokens:
+        return None
+    token = tokens[0]
+    if len(tokens) > 1 and tokens[1][:1].isdigit():
+        return None  # space-grouped digits ("1 234.5") are ambiguous
+    if "," in token:
+        if _THOUSANDS_GROUPED.fullmatch(token):
+            token = token.replace(",", "")
+        elif _DECIMAL_COMMA.fullmatch(token):
+            token = token.replace(",", ".")
+        else:
+            return None
+    if _NUMBER.fullmatch(token) is None:
+        return None
+    return float(token)
+
 
 # Explicit report-kind markers: a "Report/Assessment type: balance|gait" line, or a
 # "<kind> assessment" phrase. Metric labels ("balance score", "gait speed") are never
@@ -238,11 +267,16 @@ def parse_report(text: str) -> BiomechReport:
         if spec is None:
             continue  # unknown line — ignored, never a fabricated label
 
-        number = _NUMBER.search(raw_value)
-        if number is None:
-            warnings.append(f"{spec.display}: no numeric value found (skipped).")
+        value = _metric_value(raw_value)
+        if value is None:
+            if _NUMBER.search(raw_value) is None:
+                warnings.append(f"{spec.display}: no numeric value found (skipped).")
+            else:
+                warnings.append(
+                    f"{spec.display}: value {' '.join(raw_value.split())!r} is not an "
+                    "unambiguous number (skipped)."
+                )
             continue
-        value = float(number.group())
         if not (spec.min_value <= value <= spec.max_value):
             warnings.append(
                 f"{spec.display}: {value:g} is outside the expected range "

@@ -72,6 +72,28 @@ to add a new `SourceType` enum value to a live Postgres column.
    engine produces sourced signals and plain-language summaries ("balance up 8 over 30
    days") with no change to engine math.
 
+## Adversarial-review hardening
+
+Five confirmed findings from the review pass, all fixed before merge:
+
+- **Upload buffering (high).** The byte cap originally fired after `file.read()`
+  had already materialized the whole body. Now: a middleware rejects over-declared
+  Content-Length before the multipart body is parsed or spooled; the route checks
+  the spooled part's actual size before reading; and the read itself is bounded to
+  cap+1 bytes. A chunked request without Content-Length still spools to disk
+  (Starlette behavior) — the memory path is fully bounded; a global body-size
+  middleware is a hardening-pass candidate.
+- **Decompression bombs (medium).** Byte/page caps do not bound decompressed
+  output; extraction now aborts past `biomech_max_pdf_text_chars` (default 5M) and
+  pypdf is pinned >=5.1 for its own decompression limits.
+- **Silent numeric truncation (high/medium, two findings).** A prefix match turned
+  "1,234.5" into 1.0 — a corrupted measurement that looked valid. Values must now
+  fully consume their token: thousands grouping and decimal commas normalize
+  explicitly; scientific notation, space-grouped digits, malformed grouping, and
+  attached units are skipped with a warning. Never coerce, never fabricate.
+- **Event-loop stall (low).** pypdf is synchronous; extraction now runs in a worker
+  thread (`run_in_threadpool`) so a slow document cannot stall concurrent requests.
+
 ## Consequences
 
 - New self-contained module `app/biomech/` (`pdf`, `parser`, `ingest`), one route
