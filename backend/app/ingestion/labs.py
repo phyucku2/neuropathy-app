@@ -68,3 +68,19 @@ def lab_result_to_observation(
             "issued_at": result.issued_at.isoformat() if result.issued_at else None,
         },
     )
+
+
+def lab_import_key(result: LabResultIn, *, fhir_base: str | None = None) -> str:
+    """Stable idempotency key for one imported lab record.
+
+    EMR pulls pass `fhir_base` so the source's own FHIR Observation id (globally
+    stable per source system) wins; patient uploads (and EMR records without ids)
+    key on the result's clinical content identity, so re-importing the same panel
+    never duplicates the analyzable dataset.
+    """
+    if fhir_base is not None and result.source_record_id:
+        return f"fhir:{fhir_base}:{result.source_record_id}"
+    return (
+        f"content:{result.loinc_code}:{result.effective_at.isoformat()}"
+        f":{result.value}:{result.unit}:{result.value_text}"
+    )

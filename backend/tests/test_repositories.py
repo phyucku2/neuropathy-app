@@ -296,15 +296,10 @@ def test_import_key_prefers_source_record_id() -> None:
     """The EMR's own FHIR id wins; content identity is the fallback (dedup design)."""
     from datetime import UTC, datetime
 
-    from app.emr.service import _import_key
+    from app.ingestion.labs import lab_import_key
     from app.schemas.lab import LabResultIn
 
-    record = ConnectionRecord(
-        id=uuid.uuid4(),
-        patient_id=PATIENT_ID,
-        fhir_base="https://ehr.example/fhir",
-        provider_name=None,
-    )
+    fhir_base = "https://ehr.example/fhir"
     with_id = LabResultIn(
         loinc_code="4548-4",
         source_record_id="obs-123",
@@ -314,5 +309,7 @@ def test_import_key_prefers_source_record_id() -> None:
         effective_at=datetime(2026, 6, 15, tzinfo=UTC),
     )
     without_id = with_id.model_copy(update={"source_record_id": None})
-    assert _import_key(record, with_id) == "fhir:https://ehr.example/fhir:obs-123"
-    assert _import_key(record, without_id).startswith("content:4548-4:2026-06-15")
+    assert lab_import_key(with_id, fhir_base=fhir_base) == "fhir:https://ehr.example/fhir:obs-123"
+    assert lab_import_key(without_id, fhir_base=fhir_base).startswith("content:4548-4:2026-06-15")
+    # Patient uploads pass no fhir_base: content identity keys the whole panel.
+    assert lab_import_key(with_id).startswith("content:4548-4:2026-06-15")

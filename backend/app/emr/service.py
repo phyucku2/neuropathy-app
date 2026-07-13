@@ -24,7 +24,7 @@ from app.emr.smart import (
     generate_code_verifier,
 )
 from app.emr.transport import HttpTransport
-from app.ingestion.labs import lab_result_to_observation
+from app.ingestion.labs import lab_import_key, lab_result_to_observation
 from app.models.audit import AuditEvent
 from app.models.emr_connection import EmrConnectionStatus
 from app.models.observation import DataOrigin
@@ -184,7 +184,7 @@ class EmrService:
         """
         imported = 0
         for result in results:
-            import_key = _import_key(record, result)
+            import_key = lab_import_key(result, fhir_base=record.fhir_base)
             if await self.observations.has_import_key(record.patient_id, import_key):
                 continue
             await self.observations.add(
@@ -226,17 +226,3 @@ class EmrService:
         if record is None:
             raise EmrError("Connection not found", status_code=404)
         return record
-
-
-def _import_key(record: ConnectionRecord, result: LabResultIn) -> str:
-    """Stable idempotency key for one pulled lab record.
-
-    Prefer the EMR's own FHIR Observation id (globally stable per source); fall back to
-    the clinical identity of the result when the EMR omits ids.
-    """
-    if result.source_record_id:
-        return f"fhir:{record.fhir_base}:{result.source_record_id}"
-    return (
-        f"content:{result.loinc_code}:{result.effective_at.isoformat()}"
-        f":{result.value}:{result.unit}:{result.value_text}"
-    )

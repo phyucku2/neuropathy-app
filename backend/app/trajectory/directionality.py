@@ -46,6 +46,9 @@ _BALANCE = SignalInfo(Polarity.higher_is_better, "balance")
 _GAIT_SPEED = SignalInfo(Polarity.higher_is_better, "walking speed")
 _DAILY_FUNCTION = SignalInfo(Polarity.higher_is_better, "daily function")
 _PAIN = SignalInfo(Polarity.lower_is_better, "pain")
+_WALKING = SignalInfo(Polarity.higher_is_better, "walking")
+_STAIRS = SignalInfo(Polarity.higher_is_better, "stairs")
+_BALANCE_CONFIDENCE = SignalInfo(Polarity.higher_is_better, "balance confidence")
 
 _REGISTRY: dict[str, SignalInfo] = {
     # Labs — LOINC codes first, then friendly keys.
@@ -72,6 +75,12 @@ _REGISTRY: dict[str, SignalInfo] = {
     "adl_katz": _DAILY_FUNCTION,
     "adl_barthel": _DAILY_FUNCTION,
     "pain_score": _PAIN,
+    # ADL daily check-in (POST /adl): three 0-4 answers + the 0-12 derived composite.
+    # All scored so that a higher number means better function.
+    "adl_walking": _WALKING,
+    "adl_stairs": _STAIRS,
+    "adl_balance_confidence": _BALANCE_CONFIDENCE,
+    "adl_daily_score": _DAILY_FUNCTION,
 }
 
 
