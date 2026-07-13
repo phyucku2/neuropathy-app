@@ -62,6 +62,10 @@ def _clean_process_state_afterwards() -> Iterator[None]:
     _reset_process_singletons()
 
 
+# Synthetic credential for durability tests (never a real secret; CLAUDE.md §5).
+SYNTHETIC_PASSWORD = "a-strong-password"
+
+
 def _register(client: TestClient, email: str, password: str) -> dict[str, str]:
     resp = client.post(
         "/auth/register",
@@ -119,16 +123,17 @@ async def _audit_events(url: str, patient_id: uuid.UUID) -> list[tuple[str, uuid
 def test_registration_survives_a_process_restart(db_url: str) -> None:
     """Register in one 'process', restart (fresh app + dropped caches), log in again."""
     email = f"durable-{uuid.uuid4().hex[:12]}@example.com"
-    password = "a-strong-password"
     with TestClient(create_app()) as first_process:
-        _register(first_process, email, password)
+        _register(first_process, email, SYNTHETIC_PASSWORD)
 
     # Simulated restart: new app instance, all process-level singletons dropped.
     # Only the database carries state across the boundary.
     _reset_process_singletons()
 
     with TestClient(create_app()) as second_process:
-        resp = second_process.post("/auth/login", json={"email": email, "password": password})
+        resp = second_process.post(
+            "/auth/login", json={"email": email, "password": SYNTHETIC_PASSWORD}
+        )
         assert resp.status_code == 200, resp.text
         me = second_process.get("/auth/me", headers=_auth_header(resp.json()["access_token"]))
         assert me.status_code == 200
