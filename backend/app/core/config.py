@@ -40,5 +40,12 @@ class Settings(BaseSettings):
     smart_redirect_uri: str | None = None
     smart_scopes: str = "launch/patient patient/Observation.read openid fhirUser offline_access"
 
+    # BioMech PDF ingest (ADR-0014). Guards on the text-layer extractor: an upload
+    # larger than the byte cap, or with more pages than the page cap, is rejected as a
+    # typed error (-> 422) before parsing. Extraction reads the text layer only and
+    # never renders or executes anything in the document.
+    biomech_max_pdf_bytes: int = 10 * 1024 * 1024  # ~10 MB
+    biomech_max_pdf_pages: int = 30
+
 
 settings = Settings()

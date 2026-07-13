@@ -50,6 +50,16 @@ _PAIN = SignalInfo(Polarity.lower_is_better, "pain")
 _WALKING = SignalInfo(Polarity.higher_is_better, "walking")
 _STAIRS = SignalInfo(Polarity.higher_is_better, "stairs")
 _BALANCE_CONFIDENCE = SignalInfo(Polarity.higher_is_better, "balance confidence")
+# BioMech balance/gait report metrics (ADR-0014). Polarities mirror the parser's
+# METRICS registry (app/biomech/parser.py); a parity test keeps the two in agreement.
+# Cadence and step length have no clear better/worse direction — reported, not judged.
+_BIOMECH_BALANCE = SignalInfo(Polarity.higher_is_better, "balance")
+_BIOMECH_SWAY_VELOCITY = SignalInfo(Polarity.lower_is_better, "sway speed")
+_BIOMECH_SWAY_AREA = SignalInfo(Polarity.lower_is_better, "sway area")
+_BIOMECH_GAIT_SPEED = SignalInfo(Polarity.higher_is_better, "walking speed")
+_BIOMECH_CADENCE = SignalInfo(Polarity.unknown, "steps per minute")
+_BIOMECH_STEP_LENGTH = SignalInfo(Polarity.unknown, "step length")
+_BIOMECH_STEP_SYMMETRY = SignalInfo(Polarity.higher_is_better, "walking symmetry")
 
 _REGISTRY: dict[str, SignalInfo] = {
     # Labs — LOINC codes first, then friendly keys.
@@ -82,6 +92,15 @@ _REGISTRY: dict[str, SignalInfo] = {
     "adl_stairs": _STAIRS,
     "adl_balance_confidence": _BALANCE_CONFIDENCE,
     "adl_daily_score": _DAILY_FUNCTION,
+    # BioMech report metrics (source='biomech'), friendly keys — code_system stays null
+    # like the other non-lab codes. Trends read as "balance up 8 over 30 days".
+    "biomech_balance_score": _BIOMECH_BALANCE,
+    "biomech_sway_velocity": _BIOMECH_SWAY_VELOCITY,
+    "biomech_sway_area": _BIOMECH_SWAY_AREA,
+    "biomech_gait_speed": _BIOMECH_GAIT_SPEED,
+    "biomech_cadence": _BIOMECH_CADENCE,
+    "biomech_step_length": _BIOMECH_STEP_LENGTH,
+    "biomech_step_time_symmetry": _BIOMECH_STEP_SYMMETRY,
 }
 
 

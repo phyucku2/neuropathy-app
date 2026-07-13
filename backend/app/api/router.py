@@ -6,6 +6,7 @@ from fastapi import APIRouter
 
 from app.api.routes import (
     auth,
+    biomech,
     capabilities,
     clinic,
     connections,
@@ -20,6 +21,7 @@ api_router.include_router(health.router)
 api_router.include_router(auth.router)
 api_router.include_router(emr.router)
 api_router.include_router(ingestion.router)
+api_router.include_router(biomech.router)
 api_router.include_router(trajectory.router)
 api_router.include_router(clinic.router)
 api_router.include_router(connections.router)
