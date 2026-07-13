@@ -1,0 +1,79 @@
+/*
+ * neuropathy-app design tokens (web / prototype)
+ * Source of truth: tokens.json — see ADR-0002. Hex values estimated from BioMech Lab
+ * screenshots; reconcile against BioMech Health's official brand guide when available.
+ * Fonts (Poppins, Inter) are SIL OFL 1.1 — permissive (CLAUDE.md §4). Self-host the
+ * font files; do not hotlink. Do NOT reproduce the BioMech logo/wordmark.
+ */
+
+:root {
+  /* Brand */
+  --color-brand-navy: #173a5e;
+  --color-brand-navy-deep: #0f2a45;
+  --color-brand-blue: #2e6da4;
+  --color-brand-blue-bright: #2e86c8;
+  --color-brand-sky: #7fb0d4;
+  --color-brand-sky-tint: #e8f1f8;
+  --gradient-header: linear-gradient(90deg, #0f2a45 0%, #2e86c8 100%);
+
+  /* Action */
+  --color-action-green: #2f8f5b;
+  --color-action-green-hover: #277a4d;
+
+  /* Status */
+  --color-status-danger: #c63f4c;
+  --color-status-warning: #d68a34;
+  --color-status-info: #7fb0d4;
+  --color-status-neutral: #1f4e79;
+  --color-status-success: #2f8f5b;
+
+  /* Text */
+  --color-text-primary: #233444;
+  --color-text-secondary: #556677;
+  --color-text-on-dark: #ffffff;
+  --color-text-link: #2e6da4;
+
+  /* Surface */
+  --color-bg: #e8f1f8;
+  --color-card: #ffffff;
+  --color-border: #d3dee8;
+  --color-muted: #f2f6fa;
+
+  /* Type */
+  --font-display: 'Poppins', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+
+  --text-display: 32px;
+  --lh-display: 40px;
+  --text-h1: 26px;
+  --lh-h1: 34px;
+  --text-h2: 21px;
+  --lh-h2: 28px;
+  --text-h3: 18px;
+  --lh-h3: 24px;
+  --text-body: 17px;
+  --lh-body: 26px; /* 17px min body for older/low-vision users */
+  --text-small: 15px;
+  --lh-small: 22px;
+  --text-label: 13px;
+  --lh-label: 18px;
+  --text-data: 20px;
+  --lh-data: 24px;
+
+  /* Radius */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+
+  /* Space */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-xxl: 48px;
+
+  /* Accessibility */
+  --min-touch-target: 48px; /* larger than the 44pt floor — numb-fingertip persona */
+}

@@ -61,6 +61,40 @@ jobs:
       - name: Tests + coverage (fails under 85%; includes Postgres integration suite)
         run: python -m pytest
 
+  frontend:
+    name: Frontend — types, lint, tests, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: TypeScript (strict)
+        run: npx tsc --noEmit
+
+      - name: ESLint (zero warnings)
+        run: npx eslint . --max-warnings 0
+
+      - name: Prettier check
+        run: npx prettier --check .
+
+      - name: Tests + coverage (fails under 90% lines/branches)
+        run: npx vitest run --coverage
+
+      - name: Production build
+        run: npx vite build
+
   security:
     name: Security & license scan
     runs-on: ubuntu-latest
