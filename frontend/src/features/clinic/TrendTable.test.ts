@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { ObservationItem } from '../../api/types';
-import { renewalDateToExpiresAt } from './CapabilityOrders';
+import { minRenewalDate, renewalDateToExpiresAt } from './CapabilityOrders';
 import { buildTrendRows } from './TrendTable';
 
 function reading(
@@ -71,6 +71,28 @@ describe('buildTrendRows', () => {
     expect(rows[0]?.judgment).toBe('no change');
   });
 
+  it('uses the backend display name for a code outside the UI registry', () => {
+    // '718-7' is not in signalMeta's registry: the Signal column must show the
+    // backend's display — 'Hemoglobin' — not the raw LOINC code.
+    const rows = buildTrendRows([
+      { ...reading('718-7', 14.1, '2026-07-01T10:00:00Z'), display: 'Hemoglobin' },
+      { ...reading('718-7', 13.2, '2026-06-01T10:00:00Z'), display: 'Hemoglobin' },
+    ]);
+    expect(rows[0]?.name).toBe('Hemoglobin');
+  });
+
+  it('withholds the delta and judgment across a unit change', () => {
+    // Same LOINC arriving as 7.2 '%' then 53 'mmol/mol': 45.8 is not a change.
+    const rows = buildTrendRows([
+      { ...reading('4548-4', 7.2, '2026-06-01T10:00:00Z'), unit: '%' },
+      { ...reading('4548-4', 53, '2026-07-01T10:00:00Z'), unit: 'mmol/mol' },
+    ]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.delta).toBeNull();
+    expect(rows[0]?.unitChanged).toBe(true);
+    expect(rows[0]?.judgment).toBe('not judged');
+  });
+
   it('skips text-only results entirely', () => {
     const textOnly: ObservationItem = {
       ...reading('4548-4', 0, '2026-06-20T09:00:00Z'),
@@ -84,5 +106,15 @@ describe('buildTrendRows', () => {
 describe('renewalDateToExpiresAt', () => {
   it('expires at the end of the chosen day, UTC (timezone-aware for the backend)', () => {
     expect(renewalDateToExpiresAt('2026-08-06')).toBe('2026-08-06T23:59:59Z');
+  });
+});
+
+describe('minRenewalDate', () => {
+  it('floors the date input at tomorrow in the local calendar', () => {
+    expect(minRenewalDate(new Date(2026, 6, 13, 15, 30))).toBe('2026-07-14');
+  });
+
+  it('rolls over month and year boundaries', () => {
+    expect(minRenewalDate(new Date(2026, 11, 31, 8, 0))).toBe('2027-01-01');
   });
 });

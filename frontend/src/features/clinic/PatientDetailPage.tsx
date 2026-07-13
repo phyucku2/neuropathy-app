@@ -10,10 +10,12 @@
  *
  * 404-over-403 (ADR-0012): the panel is THE list of patients this clinic may
  * read, and every /clinic/patients/{id}/* fetch answers 404 for anything else
- * — both paths render the neutral PatientNotFound screen.
+ * — both paths render the neutral PatientNotFound screen. A 404 from ANY tab
+ * (e.g. mid-session consent revocation) collapses the WHOLE detail view —
+ * the name/consent header must never sit above a "not found" body.
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { getClinicPatientTrajectory, getPanel } from '../../api/endpoints';
 import { ErrorNotice, Loading } from '../../components/StatusMessages';
@@ -35,9 +37,23 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'features', label: 'Features' },
 ];
 
-function TrajectoryTab({ patientId, displayName }: { patientId: string; displayName: string }) {
+function TrajectoryTab({
+  patientId,
+  displayName,
+  onNotFound,
+}: {
+  patientId: string;
+  displayName: string;
+  onNotFound?: () => void;
+}) {
   const fetcher = useCallback(() => getClinicPatientTrajectory(patientId), [patientId]);
   const { data: trajectory, error, errorStatus, loading } = useApi(fetcher);
+
+  useEffect(() => {
+    if (errorStatus === 404) {
+      onNotFound?.();
+    }
+  }, [errorStatus, onNotFound]);
 
   if (loading) {
     return <Loading label="Computing the trend…" />;
@@ -83,7 +99,16 @@ export function PatientDetailPage() {
   const { patientId = '' } = useParams();
   const { data: panel, error, loading } = useApi(getPanel);
   const [tab, setTab] = useState<TabKey>('trajectory');
+  // A 404 from any tab fetch (consent revoked mid-session) collapses the whole
+  // view — no name, consent date, or tab chips above a "not found" body.
+  const [patientGone, setPatientGone] = useState(false);
+  const handleNotFound = useCallback(() => {
+    setPatientGone(true);
+  }, []);
 
+  if (patientGone) {
+    return <PatientNotFound />;
+  }
   if (loading) {
     return <Loading label="Loading patient…" />;
   }
@@ -124,11 +149,17 @@ export function PatientDetailPage() {
         ))}
       </div>
       {tab === 'trajectory' && (
-        <TrajectoryTab patientId={patientId} displayName={entry.display_name} />
+        <TrajectoryTab
+          patientId={patientId}
+          displayName={entry.display_name}
+          onNotFound={handleNotFound}
+        />
       )}
-      {tab === 'trend-table' && <TrendTable patientId={patientId} />}
-      {tab === 'observations' && <ObservationsTable patientId={patientId} />}
-      {tab === 'features' && <CapabilityOrders patientId={patientId} />}
+      {tab === 'trend-table' && <TrendTable patientId={patientId} onNotFound={handleNotFound} />}
+      {tab === 'observations' && (
+        <ObservationsTable patientId={patientId} onNotFound={handleNotFound} />
+      )}
+      {tab === 'features' && <CapabilityOrders patientId={patientId} onNotFound={handleNotFound} />}
     </div>
   );
 }

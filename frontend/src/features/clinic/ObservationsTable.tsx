@@ -4,7 +4,7 @@
  * /clinic/patients/{id}/observations with limit/offset).
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { getClinicPatientObservations } from '../../api/endpoints';
 import type { ObservationItem } from '../../api/types';
 import { ErrorNotice, Loading } from '../../components/StatusMessages';
@@ -23,13 +23,25 @@ function valueText(item: ObservationItem): string {
   return item.value_text ?? '—';
 }
 
-export function ObservationsTable({ patientId }: { patientId: string }) {
+export function ObservationsTable({
+  patientId,
+  onNotFound,
+}: {
+  patientId: string;
+  onNotFound?: () => void;
+}) {
   const [offset, setOffset] = useState(0);
   const fetcher = useCallback(
     () => getClinicPatientObservations(patientId, { limit: PAGE_SIZE, offset }),
     [patientId, offset],
   );
   const { data: page, error, errorStatus, loading } = useApi(fetcher);
+
+  useEffect(() => {
+    if (errorStatus === 404) {
+      onNotFound?.();
+    }
+  }, [errorStatus, onNotFound]);
 
   if (loading) {
     return <Loading label="Loading observations…" />;

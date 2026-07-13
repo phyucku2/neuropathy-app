@@ -62,3 +62,27 @@ non-enumeration) and the product's non-diagnostic requirement show up in the UI?
   and the new contrast pairs; the 90% coverage gate is unchanged.
 - The patient UI's Home now composes the shared `TrajectoryView` components;
   its rendered markup is unchanged (locked by the existing HomePage tests).
+
+## Addendum (2026-07-13): adversarial-review hardening
+
+- **Renewal = enable-with-expiry.** "Set renewal" no longer echoes the row's
+  possibly stale `active` value (which made renewing an expired order 422
+  every time): a renewal is an ORDER action that sends `{active: true,
+  expires_at}` explicitly, preceded by a fresh read of the capability list so
+  the UI acts on — and re-renders — current state. A past `expires_at` is
+  labeled "expired", never "renews", and the renewal date input is floored at
+  tomorrow (local) so a past date cannot instantly deactivate the order.
+- **Trend table completeness.** The cross-source table pages through ALL
+  observations (hard cap: 10 pages / 1,000 rows) instead of judging from the
+  newest 100; when the cap truncates, the table states "Based on the most
+  recent 1,000 of N records" explicitly. Rows are named by the backend display
+  (same as the Observations tab), so unregistered codes never render raw.
+- **404s collapse the whole detail view.** A 404 from ANY tab fetch (e.g.
+  mid-session consent revocation) replaces the entire page — header, consent
+  date, and tab chips included — with the neutral not-found screen; no
+  post-revocation PHI stays on screen.
+- **Unit-change honesty (shared with the patient UI).** When a metric's latest
+  two readings carry different unit strings (HbA1c as '%' then 'mmol/mol'),
+  neither surface computes a delta or a better/worse verdict: both show a
+  "unit changed" note and "not judged". The trend-table judgment words use the
+  strong green/red pair, locked at AA by the contrast tests.

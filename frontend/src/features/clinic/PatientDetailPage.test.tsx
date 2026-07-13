@@ -2,10 +2,15 @@ import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
-import type { ObservationItem } from '../../api/types';
-import { PANEL_PATIENT_ID } from '../../test/fixtures';
+import type {
+  CapabilityStateOut,
+  ClinicianCapabilitySetIn,
+  ObservationItem,
+} from '../../api/types';
+import { CLINIC_CAPABILITIES, PANEL_PATIENT_ID } from '../../test/fixtures';
 import { renderApp } from '../../test/renderApp';
 import { actAsClinician, server } from '../../test/server';
+import { minRenewalDate } from './CapabilityOrders';
 import { NON_DIAGNOSTIC_TEXT } from './NonDiagnosticNote';
 
 const DETAIL_PATH = `/clinic/patients/${PANEL_PATIENT_ID}`;
@@ -16,6 +21,21 @@ async function openTab(name: string) {
   await screen.findByRole('heading', { name: 'Pat Example' });
   await user.click(screen.getByRole('button', { name }));
   return user;
+}
+
+/** A limit/offset-honoring observations handler over a full newest-first list. */
+function pagedClinicObservations(all: ObservationItem[], total = all.length) {
+  return http.get('/clinic/patients/:patientId/observations', ({ request }) => {
+    const url = new URL(request.url);
+    const limit = Number(url.searchParams.get('limit') ?? '50');
+    const offset = Number(url.searchParams.get('offset') ?? '0');
+    return HttpResponse.json({
+      items: all.slice(offset, offset + limit),
+      total,
+      limit,
+      offset,
+    });
+  });
 }
 
 describe('PatientDetailPage — trajectory tab', () => {
@@ -75,8 +95,9 @@ describe('PatientDetailPage — cross-source trend table', () => {
     expect(swayRow).toHaveTextContent('↓ 1.5');
     expect(swayRow).toHaveTextContent('better');
 
-    // A single lab reading is never judged.
-    const labRow = screen.getByRole('row', { name: /Long-term blood sugar/ });
+    // A single lab reading is never judged. Named by the backend's display —
+    // the same name the Observations tab shows, never the raw code.
+    const labRow = screen.getByRole('row', { name: /Hemoglobin A1c/ });
     expect(labRow).toHaveTextContent('Lab');
     expect(labRow).toHaveTextContent('single reading');
     expect(labRow).toHaveTextContent('not judged');
@@ -86,6 +107,81 @@ describe('PatientDetailPage — cross-source trend table', () => {
 
     // The disclaimer sits under the table too.
     expect(screen.getByText(NON_DIAGNOSTIC_TEXT)).toBeInTheDocument();
+  });
+
+  it('pages through every observation so an old lab keeps its delta and display name', async () => {
+    actAsClinician();
+    const hemoglobin = (value: number, effectiveAt: string): ObservationItem => ({
+      code: '718-7', // NOT in the UI registry — the backend display must name it.
+      display: 'Hemoglobin',
+      value,
+      value_text: null,
+      unit: 'g/dL',
+      effective_at: effectiveAt,
+      source: 'lab',
+      status: 'final',
+    });
+    // Newest-first: the latest hemoglobin sits on page 1, the older one on page 2.
+    const all = [
+      hemoglobin(14.1, '2026-07-01T10:00:00Z'),
+      ...syntheticObservations(120),
+      hemoglobin(13.2, '2026-01-05T10:00:00Z'),
+      ...syntheticObservations(29),
+    ];
+    server.use(pagedClinicObservations(all));
+    await openTab('Trend table');
+    const row = await screen.findByRole('row', { name: /Hemoglobin/ });
+    // The page-2 reading gives it a real delta — never a fake 'single reading'.
+    expect(row).toHaveTextContent('↑ 0.9');
+    expect(row).not.toHaveTextContent('single reading');
+    expect(row).not.toHaveTextContent('718-7');
+    // Everything was fetched (151 of 151): no truncation notice.
+    expect(screen.queryByText(/Based on the most recent/)).not.toBeInTheDocument();
+  });
+
+  it('stops at the 1,000-row safety cap and says so explicitly', async () => {
+    actAsClinician();
+    server.use(pagedClinicObservations(syntheticObservations(1050)));
+    await openTab('Trend table');
+    expect(
+      await screen.findByText('Based on the most recent 1,000 of 1,050 records.'),
+    ).toBeInTheDocument();
+  });
+
+  it('says "unit changed" instead of a delta when the latest two readings differ in unit', async () => {
+    actAsClinician();
+    server.use(
+      pagedClinicObservations([
+        {
+          code: '4548-4',
+          display: 'Hemoglobin A1c',
+          value: 53,
+          value_text: null,
+          unit: 'mmol/mol',
+          effective_at: '2026-07-01T10:00:00Z',
+          source: 'lab',
+          status: 'final',
+        },
+        {
+          code: '4548-4',
+          display: 'Hemoglobin A1c',
+          value: 7.2,
+          value_text: null,
+          unit: '%',
+          effective_at: '2026-06-01T10:00:00Z',
+          source: 'lab',
+          status: 'final',
+        },
+      ]),
+    );
+    await openTab('Trend table');
+    const row = await screen.findByRole('row', { name: /Hemoglobin A1c/ });
+    // 53 mmol/mol minus 7.2 % is not a change: no number, no verdict.
+    expect(row).toHaveTextContent('unit changed');
+    expect(row).toHaveTextContent('not judged');
+    expect(row).not.toHaveTextContent('45.8');
+    expect(row).not.toHaveTextContent('better');
+    expect(row).not.toHaveTextContent('worse');
   });
 
   it('shows an empty state when there are no numeric readings', async () => {
@@ -190,6 +286,16 @@ describe('PatientDetailPage — observations tab', () => {
   });
 });
 
+/** A lapsed order: the backend serves it inactive with a past expires_at. */
+const EXPIRED_ORDER: CapabilityStateOut = {
+  key: 'ingest_biomech',
+  name: 'BioMech report upload',
+  active: false,
+  managed_by: 'clinic',
+  expires_at: '2026-06-01T23:59:59Z',
+  enforced: true,
+};
+
 describe('PatientDetailPage — features tab (capability orders)', () => {
   it('renders toggles with expiry and read-only rows for unwired capabilities', async () => {
     actAsClinician();
@@ -227,8 +333,124 @@ describe('PatientDetailPage — features tab (capability orders)', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
-  it('surfaces the backend 422 verbatim when renewing an inactive capability', async () => {
+  it('labels a lapsed order "expired", never "renews"', async () => {
     actAsClinician();
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    server.use(
+      http.get('/clinic/patients/:patientId/capabilities', () =>
+        HttpResponse.json({ capabilities: [{ ...EXPIRED_ORDER, expires_at: yesterday }] }),
+      ),
+    );
+    await openTab('Features');
+    expect(await screen.findByText(/^expired /)).toBeInTheDocument();
+    expect(screen.queryByText(/renews/)).not.toBeInTheDocument();
+  });
+
+  it('renews an expired order as an explicit enable-with-expiry (ADR-0013)', async () => {
+    actAsClinician();
+    const expired: CapabilityStateOut = {
+      ...EXPIRED_ORDER,
+      expires_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+    };
+    const putBodies: ClinicianCapabilitySetIn[] = [];
+    server.use(
+      http.get('/clinic/patients/:patientId/capabilities', () =>
+        HttpResponse.json({ capabilities: [expired] }),
+      ),
+      http.put('/clinic/patients/:patientId/capabilities/:key', async ({ request }) => {
+        const body = (await request.json()) as ClinicianCapabilitySetIn;
+        putBodies.push(body);
+        // The backend's ADR-0013 rule: expiry pairs only with active=true.
+        if (!body.active && body.expires_at != null) {
+          return HttpResponse.json({ detail: 'expiry only with enable' }, { status: 422 });
+        }
+        return HttpResponse.json({
+          ...expired,
+          active: body.active,
+          expires_at: body.expires_at ?? null,
+        });
+      }),
+    );
+    const user = await openTab('Features');
+    await screen.findByText(/^expired /);
+    fireEvent.change(screen.getByLabelText('Renewal date for BioMech report upload'), {
+      target: { value: '2026-09-01' },
+    });
+    await user.click(screen.getByRole('button', { name: 'Set renewal for BioMech report upload' }));
+    expect(await screen.findByText('renews Sep 1, 2026')).toBeInTheDocument();
+    // The stale row said active=false; the renewal still sends active=true.
+    expect(putBodies).toEqual([{ active: true, expires_at: '2026-09-01T23:59:59Z' }]);
+    expect(screen.getByRole('switch', { name: 'BioMech report upload' })).toBeChecked();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('refetches the capability list right before submitting a renewal', async () => {
+    actAsClinician();
+    const events: string[] = [];
+    let externallyEnabled = false;
+    server.use(
+      http.get('/clinic/patients/:patientId/capabilities', () => {
+        events.push('GET');
+        const capabilities = CLINIC_CAPABILITIES.map((row) =>
+          row.key === 'ingest_adl' ? { ...row, active: externallyEnabled } : row,
+        );
+        return HttpResponse.json({ capabilities });
+      }),
+      http.put('/clinic/patients/:patientId/capabilities/:key', async ({ request, params }) => {
+        events.push('PUT');
+        const body = (await request.json()) as ClinicianCapabilitySetIn;
+        const existing = CLINIC_CAPABILITIES.find(
+          (row) => row.key === params['key'],
+        ) as CapabilityStateOut;
+        return HttpResponse.json({
+          ...existing,
+          active: body.active,
+          expires_at: body.expires_at ?? null,
+        });
+      }),
+    );
+    const user = await openTab('Features');
+    await screen.findByRole('switch', { name: 'Lab result upload' });
+    // Another clinician enables the check-in while this page sits open.
+    externallyEnabled = true;
+    fireEvent.change(screen.getByLabelText('Renewal date for Lab result upload'), {
+      target: { value: '2026-09-01' },
+    });
+    await user.click(screen.getByRole('button', { name: 'Set renewal for Lab result upload' }));
+    expect(await screen.findByText('renews Sep 1, 2026')).toBeInTheDocument();
+    // The fresh GET fired BEFORE the PUT — never acting on a stale snapshot —
+    // and the refetch re-rendered the external change.
+    expect(events).toEqual(['GET', 'GET', 'PUT']);
+    expect(screen.getByRole('switch', { name: 'Daily function check-in' })).toBeChecked();
+  });
+
+  it('floors the renewal date input at tomorrow (local) so past dates are unpickable', async () => {
+    actAsClinician();
+    await openTab('Features');
+    const input = await screen.findByLabelText('Renewal date for Lab result upload');
+    expect(input).toHaveAttribute('min', minRenewalDate());
+    // The floor itself is strictly in the future.
+    expect(new Date(minRenewalDate()).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('surfaces a backend 422 on a refused renewal verbatim', async () => {
+    actAsClinician();
+    server.use(
+      http.put('/clinic/patients/:patientId/capabilities/:key', () =>
+        HttpResponse.json(
+          {
+            detail: [
+              {
+                type: 'value_error',
+                loc: ['body'],
+                msg: 'Value error, expires_at only applies when active=true; omit it when disabling',
+              },
+            ],
+          },
+          { status: 422 },
+        ),
+      ),
+    );
     const user = await openTab('Features');
     await screen.findByRole('switch', { name: 'Daily function check-in' });
     fireEvent.change(screen.getByLabelText('Renewal date for Daily function check-in'), {
@@ -265,6 +487,27 @@ describe('PatientDetailPage — features tab (capability orders)', () => {
     );
     await openTab('Features');
     expect(await screen.findByRole('heading', { name: 'Patient not found' })).toBeInTheDocument();
+  });
+});
+
+describe('PatientDetailPage — mid-session consent revocation', () => {
+  it('collapses the WHOLE detail view when a tab fetch 404s after the initial load', async () => {
+    actAsClinician();
+    const user = userEvent.setup();
+    renderApp(DETAIL_PATH);
+    await screen.findByRole('heading', { name: 'Pat Example' });
+    // Consent is revoked while the page is open: the next tab fetch 404s.
+    server.use(
+      http.get('/clinic/patients/:patientId/observations', () =>
+        HttpResponse.json({ detail: 'Patient not found' }, { status: 404 }),
+      ),
+    );
+    await user.click(screen.getByRole('button', { name: 'Trend table' }));
+    expect(await screen.findByRole('heading', { name: 'Patient not found' })).toBeInTheDocument();
+    // No post-revocation PHI: name, consent date, and tab chips are ALL gone.
+    expect(screen.queryByText('Pat Example')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Consented/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Observations' })).not.toBeInTheDocument();
   });
 });
 

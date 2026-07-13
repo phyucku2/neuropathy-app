@@ -2,9 +2,11 @@
  * Features tab — clinician toggle authority over a consented patient's
  * capabilities, order-style (ADR-0013): a toggle plus an optional renewal
  * (expiry) date. Expiry pairs ONLY with active=true — the backend answers 422
- * otherwise and that message is surfaced verbatim. enforced=false rows are
- * read-only ("not wired yet"): their features do not consult the toggle, so
- * offering the switch would be a false promise.
+ * otherwise and that message is surfaced verbatim. A renewal is therefore an
+ * ENABLE-with-expiry order action (active: true sent explicitly), preceded by
+ * a fresh read of the list so it never acts on a stale snapshot.
+ * enforced=false rows are read-only ("not wired yet"): their features do not
+ * consult the toggle, so offering the switch would be a false promise.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -25,14 +27,28 @@ export function renewalDateToExpiresAt(date: string): string {
   return `${date}T23:59:59Z`;
 }
 
+/**
+ * The renewal date input's floor: tomorrow in the clinician's LOCAL calendar.
+ * A past (or same-day, already-mostly-elapsed) date would instantly
+ * deactivate the order the moment it is set.
+ */
+export function minRenewalDate(now = new Date()): string {
+  const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  const month = String(tomorrow.getMonth() + 1).padStart(2, '0');
+  const day = String(tomorrow.getDate()).padStart(2, '0');
+  return `${String(tomorrow.getFullYear())}-${month}-${day}`;
+}
+
 function CapabilityOrderRow({
   capability,
   busy,
   onSave,
+  onRenew,
 }: {
   capability: CapabilityStateOut;
   busy: boolean;
   onSave: (key: string, body: ClinicianCapabilitySetIn) => void;
+  onRenew: (key: string, expiresAt: string) => void;
 }) {
   const [renewalDate, setRenewalDate] = useState('');
 
@@ -56,7 +72,11 @@ function CapabilityOrderRow({
           <small>{capability.active ? 'Active' : 'Off'}</small>
         </div>
         {capability.expires_at !== null ? (
-          <span className="expiry">renews {formatDayYear(Date.parse(capability.expires_at))}</span>
+          // A lapsed order has EXPIRED — "renews <past date>" would misstate it.
+          <span className="expiry">
+            {Date.parse(capability.expires_at) < Date.now() ? 'expired' : 'renews'}{' '}
+            {formatDayYear(Date.parse(capability.expires_at))}
+          </span>
         ) : (
           <span className="muted" aria-hidden="true">
             —
@@ -83,6 +103,7 @@ function CapabilityOrderRow({
             id={`renew-${capability.key}`}
             type="date"
             aria-label={`Renewal date for ${capability.name}`}
+            min={minRenewalDate()}
             value={renewalDate}
             onChange={(event) => {
               setRenewalDate(event.target.value);
@@ -95,12 +116,7 @@ function CapabilityOrderRow({
           aria-label={`Set renewal for ${capability.name}`}
           disabled={busy || renewalDate === ''}
           onClick={() => {
-            // Sent with the row's CURRENT active state: renewing an off order
-            // is refused by the backend (422) and surfaced verbatim below.
-            onSave(capability.key, {
-              active: capability.active,
-              expires_at: renewalDateToExpiresAt(renewalDate),
-            });
+            onRenew(capability.key, renewalDateToExpiresAt(renewalDate));
           }}
         >
           Set renewal
@@ -110,7 +126,13 @@ function CapabilityOrderRow({
   );
 }
 
-export function CapabilityOrders({ patientId }: { patientId: string }) {
+export function CapabilityOrders({
+  patientId,
+  onNotFound,
+}: {
+  patientId: string;
+  onNotFound?: () => void;
+}) {
   const fetcher = useCallback(() => getClinicPatientCapabilities(patientId), [patientId]);
   const { data, error, errorStatus, loading } = useApi(fetcher);
   const [rows, setRows] = useState<CapabilityStateOut[] | null>(null);
@@ -123,6 +145,12 @@ export function CapabilityOrders({ patientId }: { patientId: string }) {
     }
   }, [data]);
 
+  useEffect(() => {
+    if (errorStatus === 404) {
+      onNotFound?.();
+    }
+  }, [errorStatus, onNotFound]);
+
   const save = async (key: string, body: ClinicianCapabilitySetIn) => {
     setSaveError(null);
     setSaving(true);
@@ -132,6 +160,31 @@ export function CapabilityOrders({ patientId }: { patientId: string }) {
     } catch (cause) {
       // 422 (expiry-without-enable) and 409 (ops-disabled) carry the backend's
       // own explanation — shown verbatim, no rewording.
+      setSaveError(messageFor(cause));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const renew = async (key: string, expiresAt: string) => {
+    setSaveError(null);
+    setSaving(true);
+    try {
+      // Fresh read FIRST: the order may have changed since this page loaded
+      // (another clinician, a lapse) — re-render current state before acting
+      // on it rather than submitting from a stale snapshot.
+      const fresh = await getClinicPatientCapabilities(patientId);
+      setRows(fresh.capabilities);
+      // ADR-0013 order-renewal semantics: a renewal IS an enable-with-expiry
+      // order action, so active: true is sent explicitly. Renewing an expired
+      // order (served as active=false) must succeed — sending the row's stale
+      // active value would 422 every time.
+      const confirmed = await putClinicPatientCapability(patientId, key, {
+        active: true,
+        expires_at: expiresAt,
+      });
+      setRows((current) => current?.map((row) => (row.key === key ? confirmed : row)) ?? null);
+    } catch (cause) {
       setSaveError(messageFor(cause));
     } finally {
       setSaving(false);
@@ -162,6 +215,9 @@ export function CapabilityOrders({ patientId }: { patientId: string }) {
           busy={saving}
           onSave={(key, body) => {
             void save(key, body);
+          }}
+          onRenew={(key, expiresAt) => {
+            void renew(key, expiresAt);
           }}
         />
       ))}

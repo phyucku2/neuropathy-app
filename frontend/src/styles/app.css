@@ -772,6 +772,15 @@ h2 {
   font-weight: 600;
 }
 
+/*
+ * Judgment words in the trend table are 14px normal text on the white card:
+ * brand green (#2f8f5b, 4.04:1) fails AA there, so "better" uses the strong
+ * green (5.28:1). Both judgment colors are locked by contrast.test.ts.
+ */
+.data-table .up {
+  color: var(--color-action-green-strong);
+}
+
 .pager {
   display: flex;
   align-items: center;

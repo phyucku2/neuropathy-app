@@ -111,6 +111,41 @@ describe('TrendsPage', () => {
     expect(unjudged).not.toHaveTextContent('worse');
   });
 
+  it('withholds the delta and judgment when the latest two readings changed unit', async () => {
+    const unitSwitched: ObservationItem[] = [
+      // HbA1c reported as mmol/mol after a % result: 53 - 7.2 is meaningless.
+      {
+        code: '4548-4',
+        display: 'Hemoglobin A1c',
+        value: 53,
+        value_text: null,
+        unit: 'mmol/mol',
+        effective_at: '2026-07-01T10:00:00Z',
+        source: 'lab',
+        status: 'final',
+      },
+      {
+        code: '4548-4',
+        display: 'Hemoglobin A1c',
+        value: 7.2,
+        value_text: null,
+        unit: '%',
+        effective_at: '2026-06-01T10:00:00Z',
+        source: 'lab',
+        status: 'final',
+      },
+    ];
+    server.use(observationsPage(unitSwitched));
+    renderApp('/trends');
+    expect(await screen.findByText('unit changed — change not judged')).toBeInTheDocument();
+    // The latest value still shows, but NO numeric delta and NO verdict word.
+    expect(screen.getByText('53')).toBeInTheDocument();
+    expect(screen.queryByText(/45\.8/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/· better/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/· worse/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: /improving|getting worse/ })).not.toBeInTheDocument();
+  });
+
   it('shows a visible empty state for a code with fewer than 2 points', async () => {
     const user = userEvent.setup();
     renderApp('/trends');
