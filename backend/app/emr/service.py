@@ -4,8 +4,11 @@ Storage posture: connections live behind the injected `EmrConnectionRepository` 
 pulled labs are persisted as research-grade Observations through the injected
 `ObservationRepository` (in-memory defaults for unit tests and DB-less development;
 Postgres in deployment). OAuth tokens live in a SecretStore (in-memory now, secret
-manager later); pending auth states are transient and stay in-process. Swapping
-storage changes implementations, not this flow or the API contract.
+manager later); pending auth states (`PendingAuthStore`) span the connect and callback
+requests, so when services are built per request (DB mode, app/api/deps.py) both the
+secret store and the pending store are process-level singletons shared across
+instances — still per-process, never per-request. Swapping storage changes
+implementations, not this flow or the API contract.
 """
 
 from __future__ import annotations
@@ -37,7 +40,13 @@ from app.repositories.emr_connection import (
 from app.repositories.observation import InMemoryObservationRepository, ObservationRepository
 from app.schemas.lab import LabResultIn
 
-__all__ = ["ConnectionRecord", "EmrError", "EmrService", "InMemorySecretStore"]
+__all__ = [
+    "ConnectionRecord",
+    "EmrError",
+    "EmrService",
+    "InMemorySecretStore",
+    "PendingAuthStore",
+]
 
 
 class EmrError(Exception):
@@ -54,6 +63,11 @@ class _PendingAuth:
     connection_id: uuid.UUID
     code_verifier: str
     token_endpoint: str
+
+
+# state -> pending PKCE exchange. The map must outlive a single request (connect and
+# callback arrive separately), so DB-mode wiring injects one process-level instance.
+PendingAuthStore = dict[str, _PendingAuth]
 
 
 class InMemorySecretStore:
@@ -80,7 +94,7 @@ class EmrService:
     connections: EmrConnectionRepository = field(default_factory=InMemoryEmrConnectionRepository)
     observations: ObservationRepository = field(default_factory=InMemoryObservationRepository)
     audit: AuditEventRepository = field(default_factory=InMemoryAuditEventRepository)
-    _pending: dict[str, _PendingAuth] = field(default_factory=dict)
+    _pending: PendingAuthStore = field(default_factory=dict)
 
     async def start_connect(
         self, *, patient_id: uuid.UUID, fhir_base: str, provider_name: str | None
