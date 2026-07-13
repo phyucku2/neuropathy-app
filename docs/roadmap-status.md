@@ -17,13 +17,13 @@ review findings fixed), **Merged** (on `main`).
 | Trajectory engine — explainable direction/confidence/signals | ✅ | ✅ | ✅ |
 | Postgres durability — repositories, migrations, request transactions | ✅ | ✅ | ✅ |
 | AI narrative layer — validated, BAA-gated, off-request-path (ADR-0011) | ✅ | ✅ | ✅ |
-| Clinician surface — consent-gated panel/views, invitations (ADR-0012) | ✅ | ✅ 100% cov | ⏳ PR #3 |
+| Clinician surface — consent-gated panel/views, invitations (ADR-0012) | ✅ | ✅ 100% cov | ✅ PR #3 |
 
 ## Remaining (build order)
 
 | # | Portion | Built | Tested | Merged | Notes |
 |---|---|---|---|---|---|
-| 1 | Feature toggles API — expose Capability/PatientCapability (model exists, no endpoints); patient self-toggles (B2C) + clinician-managed toggles, consent-aware | ✅ | ✅ 100% cov | ◻️ | ADR-0013; enforcement seam live on POST /adl + /labs, remaining consumers noted in the ADR |
+| 1 | Feature toggles API — expose Capability/PatientCapability (model exists, no endpoints); patient self-toggles (B2C) + clinician-managed toggles, consent-aware | ✅ | ✅ 100% cov | ⏳ PR #4 | ADR-0013; enforcement seam live on POST /adl + /labs + EMR pull, remaining consumers noted in the ADR |
 | 2 | BioMech PDF ingest module (V1) — parse balance/gait report PDFs into research-grade Observations (SourceType.biomech); ingest + graph only | ◻️ | ◻️ | ◻️ | Separate module by design |
 | 3 | Patient graphing/trends UI — from mockups/patient-app.html against the existing API | ◻️ | ◻️ | ◻️ | Mockup approved |
 | 4 | Clinician UI — from mockups/clinician-app.html (panel, cross-source trend table, non-diagnostic) | ◻️ | ◻️ | ◻️ | Mockup approved |
