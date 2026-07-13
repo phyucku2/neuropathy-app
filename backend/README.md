@@ -35,6 +35,29 @@ reference-range crossings), then the `ai/` layer uses a BAA-covered model only t
 confidence-scored `Trajectory`. Every feature is gated by the capability/toggle model,
 enforced server-side. PHI access and toggle changes are audit-logged.
 
+## Persistence modes
+
+Storage is selected by whether `DATABASE_URL` is set (`app/core/config.py`):
+
+- **`DATABASE_URL` unset (default):** every request is served by the in-memory
+  stores (`app/api/deps.py` singletons). Per-process and non-durable by design —
+  for unit tests and DB-less development only.
+- **`DATABASE_URL` set:** the app lifespan (`app/main.py`) builds one async engine +
+  sessionmaker per process, and every request runs against Postgres-backed
+  repositories bound to a request-scoped transaction (`app/db/session.py`):
+  commit on success, rollback on any error. Users, patients, EMR connections,
+  observations, and audit events are durable across restarts.
+
+**Migration bootstrap (files-only rule):** the app never creates or migrates schema
+at startup. Before the first boot with a database — and after every schema change —
+a human runs `alembic upgrade head` against that `DATABASE_URL`. Booting against an
+un-migrated database fails at the first query, by design.
+
+Known limitation (even in DB mode): OAuth *pending* auth states and the token secret
+store are process-level in-memory singletons — a durable secret-manager adapter and a
+DB-backed pending store are follow-ups. Configure `JWT_SECRET` so issued tokens
+survive restarts and multiple workers.
+
 ## Run locally
 
 ```bash
@@ -43,6 +66,7 @@ python -m venv .venv && source .venv/bin/activate    # Windows: .venv\Scripts\ac
 pip install -e ".[dev]"
 
 cp .env.example .env          # fill in locally; never commit .env
+                              # leave DATABASE_URL unset to run in-memory (no Postgres)
 
 # Postgres via Docker (example):
 # docker run --name neuro-pg -e POSTGRES_USER=neuro -e POSTGRES_PASSWORD=neuro \
@@ -50,7 +74,7 @@ cp .env.example .env          # fill in locally; never commit .env
 
 # Migrations are files-only — generate + review, then apply intentionally:
 alembic revision --autogenerate -m "init"    # writes a file; review it
-# alembic upgrade head                        # a human runs this
+# alembic upgrade head                        # a human runs this before first DB boot
 
 uvicorn app.main:app --reload
 # -> http://127.0.0.1:8000  (docs at /docs, health at /healthz)

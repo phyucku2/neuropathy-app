@@ -11,7 +11,12 @@ class Settings(BaseSettings):
     app_env: str = "local"
     app_debug: bool = False
 
-    database_url: str = "postgresql+asyncpg://neuro:neuro@localhost:5432/neuropathy"
+    # Persistence is opt-in: set DATABASE_URL to run every request against
+    # Postgres-backed repositories in a request-scoped transaction (app/db/session.py,
+    # app/api/deps.py). Unset (the default) means the in-memory stores serve requests —
+    # per-process and non-durable, for unit tests and DB-less development only.
+    # Alembic reads this too; apply migrations before first boot (backend/README.md).
+    database_url: str | None = None
 
     # External providers — must be BAA-covered before any PHI flows (ADR-0003).
     ai_provider: str | None = None
