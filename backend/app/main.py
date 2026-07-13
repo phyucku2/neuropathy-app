@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import JSONResponse
 
 from app.api.router import api_router
 from app.core.config import settings
 from app.db.session import create_engine_and_sessionmaker
+
+# Multipart framing allowance on top of the PDF byte cap for the upload route's
+# declared-size check.
+_UPLOAD_OVERHEAD_BYTES = 64 * 1024
 
 
 @asynccontextmanager
@@ -43,6 +48,26 @@ def create_app() -> FastAPI:
         lifespan=_lifespan,
     )
     application.include_router(api_router)
+
+    @application.middleware("http")
+    async def _reject_oversized_uploads(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        """Refuse an over-declared upload BEFORE its body is parsed or spooled — the
+        PDF byte cap must bound network/disk work, not just memory (ADR-0014 review
+        finding). A chunked request without Content-Length still spools to disk; the
+        route's `file.size` check and bounded read then cap what reaches memory.
+        """
+        if request.url.path == "/biomech/reports":
+            declared = request.headers.get("content-length", "")
+            if declared.isdigit() and (
+                int(declared) > settings.biomech_max_pdf_bytes + _UPLOAD_OVERHEAD_BYTES
+            ):
+                return JSONResponse(
+                    status_code=422,
+                    content={"detail": "Upload exceeds the PDF size cap"},
+                )
+        return await call_next(request)
 
     @application.get("/", include_in_schema=False)
     async def root() -> dict[str, str]:

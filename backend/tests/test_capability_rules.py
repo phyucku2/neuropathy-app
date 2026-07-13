@@ -114,6 +114,7 @@ async def test_registry_covers_every_shipped_feature() -> None:
     assert {s.key for s in states} == {
         "ingest_labs",
         "ingest_adl",
+        "ingest_biomech",
         "emr_connect",
         "ai_narrative",
         "share_with_clinic",

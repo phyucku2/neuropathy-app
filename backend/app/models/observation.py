@@ -26,8 +26,7 @@ from app.db.base import Base, Timestamps, UUIDPrimaryKey
 class SourceType(enum.StrEnum):
     lab = "lab"  # patient-imported lab result (FHIR/LOINC/UCUM — ADR-0007)
     adl = "adl"  # activities-of-daily-living / functional status (patient-reported)
-    # NOTE: BioMech is a separate module built later (ADR-0007); it will register its
-    # own source when that module lands. Not part of the core data model now.
+    biomech = "biomech"  # BioMech balance/gait report, PDF-ingested (ADR-0014, app/biomech)
 
 
 class DataOrigin(enum.StrEnum):

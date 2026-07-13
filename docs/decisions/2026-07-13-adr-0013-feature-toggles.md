@@ -23,8 +23,10 @@ A code-registry + lazy rows + one effective-state predicate, with five postures:
 
 1. **The registry lives in code; rows are seeded lazily.** `CAPABILITIES`
    (app/services/capability.py) is the canonical list of what the app ships today —
-   `ingest_labs`, `ingest_adl`, `emr_connect`, `ai_narrative`, `share_with_clinic` —
-   each with key, name, and default. Registry DB rows are get-or-created by key on
+   `ingest_labs`, `ingest_adl`, `ingest_biomech`, `emr_connect`, `ai_narrative`,
+   `share_with_clinic` — each with key, name, and default. (`ingest_biomech` was added
+   with the BioMech PDF ingest module, ADR-0014, `enforced=True`; its consumer is
+   `POST /biomech/reports`.) Registry DB rows are get-or-created by key on
    first touch (race-safe: the unique key constraint backstops it and the loser
    re-fetches the winner's row, mirroring the ADR-0012 duplicate-invite absorption),
    so both storage modes work without seed scripts and a deploy can never "forget"

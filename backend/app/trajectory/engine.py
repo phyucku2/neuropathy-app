@@ -59,6 +59,7 @@ _TIE_PRIORITY = {Direction.declining: 2, Direction.stable: 1, Direction.improvin
 _SOURCE_GAP_MESSAGES = {
     SourceType.lab: "No lab results yet.",
     SourceType.adl: "No daily-activity check-ins yet.",
+    SourceType.biomech: "No BioMech reports yet.",
 }
 
 _RANGE_NOTES = {

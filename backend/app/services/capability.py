@@ -83,6 +83,7 @@ class CapabilitySpec:
 CAPABILITIES: tuple[CapabilitySpec, ...] = (
     CapabilitySpec(key="ingest_labs", name="Lab result upload", default=True, enforced=True),
     CapabilitySpec(key="ingest_adl", name="Daily function check-in", default=True, enforced=True),
+    CapabilitySpec(key="ingest_biomech", name="BioMech report upload", default=True, enforced=True),
     CapabilitySpec(
         key="emr_connect", name="Medical record connection", default=True, enforced=False
     ),
