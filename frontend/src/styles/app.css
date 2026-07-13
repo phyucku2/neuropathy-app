@@ -74,6 +74,17 @@ body {
   padding: var(--space-md);
 }
 
+.status-bar .status-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.status-bar .who {
+  font-size: 13px;
+  opacity: 0.9;
+}
+
 .tabbar {
   display: flex;
   background: var(--color-card);
@@ -683,4 +694,124 @@ h2 {
   color: var(--color-text-secondary);
   text-align: center;
   padding: var(--space-lg);
+}
+
+/* ---------- Clinician area (mockups/clinician-app.html) ---------- */
+
+/* The clinician console is a working surface, not a phone frame. */
+.app-frame.clinician {
+  max-width: 980px;
+}
+
+/* Panel row: the whole row is the link to the patient. */
+.prow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px;
+  border-radius: 10px;
+  min-height: var(--min-touch-target);
+  text-decoration: none;
+  color: var(--color-text-primary);
+}
+
+.prow:hover {
+  background: var(--color-muted);
+}
+
+.prow .ava {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-pill);
+  /* brand-blue holds AA with white text (same pair as the pressed metric chip) */
+  background: var(--color-brand-blue);
+  color: var(--color-text-on-dark);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 13px;
+  flex: none;
+}
+
+.prow .nm {
+  flex: 1;
+}
+
+.prow .nm small {
+  color: var(--color-text-secondary);
+  display: block;
+}
+
+/* Cross-source trend + observation tables. Wide content scrolls in place. */
+.table-scroll {
+  overflow-x: auto;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.data-table th,
+.data-table td {
+  text-align: left;
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 14px;
+}
+
+.data-table thead th {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+}
+
+.data-table tbody th {
+  font-weight: 600;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+/*
+ * Non-diagnostic disclaimer. Text/background is the SAME verified pair as
+ * .pill.warn (#8a5313 on #f7ecdd, 5.4:1) — locked by contrast.test.ts.
+ */
+.disclaimer {
+  background: #f7ecdd;
+  border: 1px solid var(--color-status-warning);
+  color: #8a5313;
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  font-size: var(--text-small);
+  margin: 12px 0;
+}
+
+/* Order renewal (ADR-0013): the date is a supporting note, warn-toned. */
+.expiry {
+  font-size: 12px;
+  font-weight: 600;
+  color: #8a5313; /* 6.4:1 on white — locked by contrast.test.ts */
+  white-space: nowrap;
+}
+
+.renew-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 0 0 12px;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: 4px;
+}
+
+.renew-row .field input {
+  min-height: 40px;
+  padding: 8px 12px;
 }

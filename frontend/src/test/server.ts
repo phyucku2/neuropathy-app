@@ -2,13 +2,17 @@
 
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
-import type { AdlCheckInIn, CapabilitySetIn } from '../api/types';
+import type { AdlCheckInIn, CapabilitySetIn, ClinicianCapabilitySetIn } from '../api/types';
 import {
   CAPABILITIES,
+  CLINIC_CAPABILITIES,
+  CLINICIAN_ME,
   CONNECTION_ACTIVE,
   CONNECTION_PENDING,
   ME,
   OBSERVATIONS,
+  PANEL,
+  PANEL_PATIENT_ID,
   TEST_ACCESS_TOKEN,
   TEST_EMAIL,
   TEST_PASSWORD,
@@ -17,7 +21,7 @@ import {
   TRAJECTORY_IMPROVING,
 } from './fixtures';
 
-function isAuthorized(request: Request): boolean {
+export function isAuthorized(request: Request): boolean {
   const header = request.headers.get('authorization');
   return (
     header === `Bearer ${TEST_ACCESS_TOKEN}` || header === `Bearer ${TEST_REFRESHED_ACCESS_TOKEN}`
@@ -25,6 +29,24 @@ function isAuthorized(request: Request): boolean {
 }
 
 const unauthorized = () => HttpResponse.json({ detail: 'Not authenticated' }, { status: 401 });
+
+/** 404-over-403: unknown AND unconsented ids are indistinguishable (ADR-0012). */
+const patientNotFound = () => HttpResponse.json({ detail: 'Patient not found' }, { status: 404 });
+
+/** The backend's 422 shape for the expiry-only-with-enable rule (ADR-0013). */
+const expiryRefused = () =>
+  HttpResponse.json(
+    {
+      detail: [
+        {
+          type: 'value_error',
+          loc: ['body'],
+          msg: 'Value error, expires_at only applies when active=true; omit it when disabling',
+        },
+      ],
+    },
+    { status: 422 },
+  );
 
 export const handlers = [
   http.post('/auth/login', async ({ request }) => {
@@ -145,6 +167,90 @@ export const handlers = [
   http.delete('/connections/:id', ({ request }) =>
     isAuthorized(request) ? new HttpResponse(null, { status: 204 }) : unauthorized(),
   ),
+
+  // ---- clinician surface ----
+
+  http.post('/clinic/invitations', ({ request }) =>
+    isAuthorized(request)
+      ? // Byte-identical 202 whether or not the email matched (non-enumeration).
+        HttpResponse.json(
+          { detail: 'If this email belongs to a patient account, an invitation is now pending.' },
+          { status: 202 },
+        )
+      : unauthorized(),
+  ),
+
+  http.get('/clinic/patients', ({ request }) =>
+    isAuthorized(request) ? HttpResponse.json(PANEL) : unauthorized(),
+  ),
+
+  http.get('/clinic/patients/:patientId/trajectory', ({ request, params }) => {
+    if (!isAuthorized(request)) {
+      return unauthorized();
+    }
+    return params['patientId'] === PANEL_PATIENT_ID
+      ? HttpResponse.json(TRAJECTORY_IMPROVING)
+      : patientNotFound();
+  }),
+
+  http.get('/clinic/patients/:patientId/observations', ({ request, params }) => {
+    if (!isAuthorized(request)) {
+      return unauthorized();
+    }
+    if (params['patientId'] !== PANEL_PATIENT_ID) {
+      return patientNotFound();
+    }
+    const url = new URL(request.url);
+    const limit = Number(url.searchParams.get('limit') ?? '50');
+    const offset = Number(url.searchParams.get('offset') ?? '0');
+    return HttpResponse.json({
+      items: OBSERVATIONS.slice(offset, offset + limit),
+      total: OBSERVATIONS.length,
+      limit,
+      offset,
+    });
+  }),
+
+  http.get('/clinic/patients/:patientId/capabilities', ({ request, params }) => {
+    if (!isAuthorized(request)) {
+      return unauthorized();
+    }
+    return params['patientId'] === PANEL_PATIENT_ID
+      ? HttpResponse.json({ capabilities: CLINIC_CAPABILITIES })
+      : patientNotFound();
+  }),
+
+  http.put('/clinic/patients/:patientId/capabilities/:key', async ({ request, params }) => {
+    if (!isAuthorized(request)) {
+      return unauthorized();
+    }
+    const body = (await request.json()) as ClinicianCapabilitySetIn;
+    // Schema validation runs before the existence gate in FastAPI.
+    if (!body.active && body.expires_at != null) {
+      return expiryRefused();
+    }
+    if (params['patientId'] !== PANEL_PATIENT_ID) {
+      return patientNotFound();
+    }
+    const existing = CLINIC_CAPABILITIES.find((row) => row.key === params['key']);
+    if (existing === undefined) {
+      return HttpResponse.json({ detail: 'Unknown capability' }, { status: 404 });
+    }
+    return HttpResponse.json({
+      ...existing,
+      active: body.active,
+      expires_at: body.expires_at ?? null,
+    });
+  }),
 ];
 
 export const server = setupServer(...handlers);
+
+/** Make GET /auth/me answer with the clinician account for the current test. */
+export function actAsClinician(): void {
+  server.use(
+    http.get('/auth/me', ({ request }) =>
+      isAuthorized(request) ? HttpResponse.json(CLINICIAN_ME) : unauthorized(),
+    ),
+  );
+}

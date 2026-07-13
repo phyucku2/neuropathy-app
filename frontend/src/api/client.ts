@@ -46,6 +46,23 @@ interface RequestOptions {
 
 const GENERIC_DETAIL = 'Something went wrong. Please try again.';
 
+/**
+ * FastAPI schema validation (422) sends `detail` as a list of error objects;
+ * their `msg` strings carry the backend's own wording (e.g. the ADR-0013
+ * expiry rule) and are surfaced verbatim.
+ */
+function validationMessages(detail: unknown[]): string | null {
+  const messages = detail.flatMap((entry) =>
+    entry !== null &&
+    typeof entry === 'object' &&
+    'msg' in entry &&
+    typeof (entry as { msg: unknown }).msg === 'string'
+      ? [(entry as { msg: string }).msg]
+      : [],
+  );
+  return messages.length > 0 ? messages.join(' ') : null;
+}
+
 async function errorDetail(response: Response): Promise<string> {
   try {
     const payload: unknown = await response.json();
@@ -53,6 +70,9 @@ async function errorDetail(response: Response): Promise<string> {
       const detail = (payload as { detail: unknown }).detail;
       if (typeof detail === 'string') {
         return detail;
+      }
+      if (Array.isArray(detail)) {
+        return validationMessages(detail) ?? GENERIC_DETAIL;
       }
     }
   } catch {

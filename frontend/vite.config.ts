@@ -13,6 +13,7 @@ const API_PREFIXES = [
   '/trajectory',
   '/capabilities',
   '/connections',
+  '/clinic',
 ];
 
 export default defineConfig({

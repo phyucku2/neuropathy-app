@@ -1,11 +1,13 @@
 /** Tiny data-fetching hook: loading / error / data + reload, no cache layer. */
 
 import { useCallback, useEffect, useState } from 'react';
-import { messageFor } from '../api/client';
+import { ApiError, messageFor } from '../api/client';
 
 export interface ApiState<T> {
   data: T | null;
   error: string | null;
+  /** HTTP status when the failure was an ApiError (e.g. 404 → neutral not-found UX). */
+  errorStatus: number | null;
   loading: boolean;
   reload: () => void;
 }
@@ -13,6 +15,7 @@ export interface ApiState<T> {
 export function useApi<T>(fetcher: () => Promise<T>): ApiState<T> {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [tick, setTick] = useState(0);
 
@@ -20,6 +23,7 @@ export function useApi<T>(fetcher: () => Promise<T>): ApiState<T> {
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setErrorStatus(null);
     fetcher()
       .then((result) => {
         if (!cancelled) {
@@ -30,6 +34,7 @@ export function useApi<T>(fetcher: () => Promise<T>): ApiState<T> {
       .catch((cause: unknown) => {
         if (!cancelled) {
           setError(messageFor(cause));
+          setErrorStatus(cause instanceof ApiError ? cause.status : null);
           setLoading(false);
         }
       });
@@ -42,5 +47,5 @@ export function useApi<T>(fetcher: () => Promise<T>): ApiState<T> {
     setTick((current) => current + 1);
   }, []);
 
-  return { data, error, loading, reload };
+  return { data, error, errorStatus, loading, reload };
 }

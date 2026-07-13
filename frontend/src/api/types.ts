@@ -136,6 +136,12 @@ export interface CapabilitySetIn {
   active: boolean;
 }
 
+/** ClinicianCapabilitySetIn — expiry pairs only with active=true (the backend 422s otherwise). */
+export interface ClinicianCapabilitySetIn {
+  active: boolean;
+  expires_at?: string | null;
+}
+
 // ---- clinic.py ----
 
 /** ConnectionOut (patient-side clinic connection) */
@@ -147,4 +153,27 @@ export interface ConnectionOut {
   initiated_by: string;
   consent_granted_at: string | null;
   revoked_at: string | null;
+}
+
+/** InvitationIn */
+export interface InvitationIn {
+  email: string;
+}
+
+/** InvitationOut — one fixed sentence for every outcome (non-enumeration). */
+export interface InvitationOut {
+  detail: string;
+}
+
+/** PanelPatientOut */
+export interface PanelPatientOut {
+  patient_id: string;
+  display_name: string;
+  connection_id: string;
+  consent_granted_at: string;
+}
+
+/** PanelOut */
+export interface PanelOut {
+  patients: PanelPatientOut[];
 }
