@@ -11,6 +11,7 @@ import { PatientDetailPage } from './features/clinic/PatientDetailPage';
 import { HomePage } from './features/home/HomePage';
 import { SettingsPage } from './features/settings/SettingsPage';
 import { TrendsPage } from './features/trends/TrendsPage';
+import { useNativeShell } from './native/useNativeShell';
 
 function RequireAuth() {
   const { status } = useAuth();
@@ -46,6 +47,8 @@ function ClinicianArea() {
 }
 
 export function App() {
+  // Native-only shell wiring (status bar, splash, hardware back). No-op on web (ADR-0025).
+  useNativeShell();
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
