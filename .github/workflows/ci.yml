@@ -95,6 +95,47 @@ jobs:
       - name: Production build
         run: npx vite build
 
+  # Browser E2E (ADR-0022): the Definition-of-Done real-browser gate for the shipped
+  # patient + clinician UIs. A DEDICATED, blocking job so the browser download +
+  # runtime are isolated from the fast `frontend` gate above (which stays untouched):
+  # a flake here is diagnosable without weakening any existing gate. Drives the REAL
+  # `vite build`/`vite preview` bundle in Chromium; the API is mocked in-browser, so
+  # no backend/Postgres is provisioned. `npx playwright install` runs in CI ONLY —
+  # locally the browser is pre-installed at PLAYWRIGHT_BROWSERS_PATH.
+  e2e:
+    name: Frontend — browser E2E (Playwright)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Install Chromium for Playwright (CI only)
+        # The pinned @playwright/test version resolves the matching browser build.
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E suite (builds, previews, drives Chromium; zero console errors)
+        run: npm run e2e
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report
+          retention-days: 7
+
   # ALL scan steps in this job BLOCK the merge (ADR-0017): the Python
   # vulnerability audit and license allowlist, the frontend npm audit and
   # license allowlist, and the secret scan. The Python steps resolve the real

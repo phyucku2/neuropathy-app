@@ -27,6 +27,9 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['src/test/setup.ts'],
     restoreMocks: true,
+    // Vitest owns the src unit/component suite; the Playwright E2E specs under
+    // e2e/ (also *.spec.ts) run in a real browser and MUST NOT be collected here.
+    include: ['src/**/*.{test,spec}.{ts,tsx}'],
     coverage: {
       provider: 'v8',
       include: ['src/**'],

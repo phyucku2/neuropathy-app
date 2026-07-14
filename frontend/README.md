@@ -43,6 +43,27 @@ npm run build          # vite production build
 
 Tests run against an msw-mocked API with synthetic data only (CLAUDE.md §5).
 
+## Browser E2E (ADR-0022 — the Definition-of-Done real-browser gate)
+
+A committed Playwright/Chromium smoke suite drives the **built** production bundle
+(`vite build` → `vite preview`) in a real browser, asserts key patient + clinician
+flows render and work, and FAILS on any new console error. A passing unit/msw test is
+NOT sufficient proof that a UI works (CLAUDE.md Definition of Done); this suite is.
+
+```bash
+cd frontend
+npm ci
+npm run e2e            # builds, previews, runs all specs in Chromium (headless)
+npm run e2e:report     # open the last HTML report
+```
+
+- The API is intercepted **in-browser** with `page.route`, fulfilled from fixtures
+  that mirror `src/test/server.ts`; there is no live backend. A test `/config.js`
+  (ADR-0018 runtime config) is written into `dist/` so the built app boots.
+- The browser is the pre-installed Chromium at `PLAYWRIGHT_BROWSERS_PATH`
+  (`/opt/pw-browsers`); the pinned `@playwright/test` version matches it, so no
+  `playwright install` / download is needed locally. CI installs the browser itself.
+
 ## Security posture (ADR-0015)
 
 Access token in memory only; refresh token in sessionStorage (tab-scoped); typed
