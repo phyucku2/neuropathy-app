@@ -75,7 +75,12 @@ episode/setup event, billing-consent scope, PHI-safe billing-evidence export, Bi
 device-provenance strengthening, and the FDA device-status ADR). **PENDING compliance
 validation** of the reimbursement analysis by a certified professional coder +
 compliance/legal **before any build** — this Wave enables billing pathways, it does not
-authorize billing, and nothing starts until that sign-off exists.
+authorize billing, and nothing starts until that sign-off exists. The review packet for
+that sign-off is
+[`docs/product/reimbursement-signoff-packet.md`](product/reimbursement-signoff-packet.md)
+(the exact decisions requested, reviewable assertions, the FDA device-status question, and
+the sign-off sheet); market context on products already billing these codes is in
+[`docs/product/reimbursed-apps-comparison.md`](product/reimbursed-apps-comparison.md).
 
 ## Deferred (not scheduled)
 
