@@ -104,6 +104,9 @@ class CurrentUser:
     # Set for clinician users (ADR-0012); defaulted last so existing constructions
     # keep working unchanged.
     clinic_id: uuid.UUID | None = None
+    # Whether the account is active (ADR-0019). A live JWT can outlast a deactivation
+    # by up to the access-token TTL, so the role gates re-check this, not just login.
+    active: bool = True
 
 
 def _unauthorized(reason: str) -> HTTPException:
@@ -132,6 +135,7 @@ async def get_current_user(
         email=user.email,
         display_name=user.display_name,
         clinic_id=user.clinic_id,
+        active=user.active,
     )
 
 
@@ -156,6 +160,18 @@ def require_clinician(current: CurrentUserDep) -> CurrentUser:
 
 
 ClinicianUserDep = Annotated[CurrentUser, Depends(require_clinician)]
+
+
+def require_ops(current: CurrentUserDep) -> CurrentUser:
+    """Ops-scoped endpoints (ADR-0019): the caller must be an ACTIVE ops operator.
+    An ops principal carries neither patient_id nor clinic_id; a deactivated one is
+    refused here even while its (short-lived) access token is still otherwise valid."""
+    if current.role is not UserRole.ops or not current.active:
+        raise HTTPException(status_code=403, detail="Ops account required")
+    return current
+
+
+OpsUserDep = Annotated[CurrentUser, Depends(require_ops)]
 
 
 @lru_cache(maxsize=1)

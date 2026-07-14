@@ -111,6 +111,10 @@ http {
     location = /clinic/patients         { proxy_pass http://$backend_origin$request_uri; }
     location ~ ^/clinic/patients/[^/]+/.+ { proxy_pass http://$backend_origin$request_uri; }
 
+    # `/ops` is an API-only namespace (operator account provisioning/deactivation,
+    # ADR-0019) — no SPA route uses it, so proxy the whole namespace to the backend.
+    location /ops/           { proxy_pass http://$backend_origin$request_uri; }
+
     # ---- static assets ----
     # Hashed build assets are content-addressed and immutable — cache hard.
     location /assets/ {

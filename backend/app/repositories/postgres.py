@@ -30,7 +30,7 @@ from app.models.observation import Observation, ObservationStatus
 from app.models.patient import Patient
 from app.models.pending_auth import PendingAuthState
 from app.models.secret import StoredSecret
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.repositories.capability import DuplicateCapabilityKeyError
 from app.repositories.clinic_connection import DuplicateLiveConnectionError
 from app.repositories.emr_connection import ConnectionRecord
@@ -64,6 +64,8 @@ class PostgresUserRepository:
                 role=user.role,
                 patient_id=user.patient_id,
                 clinic_id=user.clinic_id,
+                active=user.active,
+                disabled_at=user.disabled_at,
             )
         )
         try:
@@ -84,6 +86,23 @@ class PostgresUserRepository:
     async def get_by_patient_id(self, patient_id: uuid.UUID) -> UserRecord | None:
         row = await self._session.scalar(select(User).where(User.patient_id == patient_id))
         return None if row is None else _user_to_record(row)
+
+    async def count_with_role(self, role: UserRole, *, active_only: bool = False) -> int:
+        stmt = select(func.count()).select_from(User).where(User.role == role)
+        if active_only:
+            stmt = stmt.where(User.active.is_(True))
+        return int(await self._session.scalar(stmt) or 0)
+
+    async def set_active(
+        self, user_id: uuid.UUID, *, active: bool, disabled_at: datetime | None
+    ) -> UserRecord | None:
+        row = await self._session.get(User, user_id)
+        if row is None:
+            return None
+        row.active = active
+        row.disabled_at = disabled_at
+        await self._session.flush()
+        return _user_to_record(row)
 
 
 class PostgresClinicRepository:
@@ -515,6 +534,8 @@ def _user_to_record(row: User) -> UserRecord:
         role=row.role,
         patient_id=row.patient_id,
         clinic_id=row.clinic_id,
+        active=row.active,
+        disabled_at=row.disabled_at,
     )
 
 

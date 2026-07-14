@@ -17,17 +17,21 @@ the patient as subject, counts only, never values (CLAUDE.md §5).
 
 from __future__ import annotations
 
-import secrets as pysecrets
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 
-from app.api.deps import AuthDep, ClinicianUserDep, ClinicServiceDep, CurrentUser
+from app.api.deps import (
+    AuthDep,
+    ClinicianUserDep,
+    ClinicServiceDep,
+    CurrentUser,
+    OpsUserDep,
+)
 from app.api.routes.ingestion import observation_to_item
-from app.core.config import settings
 from app.models.audit import AuditEvent
 from app.models.connection import ClinicConnection
 from app.schemas.clinic import (
@@ -41,56 +45,11 @@ from app.schemas.clinic import (
 from app.schemas.ingestion import ObservationPage
 from app.schemas.trajectory import Trajectory
 from app.services.auth import AuthApiError
-from app.services.clinic import (
-    OPS_BOOTSTRAP_ACTOR_ID,
-    ClinicService,
-    bootstrap_denial_audit_limiter,
-)
+from app.services.clinic import ClinicService
 from app.services.rate_limit import RateLimitExceededError
 from app.services.trajectory import compute_patient_trajectory
 
 router = APIRouter(prefix="/clinic", tags=["clinic"])
-
-
-async def _bootstrap_denial(
-    provided: str | None, service: ClinicService, *, now: datetime
-) -> JSONResponse | None:
-    """Ops gate for clinician provisioning: fail closed when unconfigured.
-
-    Clinicians are provisioned, never self-registered (ADR-0010). Until the dedicated
-    ops-auth surface replaces this gate (ADR-0017), provisioning requires the
-    settings-provided OPS_BOOTSTRAP_TOKEN (min length enforced at settings load); no
-    token configured means no provisioning at all. Constant-time comparison, same 403
-    for missing and wrong tokens — and FAILED attempts are audited (no token material,
-    only which failure class) so brute-forcing the gate leaves a trail. The denial
-    audit is CAPPED by a sliding window on the fixed sentinel actor (ADR-0017): this
-    endpoint is unauthenticated, so unbounded per-request audit writes would hand any
-    anonymous client a log-flood primitive against the PHI database. Beyond the budget
-    the byte-identical 403 still answers and only the audit write is skipped.
-
-    The denial is RETURNED, not raised: an HTTPException would propagate through the
-    request-transaction dependency and roll the just-written audit event back in DB
-    mode; a returned response commits it.
-    """
-    configured = settings.ops_bootstrap_token
-    if (
-        configured
-        and provided is not None
-        and pysecrets.compare_digest(configured.encode(), provided.encode())
-    ):
-        return None
-    if await bootstrap_denial_audit_limiter(service.audit).allow(OPS_BOOTSTRAP_ACTOR_ID, now=now):
-        await service.audit.add(
-            AuditEvent(
-                actor_id=OPS_BOOTSTRAP_ACTOR_ID,
-                actor_role="ops",
-                action="bootstrap_denied",
-                patient_id=None,
-                # Never the tokens themselves — only the shape of the failure.
-                detail={"configured": bool(configured), "token_presented": provided is not None},
-            )
-        )
-    return JSONResponse(status_code=403, content={"detail": "Bootstrap token required"})
 
 
 @router.post("/clinicians", response_model=ClinicianOut, status_code=201)
@@ -98,13 +57,12 @@ async def create_clinician(
     body: ClinicianCreateIn,
     service: ClinicServiceDep,
     auth: AuthDep,
-    x_bootstrap_token: Annotated[str | None, Header()] = None,
-) -> ClinicianOut | JSONResponse:
-    """Provision a clinician account (ops/bootstrap): join an existing clinic by id
-    or found a new one by name."""
-    denial = await _bootstrap_denial(x_bootstrap_token, service, now=datetime.now(UTC))
-    if denial is not None:
-        return denial
+    current: OpsUserDep,
+) -> ClinicianOut:
+    """Provision a clinician account (an authenticated ops action, ADR-0019): join an
+    existing clinic by id or found a new one by name. The gate is now a real ops bearer
+    token (require_ops), not the shared OPS_BOOTSTRAP_TOKEN, so the provisioning audit
+    below records the actual operator as actor — genuine per-operator attribution."""
     founded = body.clinic_id is None
     if body.clinic_id is not None:
         clinic = await service.clinics.get(body.clinic_id)
@@ -129,9 +87,11 @@ async def create_clinician(
             await service.clinics.delete(clinic.id)
         raise HTTPException(status_code=exc.status_code, detail=exc.reason) from exc
     # Provisioning is a privileged config change — audited like any other (CLAUDE.md §5).
+    # The actor is now the REAL ops operator (ADR-0019), not the anonymous sentinel the
+    # shared-token gate could only record.
     await service.audit.add(
         AuditEvent(
-            actor_id=None,
+            actor_id=current.user_id,
             actor_role="ops",
             action="create_clinician",
             patient_id=None,

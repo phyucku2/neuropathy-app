@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol
 
 from app.models.user import UserRole
@@ -30,6 +31,10 @@ class UserRecord:
     # Set for clinician users (ADR-0012); defaulted last so existing constructions
     # keep working unchanged.
     clinic_id: uuid.UUID | None = None
+    # Per-account revocation (ADR-0019). Defaulted last for the same reason: an account
+    # is active until explicitly deactivated (disabled_at then stamps when).
+    active: bool = True
+    disabled_at: datetime | None = None
 
 
 class UserRepository(Protocol):
@@ -53,6 +58,24 @@ class UserRepository(Protocol):
 
     async def get_by_patient_id(self, patient_id: uuid.UUID) -> UserRecord | None:
         """Look up the patient user owning a Patient record (clinician panel display)."""
+        ...
+
+    async def count_with_role(self, role: UserRole, *, active_only: bool = False) -> int:
+        """How many accounts hold `role`. `active_only` counts only active ones.
+
+        The ops-auth surface (ADR-0019) uses this twice: `count_with_role(ops) == 0`
+        decides whether the first-ops bootstrap gate is still open, and
+        `count_with_role(ops, active_only=True)` guards against deactivating the last
+        active operator (which — with the bootstrap closed once any ops exists — would
+        lock the provisioning surface out entirely).
+        """
+        ...
+
+    async def set_active(
+        self, user_id: uuid.UUID, *, active: bool, disabled_at: datetime | None
+    ) -> UserRecord | None:
+        """Flip an account's active flag (ADR-0019 revocation), stamping disabled_at.
+        Returns the updated record, or None when no such user exists."""
         ...
 
 
@@ -81,3 +104,19 @@ class InMemoryUserRepository:
 
     async def get_by_patient_id(self, patient_id: uuid.UUID) -> UserRecord | None:
         return next((u for u in self._by_id.values() if u.patient_id == patient_id), None)
+
+    async def count_with_role(self, role: UserRole, *, active_only: bool = False) -> int:
+        return sum(
+            1 for u in self._by_id.values() if u.role is role and (u.active or not active_only)
+        )
+
+    async def set_active(
+        self, user_id: uuid.UUID, *, active: bool, disabled_at: datetime | None
+    ) -> UserRecord | None:
+        user = self._by_id.get(user_id)
+        if user is None:
+            return None
+        # Stored by reference (also in _by_email), so mutating in place updates both.
+        user.active = active
+        user.disabled_at = disabled_at
+        return user

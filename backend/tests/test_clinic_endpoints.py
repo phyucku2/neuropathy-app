@@ -13,10 +13,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_auth_service, get_clinic_service
-from app.api.routes.clinic import _bootstrap_denial
 from app.core.config import settings
 from app.main import app
-from app.models.audit import AuditEvent
 from app.models.connection import ClinicConnection, ConnectionStatus, Initiator
 from app.models.observation import DataOrigin, Observation, ObservationStatus, SourceType
 from app.models.user import UserRole
@@ -26,7 +24,7 @@ from app.repositories.clinic_connection import (
 )
 from app.repositories.user import InMemoryUserRepository, UserRecord
 from app.services.auth import AuthService
-from app.services.clinic import OPS_BOOTSTRAP_ACTOR_ID, ClinicService
+from app.services.clinic import ClinicService
 from app.services.rate_limit import RateLimitExceededError
 
 NOW = datetime.now(UTC)
@@ -70,6 +68,21 @@ def _register_patient(
     return headers, uuid.UUID(me.json()["patient_id"])
 
 
+def _ops_headers(client: TestClient) -> dict[str, str]:
+    """Provision + log in the first ops operator (ADR-0019), idempotently. Clinician
+    provisioning now runs under this ops bearer, not the shared bootstrap token: the
+    first call bootstraps the operator with the token, later calls just log it in."""
+    client.post(
+        "/ops/accounts",
+        headers=BOOTSTRAP,
+        json={"email": "ops@example.com", "password": "a-strong-password", "display_name": "Ops"},
+    )
+    login = client.post(
+        "/auth/login", json={"email": "ops@example.com", "password": "a-strong-password"}
+    )
+    return _auth(login.json()["access_token"])
+
+
 def _create_clinician(
     client: TestClient,
     email: str = "dr@example.com",
@@ -78,7 +91,7 @@ def _create_clinician(
     """Provision + log in a clinician; returns (headers, clinic_id, user_id)."""
     resp = client.post(
         "/clinic/clinicians",
-        headers=BOOTSTRAP,
+        headers=_ops_headers(client),
         json={
             "email": email,
             "password": "a-strong-password",
@@ -130,45 +143,38 @@ async def _seed_improving_labs(service: ClinicService, patient_id: uuid.UUID) ->
         await service.observations.add(_hba1c(value, days_ago, patient_id))
 
 
-# ---------------------------------------------------------------- provisioning
+# ---------------------------------------------------------------- provisioning (ADR-0019)
 
 
-def test_bootstrap_fails_closed_when_unconfigured(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(settings, "ops_bootstrap_token", None)
-    resp = client.post(
-        "/clinic/clinicians",
-        headers=BOOTSTRAP,
-        json={
-            "email": "dr@example.com",
-            "password": "a-strong-password",
-            "display_name": "Dr",
-            "clinic_name": "C",
-        },
-    )
-    assert resp.status_code == 403
-
-
-def test_bootstrap_rejects_wrong_or_missing_token(client: TestClient) -> None:
+def test_provisioning_requires_an_ops_bearer_not_the_shared_token(client: TestClient) -> None:
+    """The clinician gate is now a real ops bearer (ADR-0019). The old shared-token-only
+    path is rejected: an X-Bootstrap-Token header alone (no bearer) is a 401, and a
+    non-ops bearer is a 403 — the token opens nothing on this endpoint anymore."""
     body = {
         "email": "dr@example.com",
         "password": "a-strong-password",
         "display_name": "Dr",
         "clinic_name": "C",
     }
-    wrong = client.post("/clinic/clinicians", headers={"X-Bootstrap-Token": "nope"}, json=body)
-    missing = client.post("/clinic/clinicians", json=body)
-    assert wrong.status_code == 403
-    assert missing.status_code == 403
+    # First stand up an ops account so we can present a patient bearer for the 403 case.
+    _ops_headers(client)
+    token_only = client.post("/clinic/clinicians", headers=BOOTSTRAP, json=body)
+    none = client.post("/clinic/clinicians", json=body)
+    patient, _ = _register_patient(client)
+    as_patient = client.post("/clinic/clinicians", headers=patient, json=body)
+    assert token_only.status_code == 401  # the shared token is not a bearer credential
+    assert none.status_code == 401
+    assert as_patient.status_code == 403
+    assert as_patient.json()["detail"] == "Ops account required"
 
 
-def test_bootstrap_creates_clinician_bound_to_new_clinic(client: TestClient) -> None:
+def test_ops_provisions_clinician_bound_to_new_clinic(client: TestClient) -> None:
+    ops = _ops_headers(client)
     _, clinic_id, _ = _create_clinician(client)
-    # A colleague joins the SAME clinic by id.
+    # A colleague joins the SAME clinic by id — same authenticated ops operator.
     resp = client.post(
         "/clinic/clinicians",
-        headers=BOOTSTRAP,
+        headers=ops,
         json={
             "email": "dr2@example.com",
             "password": "a-strong-password",
@@ -181,10 +187,10 @@ def test_bootstrap_creates_clinician_bound_to_new_clinic(client: TestClient) -> 
     assert resp.json()["clinic_name"] == "Advanced Health & Wellness Group"
 
 
-def test_bootstrap_unknown_clinic_id_is_422(client: TestClient) -> None:
+def test_ops_provisioning_unknown_clinic_id_is_422(client: TestClient) -> None:
     resp = client.post(
         "/clinic/clinicians",
-        headers=BOOTSTRAP,
+        headers=_ops_headers(client),
         json={
             "email": "dr@example.com",
             "password": "a-strong-password",
@@ -195,23 +201,24 @@ def test_bootstrap_unknown_clinic_id_is_422(client: TestClient) -> None:
     assert resp.status_code == 422
 
 
-def test_bootstrap_requires_exactly_one_clinic_reference(client: TestClient) -> None:
+def test_ops_provisioning_requires_exactly_one_clinic_reference(client: TestClient) -> None:
+    ops = _ops_headers(client)
     base = {"email": "dr@example.com", "password": "a-strong-password", "display_name": "Dr"}
-    neither = client.post("/clinic/clinicians", headers=BOOTSTRAP, json=base)
+    neither = client.post("/clinic/clinicians", headers=ops, json=base)
     both = client.post(
         "/clinic/clinicians",
-        headers=BOOTSTRAP,
+        headers=ops,
         json={**base, "clinic_id": str(uuid.uuid4()), "clinic_name": "C"},
     )
     assert neither.status_code == 422
     assert both.status_code == 422
 
 
-def test_bootstrap_duplicate_email_is_409(client: TestClient) -> None:
+def test_ops_provisioning_duplicate_email_is_409(client: TestClient) -> None:
     _create_clinician(client)
     resp = client.post(
         "/clinic/clinicians",
-        headers=BOOTSTRAP,
+        headers=_ops_headers(client),
         json={
             "email": "dr@example.com",
             "password": "another-pass-1",
@@ -230,7 +237,7 @@ def test_failed_provisioning_leaves_no_orphan_clinic(
     _create_clinician(client)
     resp = client.post(
         "/clinic/clinicians",
-        headers=BOOTSTRAP,
+        headers=_ops_headers(client),
         json={
             "email": "dr@example.com",  # duplicate — provisioning fails
             "password": "another-pass-1",
@@ -250,7 +257,7 @@ def test_failed_join_of_existing_clinic_keeps_the_clinic(
     _, clinic_id, _ = _create_clinician(client)
     resp = client.post(
         "/clinic/clinicians",
-        headers=BOOTSTRAP,
+        headers=_ops_headers(client),
         json={
             "email": "dr@example.com",  # duplicate — provisioning fails
             "password": "another-pass-1",
@@ -262,109 +269,28 @@ def test_failed_join_of_existing_clinic_keeps_the_clinic(
     assert len(clinic_service.clinics._clinics) == 1  # the joined clinic survives
 
 
-def test_failed_bootstrap_attempts_are_audited_without_token_material(
-    client: TestClient, clinic_service: ClinicService, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Every FAILED bootstrap attempt writes a bootstrap_denied audit event (ADR-0017)
-    recording only the failure shape — never the presented or configured token."""
-    body = {
-        "email": "dr@example.com",
-        "password": "a-strong-password",
-        "display_name": "Dr",
-        "clinic_name": "C",
-    }
-    assert (
-        client.post(
-            "/clinic/clinicians", headers={"X-Bootstrap-Token": "wrong-token"}, json=body
-        ).status_code
-        == 403
-    )
-    assert client.post("/clinic/clinicians", json=body).status_code == 403
-    monkeypatch.setattr(settings, "ops_bootstrap_token", None)
-    assert client.post("/clinic/clinicians", headers=BOOTSTRAP, json=body).status_code == 403
-
-    denied = [e for e in clinic_service.audit._events if e.action == "bootstrap_denied"]
-    assert [e.detail for e in denied] == [
-        {"configured": True, "token_presented": True},  # wrong token
-        {"configured": True, "token_presented": False},  # missing token
-        {"configured": False, "token_presented": True},  # gate unconfigured (fail closed)
-    ]
-    for event in denied:
-        assert event.actor_id == OPS_BOOTSTRAP_ACTOR_ID  # the fixed sentinel, no real user
-        assert event.actor_role == "ops"
-        assert event.patient_id is None
-        assert "wrong-token" not in str(event.detail)
-        assert BOOTSTRAP_TOKEN not in str(event.detail)
-
-
-def test_successful_bootstrap_writes_no_denied_event(
+async def test_provisioning_audits_the_real_ops_actor(
     client: TestClient, clinic_service: ClinicService
 ) -> None:
-    _create_clinician(client)
-    actions = [e.action for e in clinic_service.audit._events]
-    assert "create_clinician" in actions
-    assert "bootstrap_denied" not in actions
-
-
-def test_bootstrap_denial_audits_are_capped_but_the_403_is_unchanged(
-    client: TestClient, clinic_service: ClinicService, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The provisioning gate is UNAUTHENTICATED: without a cap, every anonymous failed
-    attempt commits a durable audit row — a log-flood primitive against the PHI
-    database (ADR-0017). Beyond the settings-driven budget the answer stays the
-    byte-identical 403; only the audit write is skipped."""
-    monkeypatch.setattr(settings, "bootstrap_denied_audit_max", 2)
-    body = {
-        "email": "dr@example.com",
-        "password": "a-strong-password",
-        "display_name": "Dr",
-        "clinic_name": "C",
-    }
-    responses = [
-        client.post("/clinic/clinicians", headers={"X-Bootstrap-Token": "wrong-token"}, json=body)
-        for _ in range(5)
-    ]
-    assert [r.status_code for r in responses] == [403] * 5
-    # Capped and uncapped denials must be indistinguishable to the caller.
-    assert len({r.content for r in responses}) == 1
-    denied = [e for e in clinic_service.audit._events if e.action == "bootstrap_denied"]
-    assert len(denied) == 2  # the durable trail is bounded to the window budget
-
-
-async def test_bootstrap_denial_audits_resume_after_the_window_passes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Window math on FIXED injected timestamps (the ADR-0013 CI-flake rule): inside a
-    full window the denial audit is skipped; once the old denials slide out, auditing
-    resumes — and every answer is the same 403 throughout."""
-    monkeypatch.setattr(settings, "ops_bootstrap_token", BOOTSTRAP_TOKEN)
-    monkeypatch.setattr(settings, "bootstrap_denied_audit_max", 1)
-    service = ClinicService()
-    window = timedelta(seconds=settings.bootstrap_denied_audit_window_seconds)
-    t0 = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
-    # The window is already spent: one denial audited at t0.
-    await service.audit.add(
-        AuditEvent(
-            actor_id=OPS_BOOTSTRAP_ACTOR_ID,
-            occurred_at=t0,
-            actor_role="ops",
-            action="bootstrap_denied",
-            patient_id=None,
-            detail={},
-        )
+    """The provisioning audit now records the REAL ops operator as actor (ADR-0019) —
+    genuine per-operator attribution, not the anonymous sentinel the shared token used."""
+    ops = _ops_headers(client)
+    ops_user_id = uuid.UUID(client.get("/auth/me", headers=ops).json()["user_id"])
+    resp = client.post(
+        "/clinic/clinicians",
+        headers=ops,
+        json={
+            "email": "dr@example.com",
+            "password": "a-strong-password",
+            "display_name": "Dr. Rivera",
+            "clinic_name": "New Clinic",
+        },
     )
-
-    capped = await _bootstrap_denial("wrong-token", service, now=t0 + timedelta(minutes=30))
-    assert capped is not None and capped.status_code == 403  # still denied...
-    denied = [e for e in service.audit._events if e.action == "bootstrap_denied"]
-    assert len(denied) == 1  # ...but nothing new written inside the full window
-
-    resumed = await _bootstrap_denial(
-        "wrong-token", service, now=t0 + window + timedelta(seconds=1)
-    )
-    assert resumed is not None and resumed.status_code == 403
-    denied = [e for e in service.audit._events if e.action == "bootstrap_denied"]
-    assert len(denied) == 2  # the t0 denial left the window — auditing resumed
+    assert resp.status_code == 201
+    created = next(e for e in clinic_service.audit._events if e.action == "create_clinician")
+    assert created.actor_id == ops_user_id  # the operator, by identity — real attribution
+    assert created.actor_role == "ops"
+    assert created.detail["user_id"] == resp.json()["user_id"]
 
 
 # ---------------------------------------------------------------- invitations

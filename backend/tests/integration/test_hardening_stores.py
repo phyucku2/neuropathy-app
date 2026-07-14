@@ -24,7 +24,7 @@ from typing import Any
 import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.api import deps
@@ -280,17 +280,31 @@ async def _count_events(url: str, action: str, clinic_id: str | None = None) -> 
         await engine.dispose()
 
 
+async def _delete_all_ops(url: str) -> None:
+    """Clear ops accounts so the first-ops bootstrap gate is open (ADR-0019): the
+    session-scoped DB is shared, so other tests may already have created ops."""
+    engine = create_async_engine(url, isolation_level="AUTOCOMMIT")
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("DELETE FROM app_user WHERE role = 'ops'"))
+    finally:
+        await engine.dispose()
+
+
 def test_denied_attempt_audits_are_durable_in_db_mode(
     db_url: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """rate_limited and bootstrap_denied audits must COMMIT with their request
     (denials are returned responses, never raised HTTPExceptions — an exception
-    would roll the request transaction, audit event included, back)."""
+    would roll the request transaction, audit event included, back). The
+    bootstrap_denied gate now lives on the first-ops surface (ADR-0019)."""
     monkeypatch.setattr(settings, "ops_bootstrap_token", BOOTSTRAP_TOKEN)
     monkeypatch.setattr(settings, "invite_rate_limit_max", 0)  # every invite refused
+    asyncio.run(_delete_all_ops(db_url))  # guarantee the first-ops gate is open
     denied_before = asyncio.run(_count_events(db_url, "bootstrap_denied"))
 
     email = f"dr-{uuid.uuid4().hex[:12]}@example.com"
+    ops_email = f"ops-{uuid.uuid4().hex[:12]}@example.com"
     body = {
         "email": email,
         "password": SYNTHETIC_PASSWORD,
@@ -298,9 +312,25 @@ def test_denied_attempt_audits_are_durable_in_db_mode(
         "clinic_name": f"Synthetic Clinic {uuid.uuid4().hex[:8]}",
     }
     with TestClient(create_app()) as client:
-        provisioned = client.post(
-            "/clinic/clinicians", headers={"X-Bootstrap-Token": BOOTSTRAP_TOKEN}, json=body
+        # First-ops surface, zero ops: a wrong token is a durable bootstrap_denied.
+        denied = client.post(
+            "/ops/accounts",
+            headers={"X-Bootstrap-Token": "wrong-token"},
+            json={"email": ops_email, "password": SYNTHETIC_PASSWORD, "display_name": "Ops"},
         )
+        assert denied.status_code == 403
+        # The real token creates the first operator; provisioning then runs under it.
+        provisioned_ops = client.post(
+            "/ops/accounts",
+            headers={"X-Bootstrap-Token": BOOTSTRAP_TOKEN},
+            json={"email": ops_email, "password": SYNTHETIC_PASSWORD, "display_name": "Ops"},
+        )
+        assert provisioned_ops.status_code == 201, provisioned_ops.text
+        ops_login = client.post(
+            "/auth/login", json={"email": ops_email, "password": SYNTHETIC_PASSWORD}
+        )
+        ops_headers = _auth_header(ops_login.json()["access_token"])
+        provisioned = client.post("/clinic/clinicians", headers=ops_headers, json=body)
         assert provisioned.status_code == 201, provisioned.text
         clinic_id = provisioned.json()["clinic_id"]
         login = client.post("/auth/login", json={"email": email, "password": SYNTHETIC_PASSWORD})
@@ -309,10 +339,6 @@ def test_denied_attempt_audits_are_durable_in_db_mode(
             "/clinic/invitations", headers=headers, json={"email": "nobody@example.com"}
         )
         assert refused.status_code == 429
-        denied = client.post(
-            "/clinic/clinicians", headers={"X-Bootstrap-Token": "wrong-token"}, json=body
-        )
-        assert denied.status_code == 403
 
     # Both refusal audits outlived their (refused) requests — committed, not rolled back.
     assert asyncio.run(_count_events(db_url, "rate_limited", clinic_id=clinic_id)) == 1
