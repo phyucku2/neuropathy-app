@@ -165,7 +165,9 @@ jobs:
           java-version: "17"
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+# v3.2.2 — third-party action pinned to a full commit SHA (supply-chain: a mutable
+        # tag could be repointed to malicious code that runs in CI). Bump deliberately.
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
 
       - name: Install
         run: npm ci
@@ -262,7 +264,7 @@ jobs:
 
       - name: Secret scan (tracked files)
         run: |
-          if git grep -nE '(AKIA[0-9A-Z]{16}|-----BEGIN (RSA|EC|OPENSSH) PRIVATE KEY-----|password\s*=\s*["'"'"'][^"'"'"']+)' -- . ':!*.md'; then
+          if git grep -nE '(AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|-----BEGIN (RSA|EC|OPENSSH) PRIVATE KEY-----|password\s*=\s*["'"'"'][^"'"'"']+|(store|key)Password\s*=\s*[^[:space:]]+)' -- . ':!*.md'; then
             echo "::error::Possible secret committed"; exit 1
           fi
           echo "No obvious secrets found."

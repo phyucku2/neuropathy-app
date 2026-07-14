@@ -57,16 +57,21 @@ captures/
 # key is a production secret; it belongs in the user's secret store / CI secrets only).
 *.jks
 *.keystore
-keystore.properties
-signing.properties
-release.properties
+# Broad signing-props coverage: `key.properties` is the most common name in Android/Flutter
+# signing guides, so match any *.properties whose name starts with key/keystore/signing/release
+# (a bare *.properties is deliberately avoided — gradle.properties IS committed).
+key*.properties
+keystore*.properties
+signing*.properties
+release*.properties
 
 # External native build folder generated in Android Studio 2.2 and later
 .externalNativeBuild
 .cxx/
 
-# Google Services (e.g. APIs or Firebase)
-# google-services.json
+# Google Services (e.g. APIs or Firebase) — ignored NOW, before the file ever exists: it
+# carries a Firebase/Google API key (AIza…) that the CI secret scan does not match.
+google-services.json
 
 # Freeline
 freeline.py
