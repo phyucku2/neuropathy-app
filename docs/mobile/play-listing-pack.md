@@ -49,8 +49,12 @@ Cross-cutting answers:
 
 - [ ] App name, short (80) + full (4000) descriptions — non-diagnostic wording only
 - [ ] Privacy policy URL live (counsel-approved; draft: `docs/legal/privacy-policy-draft.md`)
-- [ ] Icon 512×512, feature graphic 1024×500, ≥4 phone screenshots (synthetic data ONLY in
-      every screenshot — never a real name or value)
+- [x] Icon 512×512 — `docs/store-assets/icon-512.png` (generated baseline mark; owner may
+      swap in commissioned branding — see `docs/store-assets/README.md`)
+- [x] Feature graphic 1024×500 — `docs/store-assets/feature-graphic-1024x500.png`
+- [x] ≥4 phone screenshots — 5 at 1080×2400 in `docs/store-assets/screenshots/` (synthetic
+      data ONLY in every screenshot — never a real name or value; regenerate with
+      `node scripts/generate-store-screenshots.mjs` from `frontend/`)
 - [ ] Data Safety form filed from §2 (re-verified against the shipped build)
 - [ ] Health apps declaration filed (§1)
 - [ ] Content rating questionnaire (IARC)
