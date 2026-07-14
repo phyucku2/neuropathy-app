@@ -98,8 +98,17 @@ deliberately centering the **clinic-bills / app-enables** model, not those.
   met. This is what makes it operationally feasible for auxiliary/clinical staff to run the
   monitoring day-to-day. [^nixon2023][^foley][^cmsrpm]
 - **CY2024** extended **general** (not direct) supervision to **PTAs and OTAs** furnishing
-  RTM in private practice (42 C.F.R. §§ 410.59, 410.60), and folded RPM/RTM into the general
-  care-management code **G0511** when furnished by **RHCs/FQHCs**. [^cms2024fs][^cms2024mm][^foley]
+  RTM in private practice (42 C.F.R. §§ 410.59, 410.60). CY2024 had **also** folded RPM/RTM
+  into the general care-management code **G0511** when furnished by **RHCs/FQHCs** — but
+  **that bundling was reversed by the CY2025 PFS final rule** (do **not** rely on the older
+  G0511 guidance): effective **2025-01-01** RHCs/FQHCs **MAY**, and after the grace period
+  (originally 7/1/2025, **extended to 9/30/2025**) **MUST**, bill the **individual**
+  care-management / monitoring CPT/HCPCS codes (CCM, RPM, RTM, etc.) **individually at the
+  national non-facility rate instead of G0511**. As of this writing, **G0511 is no longer the
+  RHC/FQHC vehicle for RPM/RTM.** CY2025 separately introduced **Advanced Primary Care
+  Management (APCM) G-codes (G0556/G0557/G0558)** — adopted for RHC/FQHC payment as well — as a
+  distinct option. (Year-tag everything: this is a CY2025 change on top of a CY2024 rule.)
+  [^cms2024fs][^cms2024mm][^cms2025fs][^cmsg0511ext][^foley]
 - **"Incident-to" nuance for clinical-staff time:** when clinical staff (not the
   physician/QHP personally) perform RTM/RPM management, the time is billable under the
   billing practitioner's number **only if** the incident-to conditions hold (general
@@ -191,7 +200,7 @@ consent, provenance); a validated coder maps facts → codes per payer/year (ana
 
 - CMS classifies RPM and RTM as **care-management services, not Medicare telehealth**
   services under §1834(m). Consequently the **telehealth geographic and originating-site
-  restrictions do NOT apply** — the **patient's home is fine**, nationwide. [^cmsrpm][^rtmnottelehealth]
+  restrictions do NOT apply** — the **patient's home is fine**, nationwide. [^cmsmln901705][^rtmnottelehealth]
 - Because they are not telehealth, they are billed with the **practitioner's normal place of
   service** (commonly **POS 11, office**) rather than a telehealth POS; **some payers/plans
   differ** and may expect POS 10 (telehealth-in-home) or 02. **This is a per-payer/MAC
@@ -212,12 +221,14 @@ consent, provenance); a validated coder maps facts → codes per payer/year (ana
 
 ### Medicaid — a STATE-AGNOSTIC verification framework (coverage genuinely varies)
 
-Medicaid is **state-administered**; coverage of RTM/RPM/CCM is **not uniform**. As of April
-2026, CCHP counts roughly **41 states** with *some* Medicaid RPM reimbursement — meaning
-**several states cover none**, and among those that cover, codes, modifiers, rates, eligible
-conditions, and eligible providers **differ**; **managed-care (MCO) plans add another layer**
-on top of fee-for-service (FFS). **No Medicare assumption is portable to Medicaid, and no
-one state's rule is portable to another.** [^cchp][^tenovi][^medicaidgov]
+Medicaid is **state-administered**; coverage of RTM/RPM/CCM is **not uniform**. In its
+**Fall 2025** *State Telehealth Laws & Reimbursement Policies* report (data collected
+**May–September 2025**), CCHP counts roughly **41 states** with *some* Medicaid RPM
+reimbursement — **36 reimbursing RPM outright + 5 CTBS-only** — meaning **several states
+cover none**, and among those that cover, codes, modifiers, rates, eligible conditions, and
+eligible providers **differ**; **managed-care (MCO) plans add another layer** on top of
+fee-for-service (FFS). **No Medicare assumption is portable to Medicaid, and no one state's
+rule is portable to another.** [^cchp][^tenovi][^medicaidgov]
 
 **Give operators a METHOD, not a table. For ANY state, verify — in this order:**
 
@@ -399,6 +410,8 @@ against the primary source before use.
 [^cmsmln901705]: CMS **MLN901705** — "Telehealth & Remote Monitoring" booklet (**December 2025** version), the current CMS provider booklet covering telehealth vs. remote-monitoring billing. Landing: <https://www.cms.gov/outreach-and-education/medicare-learning-network-mln/mlnproducts/mln-publications-items/cms1243327> · PDF: <https://www.cms.gov/files/document/mln901705-telehealth-remote-monitoring.pdf>
 [^cms2024fs]: CMS — "Calendar Year (CY) 2024 Medicare Physician Fee Schedule Final Rule" fact sheet (**general** supervision of PTAs/OTAs for RTM in private practice; RPM/RTM included in **G0511** for RHCs/FQHCs). <https://www.cms.gov/newsroom/fact-sheets/calendar-year-cy-2024-medicare-physician-fee-schedule-final-rule>
 [^cms2024mm]: CMS **MM13452** — "Medicare Physician Fee Schedule Final Rule Summary CY 2024." <https://www.cms.gov/files/document/mm13452-medicare-physician-fee-schedule-final-rule-summary-cy-2024.pdf>
+[^cms2025fs]: CMS — "Calendar Year (CY) 2025 Medicare Physician Fee Schedule Final Rule" fact sheet (**unbundled G0511** for RHCs/FQHCs — effective 2025-01-01 they report the **individual** care-coordination CPT/HCPCS codes instead of G0511; new **Advanced Primary Care Management (APCM) G-codes G0556/G0557/G0558**, adopted for RHC/FQHC payment). Supersedes the CY2024 G0511 bundling above. <https://www.cms.gov/newsroom/fact-sheets/calendar-year-cy-2025-medicare-physician-fee-schedule-final-rule>
+[^cmsg0511ext]: CMS **MLN Connects** (2025-06-05) — RHC/FQHC G0511 transition grace period **extended to September 30, 2025** ("Now, the deadline is extended to September 30"); after that date G0511 is no longer billable and individual care-management codes are required. <https://www.cms.gov/training-education/medicare-learning-network/newsletter/2025-06-05-mlnc>
 [^cms2022fr]: CMS / Federal Register — "Medicare Program; CY 2022 Payment Policies Under the Physician Fee Schedule" (86 FR 65112 et seq.; RTM device must meet the FDA **§201(h)** definition; CPT/AMA does not adjudicate a device's FDA status — burden on biller/manufacturer). <https://www.federalregister.gov/documents/2021/11/19/2021-23972/medicare-program-cy-2022-payment-policies-under-the-physician-fee-schedule-and-other-changes-to-part>
 [^cms2026fr]: CMS / Federal Register — "Medicare and Medicaid Programs; CY 2026 Payment Policies Under the Physician Fee Schedule" (CMS-1832-F; new 2–15-day RPM/RTM device codes 99445 / 98984 / 98985 / 98986, 16–30-day realignment of 98976/98977/98978, new 10–19-min management codes; effective 2026-01-01). <https://www.federalregister.gov/documents/2025/11/05/2025-19787/medicare-and-medicaid-programs-cy-2026-payment-policies-under-the-physician-fee-schedule-and-other>
 [^cmstherapy]: CMS — "Therapy Services" (RTM as "sometimes therapy"; therapy plan-of-care and modifier context for PT/OT/SLP). <https://www.cms.gov/medicare/coding-billing/therapy-services>
@@ -420,7 +433,7 @@ against the primary source before use.
 [^rtmconsent]: UTHealth — Healthcare Billing Compliance, "Remote Therapeutic Monitoring (RTM)" (consent verbal/written and documented; new order after goals met; order documented in record). <https://med.uth.edu/mshbc/digital-health-services/remote-therapeutic-monitoring-rtm/>
 [^rtmnottelehealth]: DrKumo — "Understanding RTM Codes and Compliance" (RTM/RPM are care-management, not §1834(m) telehealth; originating-site/geographic restrictions do not apply; POS handling varies by payer). <https://drkumo.com/understanding-rtm-codes-and-compliance-in-2025-what-providers-should-know/>
 [^denials]: Phyxup Health — "RTM Claim Denials: 5 Preventable Errors" and CCNHealth — "RPM Compliance Checklist 2026" (top denial reasons; retain raw transmission logs; time-log specificity; OIG concern on missing interactive communication). <https://blog.phyxuphealth.com/rtm-claim-denials-2026/> · <https://ccnhealth.com/articles/blog/rpm-compliance-checklist-2026>
-[^cchp]: Center for Connected Health Policy — "Remote Patient Monitoring" state policy index (~41 states with some Medicaid RPM reimbursement as of Apr 2026; not universal; FFS vs MCO). <https://www.cchpca.org/topic/remote-patient-monitoring/>
+[^cchp]: Center for Connected Health Policy — **Fall 2025** "State Telehealth Laws & Reimbursement Policies" report (data collected **late May–early September 2025**): ~**41 states** with some Medicaid RPM reimbursement — **36 reimbursing RPM outright + 5 CTBS-only**; not universal; FFS vs MCO. Cross-check the primary state manual/fee schedule per state. <https://www.cchpca.org/resources/state-telehealth-laws-and-reimbursement-policies-report-fall-2025/>
 [^tenovi]: Tenovi — "Medicaid Remote Patient Monitoring: A State-by-State Guide" (state variation; verify state manual/fee schedule). <https://www.tenovi.com/medicaid-remote-patient-monitoring-by-state/>
 [^aapc]: AAPC — ICD-10 "E11.42" (type 2 diabetes with diabetic polyneuropathy combination code). <https://www.aapc.com/codes/icd-10-codes/E11.42>
 [^icd10]: Billing Care Solutions — "Peripheral Neuropathy ICD-10 Diagnosis Codes Overview" (E11.42 combination code; do not separately code G62.x when diabetic combination applies; G60/G62 usage; diabetes–neuropathy linkage audit risk). <https://billingcaresolutions.com/articles/peripheral-neuropathy-icd-10-diagnosis-codes-overview/>
