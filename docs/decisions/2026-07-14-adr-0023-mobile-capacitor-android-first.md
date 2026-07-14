@@ -29,7 +29,7 @@ biometric unlock and the native OAuth-callback handling are their own later port
 - `@capacitor/core` (prod dep, MIT), `@capacitor/cli` + `@capacitor/android` (dev deps).
   The production dependency tree stays clean on the blocking `npm audit --omit=dev
   --audit-level=high` and the production license allowlist (verified locally).
-- `frontend/capacitor.config.ts` — `appId: com.biomech.neuropathy`, `appName:
+- `frontend/capacitor.config.ts` — `appId: com.ahwg.neuropathy`, `appName:
   Neuropathy`, `webDir: dist`, `androidScheme: https` (WebView served from a secure
   `https://localhost` origin so Web Crypto / secure storage behave as on web),
   `allowMixedContent: false` (the app only talks to the API over TLS; the base URL comes
@@ -47,9 +47,9 @@ biometric unlock and the native OAuth-callback handling are their own later port
 
 ### appId is semi-permanent
 
-`com.biomech.neuropathy` is the Android application id / Play Store package name. It is a
+`com.ahwg.neuropathy` is the Android application id / Play Store package name. It is a
 free-to-change local identifier **until the first Google Play release, after which it is
-permanent.** CONFIRM IT WITH THE USER BEFORE THE FIRST RELEASE (it encodes the
+permanent.** CONFIRMED 2026-07-14: the id was switched to `com.ahwg.neuropathy` (Advanced Health and Wellness Group is the DUNS-registered publisher; ADR-0026) (it encodes the
 go-to-market brand; the user owns the IP and BioMech licenses it).
 
 ## Verification boundary (honest)

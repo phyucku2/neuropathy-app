@@ -12,10 +12,10 @@ if (keystorePropsFile.exists()) {
 }
 
 android {
-    namespace "com.biomech.neuropathy"
+    namespace "com.ahwg.neuropathy"
     compileSdk rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.biomech.neuropathy"
+        applicationId "com.ahwg.neuropathy"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         // versionCode must strictly increase on EVERY Play upload (internal testing included) —

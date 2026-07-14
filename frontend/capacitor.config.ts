@@ -18,7 +18,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
  * `server.url` is opt-in via an env-driven override, never committed).
  */
 const config: CapacitorConfig = {
-  appId: 'com.biomech.neuropathy',
+  appId: 'com.ahwg.neuropathy',
   appName: 'Neuropathy',
   webDir: 'dist',
   android: {
