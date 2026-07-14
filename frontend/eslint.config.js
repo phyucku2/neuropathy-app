@@ -6,9 +6,19 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   // `public/` holds static assets served verbatim (e.g. the runtime config.js shim,
-  // ADR-0018), not part of the TypeScript program — excluded from linting.
+  // ADR-0018), not part of the TypeScript program — excluded from linting. `android/`
+  // is the generated Capacitor native project (Java/Gradle/XML + the copied web bundle
+  // under assets/public); it is not TypeScript source and must not be linted (ADR-0023).
   {
-    ignores: ['dist', 'coverage', 'node_modules', 'public', 'playwright-report', 'test-results'],
+    ignores: [
+      'dist',
+      'coverage',
+      'node_modules',
+      'public',
+      'playwright-report',
+      'test-results',
+      'android',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.strict,

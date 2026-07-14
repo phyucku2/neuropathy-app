@@ -38,12 +38,17 @@ reviewed, and merged (PRs #9, #10, #12, #14, #15).
 | 4 | Observability & ops — error tracking (self-hosted-friendly), metrics, alerting hooks, Postgres backup drill; compliance pack (HIPAA ops checklist, BAA inventory, incident-response runbook) | ✅ | ✅ 100% cov | ✅ PR #14 | ADR-0021. PHI-free `GET /metrics` (prometheus_client; method/route-template/status labels — never raw path; app_up, DB pool, subject-free AI-disclosure counter; auth-denials/rate-limits read off the status label). `MetricsMiddleware` + `ErrorReportingMiddleware` compose inside the outermost logging middleware (logging stays index 0). Error seam mirrors the Narrator: off-by-default, self-hostable, PHI-scrubbing (whitelist event — never the exception message), fail-safe. Alert rules + scrape/collector wiring in `docs/ops/observability.md`. Tested backup drill script + `SECRET_STORE_KEY` trap reinforced. Compliance pack under `docs/compliance/` with honest [CE] boundaries. |
 | 5 | Browser-verify the shipped patient + clinician UIs (Playwright/Chromium: built app renders + key flows work + ZERO new console errors) — retroactive Definition-of-Done closure for ADR-0015/0016 UI portions (msw/unit tests are not sufficient proof) | ✅ | ✅ | ✅ PR #15 | ADR-0022. 29 committed Playwright specs (patient + clinician + 2 gate self-checks) drive the REAL `vite build`/`vite preview` bundle in the pre-installed Chromium (rev 1194), API mocked in-browser mirroring `src/test/server.ts`, runtime `/config.js` (ADR-0018) exercised. Auto zero-console-errors gate (`pageerror` + `console.error`, allowlist pinned to the designed 401/404/409/422 only — a 500 fails) on every spec, with a self-check proving the gate fails on a real fault. Proves the ADR-0020 §3(b) `share_with_clinic` read-only property in a real browser. Dedicated blocking CI `e2e` job (browser installed CI-only). Existing gates untouched. |
 
-**Wave 2 — Mobile app**: Capacitor wrap of the existing SPA (decision 2026-07-14 —
-professional staged approach; ADR to record the revisit trigger: native rebuild only
-if device/HealthKit integration lands). Biometric unlock + Keychain/Keystore token
-storage replace the web sessionStorage posture. **Android-first per user (ready to go);
-iOS PENDING the user's DUNS + Apple-ID switch — do not collect Apple credentials until
-iOS submission.** NOT STARTED — awaiting the user's go-ahead.
+**Wave 2 — Mobile app** (IN PROGRESS): Capacitor wrap of the existing SPA (ADR-0023 —
+professional staged approach; revisit trigger recorded: native rebuild only if
+device/HealthKit/BLE integration lands). **Android-first per user (ready to go); iOS
+PENDING the user's DUNS + Apple-ID switch — do not collect Apple credentials until iOS
+submission.**
+
+| # | Portion | Built | Tested | Merged | Notes |
+|---|---|---|---|---|---|
+| 1 | Capacitor scaffolding + Android platform — `@capacitor/core` (prod, MIT) + cli/android (dev), `capacitor.config.ts`, generated `android/` native project, cap npm scripts, keystore-safe `.gitignore`, ESLint/Prettier exclude the native tree; CI `mobile` job assembles a debug APK (ADR-0023) | ✅ | ⏳ | ⏳ | Scaffolding only — no web behavior change. Verified locally: web target unregressed (tsc/eslint/prettier/vitest/build + 29 Playwright specs green), `cap sync` works, prod audit + license gates pass, no secret-scan hits. No Android SDK in this env, so on-device is the user's `npx cap run android`; the CI `mobile` job proves the APK compiles. |
+| 2 | Secure token storage + biometric unlock — move the refresh token off web `sessionStorage` into the OS secure store (Keystore) on native, biometric gate before revealing the session; web posture (ADR-0015) unchanged as the fallback so the E2E suite is unaffected | — | — | — | Security-sensitive → adversarial review. Async secure-store API vs the current sync token store is the main design point. |
+| 3 | Native shell + OAuth-callback handling — status bar / splash / safe-area insets / hardware back button; the SMART OAuth redirect (ADR-0009) needs an app-scheme/App-URL handler on native instead of a web redirect | — | — | — | |
 
 **Wave 3 — EMR registrations**: Epic/Cerner sandbox enrollment (runbook + provider
 config surface), then production enrollment.
