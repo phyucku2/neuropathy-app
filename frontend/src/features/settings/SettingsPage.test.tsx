@@ -15,13 +15,32 @@ describe('SettingsPage — capability toggles', () => {
     expect(screen.getByText('Off · hidden and paused in your trend')).toBeInTheDocument();
   });
 
-  it('renders enforced=false rows read-only in the coming-soon style', async () => {
+  it('renders an unenforced (not-yet-wired) capability read-only in the coming-soon style', async () => {
+    // Every shipped key is enforced as of ADR-0020, so the read-only path now only
+    // applies to a FUTURE key introduced un-wired — modeled here with a synthetic one.
+    server.use(
+      http.get('/capabilities', () =>
+        HttpResponse.json({
+          capabilities: [
+            ...CAPABILITIES,
+            {
+              key: 'future_feature',
+              name: 'Future feature',
+              active: true,
+              managed_by: 'patient',
+              expires_at: null,
+              enforced: false,
+            },
+          ],
+        }),
+      ),
+    );
     renderApp('/settings');
     await screen.findByRole('switch', { name: 'BioMech report upload' });
-    // The unenforced capability gets a pill instead of a switch.
-    expect(
-      screen.queryByRole('switch', { name: 'Medical record connection' }),
-    ).not.toBeInTheDocument();
+    // The wired keys are interactive switches...
+    expect(screen.getByRole('switch', { name: 'Medical record connection' })).toBeInTheDocument();
+    // ...while the unenforced capability gets a pill instead of a switch.
+    expect(screen.queryByRole('switch', { name: 'Future feature' })).not.toBeInTheDocument();
     expect(screen.getAllByText('Coming soon').length).toBeGreaterThanOrEqual(1);
   });
 

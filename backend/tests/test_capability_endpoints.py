@@ -50,9 +50,16 @@ def clinic_service() -> ClinicService:
 
 @pytest.fixture()
 def capability_service(clinic_service: ClinicService) -> CapabilityService:
-    # Shares the connection and audit stores with the clinic service, exactly like
-    # the deps wiring does — toggle authority tracks the real consent state.
-    return CapabilityService(connections=clinic_service.connections, audit=clinic_service.audit)
+    # Shares the connection, audit, AND capability stores with the clinic service,
+    # exactly like the deps wiring does — toggle authority tracks the real consent
+    # state, and the clinic service's share_with_clinic read gate (ADR-0020) sees every
+    # toggle write the patient makes here.
+    return CapabilityService(
+        connections=clinic_service.connections,
+        audit=clinic_service.audit,
+        capabilities=clinic_service.capabilities,
+        patient_capabilities=clinic_service.patient_capabilities,
+    )
 
 
 @pytest.fixture()
@@ -202,22 +209,25 @@ def test_b2c_patient_toggles_own_capability(client: TestClient) -> None:
     assert _states(client, patient)["ingest_adl"]["active"] is True
 
 
-def test_unenforced_toggles_are_read_only(client: TestClient) -> None:
-    """A stored "off" that the feature ignores would be a false promise: keys whose
-    consumers are not wired yet are visible (enforced=false) but refuse writes —
-    for the patient AND for the clinician (review finding)."""
+def test_all_shipped_keys_are_enforced_and_settable(client: TestClient) -> None:
+    """Every shipped key is now wired to a consumer (ADR-0020), so all are
+    enforced=true and a B2C patient can set them — the "not changeable yet" refusal
+    only ever applies to a FUTURE key introduced un-wired."""
     patient, _ = _register_patient(client)
     states = _states(client, patient)
-    assert states["ai_narrative"]["enforced"] is False
-    assert states["share_with_clinic"]["enforced"] is False
-    assert states["emr_connect"]["enforced"] is False
-    assert states["ingest_labs"]["enforced"] is True
-    assert states["ingest_adl"]["enforced"] is True
+    assert all(state["enforced"] is True for state in states.values())
 
-    refused = client.put("/capabilities/ai_narrative", headers=patient, json={"active": False})
-    assert refused.status_code == 409
-    assert "not changeable yet" in refused.json()["detail"]
+    for key in ("ai_narrative", "emr_connect", "share_with_clinic"):
+        resp = client.put(f"/capabilities/{key}", headers=patient, json={"active": False})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["active"] is False
+        assert _states(client, patient)[key]["active"] is False
 
+
+def test_clinician_cannot_set_patient_held_share_with_clinic(client: TestClient) -> None:
+    """share_with_clinic is a PATIENT-HELD consent control (ADR-0020): even a consented
+    clinician write to it is refused (409) — a clinic must never control the patient's
+    ability to stop sharing. (Other keys stay clinician-settable while managed.)"""
     clinician, _, _ = _create_clinician(client)
     _, patient_id, _ = _connect_consented_patient(client, clinician, email="managed@example.com")
     refused = client.put(
@@ -226,6 +236,16 @@ def test_unenforced_toggles_are_read_only(client: TestClient) -> None:
         json={"active": False},
     )
     assert refused.status_code == 409
+    assert "controlled by the patient" in refused.json()["detail"]
+    # A normal managed key is still clinician-settable, proving this is a carve-out.
+    assert (
+        client.put(
+            f"/clinic/patients/{patient_id}/capabilities/ingest_adl",
+            headers=clinician,
+            json={"active": False},
+        ).status_code
+        == 200
+    )
 
 
 def test_clinician_cannot_pair_expiry_with_disable(client: TestClient) -> None:
@@ -290,11 +310,51 @@ def test_capability_routes_require_the_right_role(client: TestClient) -> None:
 def test_clinically_managed_patient_cannot_self_toggle(client: TestClient) -> None:
     clinician, _, _ = _create_clinician(client)
     patient, _, _ = _connect_consented_patient(client, clinician)
-    assert all(s["managed_by"] == "clinic" for s in _states(client, patient).values())
+    states = _states(client, patient)
+    # Every key reads clinic-managed EXCEPT the patient-held share_with_clinic (ADR-0020).
+    assert all(s["managed_by"] == "clinic" for k, s in states.items() if k != "share_with_clinic")
+    assert states["share_with_clinic"]["managed_by"] == "patient"
     resp = client.put("/capabilities/ingest_adl", headers=patient, json={"active": False})
     assert resp.status_code == 409
     assert "managed by your connected clinic" in resp.json()["detail"]
     assert _states(client, patient)["ingest_adl"]["active"] is True  # nothing changed
+
+
+def test_managed_patient_always_controls_share_with_clinic(client: TestClient) -> None:
+    """The patient-held-consent carve-out (ADR-0020): a clinically-managed patient can
+    turn share_with_clinic OFF themselves — unlike every OTHER key, which 409s for the
+    managed patient. A clinic controlling the patient's ability to stop sharing would
+    be perverse, so the managed-authority refusal never applies to this one key."""
+    clinician, _, _ = _create_clinician(client)
+    patient, patient_id, _ = _connect_consented_patient(client, clinician)
+    # Other keys 409 for the managed patient...
+    assert (
+        client.put("/capabilities/ingest_adl", headers=patient, json={"active": False}).status_code
+        == 409
+    )
+    # ...but share_with_clinic is the patient's own consent and always succeeds.
+    off = client.put("/capabilities/share_with_clinic", headers=patient, json={"active": False})
+    assert off.status_code == 200
+    assert off.json() == {
+        "key": "share_with_clinic",
+        "name": "Share data with my clinic",
+        "active": False,
+        "managed_by": "patient",
+        "expires_at": None,
+        "enforced": True,
+    }
+    # And turning it off cuts the clinic off entirely (neutral 404, no existence leak).
+    assert (
+        client.get(f"/clinic/patients/{patient_id}/trajectory", headers=clinician).status_code
+        == 404
+    )
+    # The patient can turn it back on again — still their control.
+    assert (
+        client.put(
+            "/capabilities/share_with_clinic", headers=patient, json={"active": True}
+        ).status_code
+        == 200
+    )
 
 
 def test_pending_invitation_does_not_transfer_authority(client: TestClient) -> None:
@@ -375,6 +435,82 @@ def test_revocation_flips_authority_back_to_the_patient(client: TestClient) -> N
         client.get(f"/clinic/patients/{patient_id}/capabilities", headers=clinician).status_code
         == 404
     )
+
+
+def test_share_off_drops_patient_from_every_clinician_surface(client: TestClient) -> None:
+    """share_with_clinic OFF is an ADDITIONAL gate on top of connection consent
+    (ADR-0020): the patient drops off the panel, every /clinic/patients/{id}/* read
+    answers the SAME neutral 404 as a cross-clinic patient, and clinician capability
+    writes are refused the same way — one predicate, so they can never drift. Default
+    is on, so the consented flow works until the patient turns it off."""
+    clinician, _, _ = _create_clinician(client)
+    patient, patient_id, _ = _connect_consented_patient(client, clinician)
+
+    # Default-on: the consented patient is fully visible.
+    panel = client.get("/clinic/patients", headers=clinician).json()["patients"]
+    assert any(p["patient_id"] == str(patient_id) for p in panel)
+    reads = [
+        f"/clinic/patients/{patient_id}/trajectory",
+        f"/clinic/patients/{patient_id}/observations",
+        f"/clinic/patients/{patient_id}/capabilities",
+    ]
+    for url in reads:
+        assert client.get(url, headers=clinician).status_code == 200, url
+
+    # The patient turns sharing off (their own consent control).
+    assert (
+        client.put(
+            "/capabilities/share_with_clinic", headers=patient, json={"active": False}
+        ).status_code
+        == 200
+    )
+
+    # (a) off the panel; (b) every read is a neutral 404; (c) writes refused the same way.
+    panel = client.get("/clinic/patients", headers=clinician).json()["patients"]
+    assert all(p["patient_id"] != str(patient_id) for p in panel)
+    for url in reads:
+        resp = client.get(url, headers=clinician)
+        assert resp.status_code == 404, url
+        assert resp.json()["detail"] == "Patient not found"  # neutral — no existence leak
+    write = client.put(
+        f"/clinic/patients/{patient_id}/capabilities/ingest_adl",
+        headers=clinician,
+        json={"active": False},
+    )
+    assert write.status_code == 404
+    assert write.json()["detail"] == "Patient not found"
+
+    # Back on — the patient reappears everywhere (back-compat, symmetric).
+    assert (
+        client.put(
+            "/capabilities/share_with_clinic", headers=patient, json={"active": True}
+        ).status_code
+        == 200
+    )
+    assert client.get(reads[0], headers=clinician).status_code == 200
+
+
+async def test_share_off_revocation_is_audited_and_leaks_nothing(
+    client: TestClient, capability_service: CapabilityService
+) -> None:
+    """Revoking share (patient) is an auditable consent change (set_capability), and the
+    clinician's resulting 404 carries nothing about why (ADR-0020)."""
+    clinician, _, _ = _create_clinician(client)
+    patient, patient_id, _ = _connect_consented_patient(client, clinician)
+    client.put("/capabilities/share_with_clinic", headers=patient, json={"active": False})
+
+    events = [
+        e
+        for e in await capability_service.audit.list_for_patient(patient_id)
+        if e.action == "set_capability"
+    ]
+    assert len(events) == 1
+    assert events[0].detail["key"] == "share_with_clinic"
+    assert events[0].detail["active"] is False
+    assert events[0].detail["set_by"] == "patient"
+    # The denial the clinician sees says only "Patient not found".
+    denied = client.get(f"/clinic/patients/{patient_id}/observations", headers=clinician)
+    assert denied.json() == {"detail": "Patient not found"}
 
 
 def test_cross_clinic_clinician_gets_404(client: TestClient) -> None:

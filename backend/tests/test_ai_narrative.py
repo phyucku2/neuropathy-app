@@ -331,6 +331,42 @@ def test_endpoint_defaults_to_deterministic_without_narrator(client: TestClient)
     assert body["narrative_source"] == "deterministic"
 
 
+async def test_ai_narrative_toggle_off_keeps_trajectory_deterministic(
+    client: TestClient, service: EmrService
+) -> None:
+    """The ai_narrative toggle ANDs with the BAA gate (ADR-0020): with the toggle OFF
+    the endpoint stays fully deterministic even though a narrator is configured — no
+    cached AI narrative is served, no narration is scheduled, and (crucially) NO
+    ai_narrative disclosure is audited, because disclosure only happens when narration
+    is actually scheduled. It is an in-handler branch, not a 409 gate: /trajectory
+    still returns 200 with the deterministic summary."""
+    from datetime import UTC, datetime
+
+    from app.api.deps import get_capability_service
+    from app.services.capability import CapabilityService
+
+    capability_service = CapabilityService()
+    assert PATIENT.patient_id is not None
+    await capability_service.set_for_patient(
+        patient_id=PATIENT.patient_id,
+        actor_id=PATIENT.user_id,
+        key="ai_narrative",
+        active=False,
+        now=datetime.now(UTC),
+    )
+    app.dependency_overrides[get_capability_service] = lambda: capability_service
+    app.dependency_overrides[get_narrator] = lambda: _FakeNarrator("Must never surface.")
+
+    for _ in range(2):  # a second read would serve cache if one had been scheduled
+        body = client.get("/trajectory").json()
+        assert body["narrative_source"] == "deterministic"
+        assert body["summary"]  # the template summary still stands on its own
+
+    events = await service.audit.list_for_patient(PATIENT.patient_id)
+    assert [e.action for e in events] == ["read_trajectory", "read_trajectory"]
+    assert "ai_narrative" not in [e.action for e in events]  # never scheduled, never disclosed
+
+
 async def test_cache_client_close_and_eviction_and_crashing_narrator() -> None:
     """Remaining lifecycle branches: aclose, FIFO eviction, begin() dedupe, and a
     narrator that RAISES (narrate_into_cache must swallow and negative-cache)."""

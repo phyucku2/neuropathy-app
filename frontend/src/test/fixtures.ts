@@ -163,7 +163,8 @@ export const CAPABILITIES: CapabilityStateOut[] = [
     active: true,
     managed_by: 'patient',
     expires_at: null,
-    enforced: false,
+    // Wired to the EMR connect flow as of ADR-0020 — interactive, not "coming soon".
+    enforced: true,
   },
 ];
 
@@ -228,7 +229,8 @@ export const CLINIC_CAPABILITIES: CapabilityStateOut[] = [
     active: true,
     managed_by: 'clinic',
     expires_at: null,
-    enforced: false,
+    // Wired to narrator scheduling as of ADR-0020 — interactive, not "not wired yet".
+    enforced: true,
   },
 ];
 

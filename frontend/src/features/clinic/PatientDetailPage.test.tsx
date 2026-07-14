@@ -298,14 +298,35 @@ const EXPIRED_ORDER: CapabilityStateOut = {
 
 describe('PatientDetailPage — features tab (capability orders)', () => {
   it('renders toggles with expiry and read-only rows for unwired capabilities', async () => {
+    // Every shipped key is enforced as of ADR-0020, so the read-only path now only
+    // covers a FUTURE un-wired key — modeled here with a synthetic one.
+    server.use(
+      http.get('/clinic/patients/:patientId/capabilities', () =>
+        HttpResponse.json({
+          capabilities: [
+            ...CLINIC_CAPABILITIES,
+            {
+              key: 'future_feature',
+              name: 'Future feature',
+              active: true,
+              managed_by: 'clinic',
+              expires_at: null,
+              enforced: false,
+            },
+          ],
+        }),
+      ),
+    );
     actAsClinician();
     await openTab('Features');
     const biomech = await screen.findByRole('switch', { name: 'BioMech report upload' });
     expect(biomech).toBeChecked();
     expect(screen.getByText('renews Aug 6, 2026')).toBeInTheDocument();
     expect(screen.getByRole('switch', { name: 'Daily function check-in' })).not.toBeChecked();
-    // enforced=false: read-only, no switch offered.
-    expect(screen.queryByRole('switch', { name: 'AI trajectory summary' })).not.toBeInTheDocument();
+    // A now-wired key is an interactive switch...
+    expect(screen.getByRole('switch', { name: 'AI trajectory summary' })).toBeInTheDocument();
+    // ...while the unenforced future key is read-only, no switch offered.
+    expect(screen.queryByRole('switch', { name: 'Future feature' })).not.toBeInTheDocument();
     expect(screen.getByText('Not wired yet')).toBeInTheDocument();
     expect(screen.getByText('Changes are logged and shown to the patient.')).toBeInTheDocument();
   });

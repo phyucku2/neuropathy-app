@@ -47,6 +47,7 @@ from app.services.connection import may_transmit_to_clinic
 
 __all__ = [
     "CAPABILITIES",
+    "SHARE_WITH_CLINIC_KEY",
     "CapabilityApiError",
     "CapabilityService",
     "CapabilitySpec",
@@ -55,11 +56,20 @@ __all__ = [
     "ClinicallyManagedError",
     "EffectiveCapability",
     "ManagedBy",
+    "PatientHeldCapabilityError",
     "UnknownCapabilityError",
     "is_effectively_active",
+    "managed_by_for",
+    "share_with_clinic_effective",
 ]
 
 ManagedBy = Literal["patient", "clinic"]
+
+# The one patient-held CONSENT control (ADR-0020): unlike every other key, the patient
+# always controls it — even while clinically managed — because it is the mechanism by
+# which they stop sharing. A clinic controlling the patient's ability to stop sharing
+# would be perverse. Named once so the carve-outs below can never drift on a typo.
+SHARE_WITH_CLINIC_KEY = "share_with_clinic"
 
 
 @dataclass(frozen=True)
@@ -79,19 +89,20 @@ class CapabilitySpec:
 # default lives here in code because it is a product decision, not per-deployment state.
 # `enforced=False` keys are visible but NOT yet settable: a stored "off" the feature
 # ignores would be a false promise about what is processed/disclosed (review finding);
-# each key flips to enforced=True in the PR that wires its consumer.
+# each key flips to enforced=True in the PR that wires its consumer. As of ADR-0020 all
+# shipped keys are wired: emr_connect gates the EMR connect flow, ai_narrative gates
+# narrator scheduling, share_with_clinic gates clinician reads. The `enforced` flag and
+# its read-only rendering stay in place for any FUTURE key introduced un-wired.
 CAPABILITIES: tuple[CapabilitySpec, ...] = (
     CapabilitySpec(key="ingest_labs", name="Lab result upload", default=True, enforced=True),
     CapabilitySpec(key="ingest_adl", name="Daily function check-in", default=True, enforced=True),
     CapabilitySpec(key="ingest_biomech", name="BioMech report upload", default=True, enforced=True),
     CapabilitySpec(
-        key="emr_connect", name="Medical record connection", default=True, enforced=False
+        key="emr_connect", name="Medical record connection", default=True, enforced=True
     ),
+    CapabilitySpec(key="ai_narrative", name="AI trajectory narration", default=True, enforced=True),
     CapabilitySpec(
-        key="ai_narrative", name="AI trajectory narration", default=True, enforced=False
-    ),
-    CapabilitySpec(
-        key="share_with_clinic", name="Share data with my clinic", default=True, enforced=False
+        key=SHARE_WITH_CLINIC_KEY, name="Share data with my clinic", default=True, enforced=True
     ),
 )
 
@@ -135,6 +146,19 @@ class CapabilityNotEnforcedError(CapabilityApiError):
         super().__init__(f"This setting is not changeable yet: {key}", status_code=409)
 
 
+class PatientHeldCapabilityError(CapabilityApiError):
+    """A clinician tried to set a patient-held consent control (share_with_clinic).
+    That key is the patient's own mechanism to stop sharing (ADR-0020) — a clinic
+    can never set it, even for a clinically-managed patient. 409: the key exists but
+    the actor may not change it."""
+
+    def __init__(self, key: str) -> None:
+        super().__init__(
+            f"This setting is controlled by the patient and cannot be set here: {key}",
+            status_code=409,
+        )
+
+
 @dataclass(frozen=True)
 class EffectiveCapability:
     """One capability's server-judged state for one patient."""
@@ -167,6 +191,40 @@ def is_effectively_active(
     if not row.active:
         return False
     return row.expires_at is None or row.expires_at > now
+
+
+def managed_by_for(key: str, *, clinically_managed: bool) -> ManagedBy:
+    """Who holds toggle authority for one key (ADR-0013, amended by ADR-0020).
+
+    Every key follows the connection: clinic while clinically managed, else patient.
+    `share_with_clinic` is the ONE exception — a patient-held consent control the
+    patient always owns, so it reads `patient` regardless of managed status (the UI
+    must render it interactive, and `set_for_patient` honors that carve-out)."""
+    if key == SHARE_WITH_CLINIC_KEY:
+        return "patient"
+    return "clinic" if clinically_managed else "patient"
+
+
+async def share_with_clinic_effective(
+    capabilities: CapabilityRepository,
+    patient_capabilities: PatientCapabilityRepository,
+    patient_id: uuid.UUID,
+    *,
+    now: datetime,
+) -> bool:
+    """Effective on/off of `share_with_clinic` for one patient — the patient-held
+    consent gate the clinician-read predicate ANDs with connection consent (ADR-0020).
+
+    Reuses `is_effectively_active` (the single unit-locked predicate) and the registry
+    default. No registry row yet -> the default (True), so existing consented
+    connections keep working with no back-fill (back-compat by construction). Reads
+    only; it never seeds a row, so a clinician read can't mutate capability state."""
+    spec = _SPEC_BY_KEY[SHARE_WITH_CLINIC_KEY]
+    capability = await capabilities.get_by_key(SHARE_WITH_CLINIC_KEY)
+    if capability is None:
+        return spec.default
+    row = await patient_capabilities.get(patient_id, capability.id)
+    return is_effectively_active(capability, row, default=spec.default, now=now)
 
 
 @dataclass
@@ -217,9 +275,7 @@ class CapabilityService:
     ) -> list[EffectiveCapability]:
         """Every registry capability's effective state for one patient, in registry
         order. This is what clients render — toggles in the app are UI hints only."""
-        managed_by: ManagedBy = (
-            "clinic" if await self.is_clinically_managed(patient_id) else "patient"
-        )
+        clinically_managed = await self.is_clinically_managed(patient_id)
         rows = {
             row.capability_id: row
             for row in await self.patient_capabilities.list_for_patient(patient_id)
@@ -233,7 +289,9 @@ class CapabilityService:
                     key=spec.key,
                     name=capability.name,
                     active=is_effectively_active(capability, row, default=spec.default, now=now),
-                    managed_by=managed_by,
+                    # share_with_clinic reads 'patient' even while managed (ADR-0020):
+                    # it is patient-held consent, so the client must render it settable.
+                    managed_by=managed_by_for(spec.key, clinically_managed=clinically_managed),
                     expires_at=row.expires_at if row is not None else None,
                     enforced=spec.enforced,
                 )
@@ -261,14 +319,21 @@ class CapabilityService:
         """Patient sets their OWN toggle — B2C authority only (ADR-0013).
 
         Refused (409) while clinically managed: a consented clinic owns the toggles,
-        order-like. Patients can never set expiry; their write clears any stale
-        clinician expiry along with the row it rode in on."""
+        order-like. The ONE exception is `share_with_clinic` (ADR-0020) — a patient-held
+        consent control the patient always owns, even while clinically managed, because
+        it is how they stop sharing; the managed-authority refusal is skipped for it.
+        Patients can never set expiry; their write clears any stale clinician expiry
+        along with the row it rode in on."""
         capability, spec = await self._ensure(key)
         if not spec.enforced:
             raise CapabilityNotEnforcedError(key)
         if not capability.available:
             raise CapabilityUnavailableError(key)
-        if await self.is_clinically_managed(patient_id, lock=True):
+        # Patient-held consent (share_with_clinic) is exempt from clinician authority:
+        # the patient may always turn it off — a clinic controlling the patient's ability
+        # to stop sharing would be perverse (ADR-0020). Every other key stays clinician-
+        # controlled while managed. The FOR SHARE lock still guards the race for those.
+        if key != SHARE_WITH_CLINIC_KEY and await self.is_clinically_managed(patient_id, lock=True):
             raise ClinicallyManagedError()
         row = await self.patient_capabilities.upsert(
             patient_id=patient_id,
@@ -308,6 +373,12 @@ class CapabilityService:
         connection can never change toggles even if a route bug hands one in."""
         if not may_transmit_to_clinic(connection):
             return None
+        # A clinic can never set the patient's own consent-to-share control (ADR-0020):
+        # it is patient-held, so even a consented clinician write to it is refused. (The
+        # read gate already 404s clinician access once share is off; this guards the
+        # narrow window where share is still on and a clinician tries to flip it.)
+        if key == SHARE_WITH_CLINIC_KEY:
+            raise PatientHeldCapabilityError(key)
         capability, spec = await self._ensure(key)
         if not spec.enforced:
             raise CapabilityNotEnforcedError(key)
