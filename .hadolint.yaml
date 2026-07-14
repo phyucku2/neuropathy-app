@@ -1,0 +1,8 @@
+# Hadolint config (ADR-0018). Only real errors fail CI; version-pin *warnings* are
+# waived because our versions are pinned where it matters — backend deps in
+# pyproject.toml (installed via `pip install .`, not on the command line) and frontend
+# deps in package-lock.json — and gettext is a small, stable base utility.
+failure-threshold: error
+ignored:
+  - DL3013 # pip: package versions are pinned in pyproject.toml, not the install line
+  - DL3018 # apk: pinning gettext (a stable base tool) buys little and breaks on rebuilds

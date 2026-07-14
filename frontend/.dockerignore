@@ -1,0 +1,15 @@
+# Keep the build context minimal and secret-free (ADR-0018).
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+*.log
+
+# Docs / dev-only.
+Dockerfile
+.dockerignore
+
+# OS / editor cruft.
+.DS_Store
+*.swp

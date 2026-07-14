@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.router import api_router
 from app.core.config import settings
+from app.core.logging import RequestLoggingMiddleware, configure_logging
 from app.db.session import create_engine_and_sessionmaker
 
 # Multipart framing allowance on top of the PDF byte cap for the upload route's
@@ -41,12 +42,16 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     """Application factory — tests boot isolated instances to simulate restarts."""
+    configure_logging(debug=settings.app_debug)
     application = FastAPI(
         title="neuropathy-app backend",
         version="0.1.0",
         debug=settings.app_debug,
         lifespan=_lifespan,
     )
+    # Outermost middleware: times the whole request and logs one PHI-free JSON line
+    # (ADR-0018). Added before the upload guard below so it wraps it.
+    application.add_middleware(RequestLoggingMiddleware)
     application.include_router(api_router)
 
     @application.middleware("http")

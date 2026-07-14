@@ -31,7 +31,7 @@ operable before new surface area).
 
 | # | Portion | Built | Tested | Merged | Notes |
 |---|---|---|---|---|---|
-| 1 | Deployment & infrastructure — container images (backend + frontend static), compose/staging topology, health/readiness endpoints, structured PHI-free request logging, backup/restore runbook, host-agnostic deploy docs | ◻️ | ◻️ | ◻️ | ADR needed |
+| 1 | Deployment & infrastructure — backend/frontend containers (multi-stage, non-root, secret-free), health/readiness endpoints, PHI-free structured request logging, runtime-config frontend, staging compose, deploy + backup/restore runbooks, image-build CI (ADR-0018) | ✅ | ✅ 100% cov | ⏳ | pushed; awaiting PR/merge |
 | 2 | Ops-auth surface — replace OPS_BOOTSTRAP_TOKEN with real ops identities for provisioning (ADR-0017 production-readiness follow-up) | ◻️ | ◻️ | ◻️ | ADR needed |
 | 3 | Wire the remaining toggles — `emr_connect` gating /emr connect flow, `ai_narrative` gating narrator scheduling, `share_with_clinic` gating clinician reads; each flips enforced=True with its own consent-interaction decision (ADR-0013) | ◻️ | ◻️ | ◻️ | One PR per key or grouped — judge at build time |
 | 4 | Observability & ops — error tracking (self-hosted-friendly), metrics, alerting hooks, Postgres backup drill; compliance pack (HIPAA ops checklist, BAA inventory, incident-response runbook) | ◻️ | ◻️ | ◻️ | Docs + code |

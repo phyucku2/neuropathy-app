@@ -1,0 +1,31 @@
+# Keep the build context minimal, reproducible, and secret-free (ADR-0018).
+
+# Secrets / local env — must NEVER enter an image layer.
+.env
+.env.*
+
+# Tests and fixtures are not shipped in the runtime image.
+tests/
+
+# Python caches and build cruft.
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Docs / dev-only files.
+README.md
+Dockerfile
+.dockerignore
+
+# OS / editor cruft.
+.DS_Store
+*.swp
