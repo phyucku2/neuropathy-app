@@ -1,4 +1,4 @@
-package com.biomech.neuropathy;
+package com.ahwg.neuropathy;
 
 import com.getcapacitor.BridgeActivity;
 

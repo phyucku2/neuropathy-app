@@ -3,7 +3,7 @@
 Operator guide for taking the Android app from a green build to the Play Store. Written for
 the app owner (the **Advanced Health and Wellness Group** Play Console organization account). The repo never contains a
 keystore, password, or Play credential — every secret lives on your machine, in Play Console,
-or in GitHub Actions secrets. (ADR-0026; app id `com.biomech.neuropathy` — **permanent after
+or in GitHub Actions secrets. (ADR-0026; app id `com.ahwg.neuropathy` — **permanent after
 the first upload**, confirm before Step 4.)
 
 ## 0. One-time: Play Console organization account
