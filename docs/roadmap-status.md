@@ -24,12 +24,27 @@ review findings fixed), **Merged** (on `main`).
 | Clinician UI — from mockups/clinician-app.html (panel, cross-source trend table, non-diagnostic) (ADR-0016) | ✅ | ✅ | ✅ PR #7 |
 | Hardening pass — invitation rate limiting, durable pending-auth store, encrypted token vault with deletion-on-revoke, hardened ops gate, blocking Python security/license scans (ADR-0017) | ✅ | ✅ 100% cov | ✅ PR #8 |
 
-## Remaining (build order)
+## Remaining (build order) — V2
 
-*Empty — every planned portion has shipped. New work starts a new row here.*
+**Wave 1 — Production readiness** (decision 2026-07-14: V1 becomes deployable and
+operable before new surface area).
+
+| # | Portion | Built | Tested | Merged | Notes |
+|---|---|---|---|---|---|
+| 1 | Deployment & infrastructure — container images (backend + frontend static), compose/staging topology, health/readiness endpoints, structured PHI-free request logging, backup/restore runbook, host-agnostic deploy docs | ◻️ | ◻️ | ◻️ | ADR needed |
+| 2 | Ops-auth surface — replace OPS_BOOTSTRAP_TOKEN with real ops identities for provisioning (ADR-0017 production-readiness follow-up) | ◻️ | ◻️ | ◻️ | ADR needed |
+| 3 | Wire the remaining toggles — `emr_connect` gating /emr connect flow, `ai_narrative` gating narrator scheduling, `share_with_clinic` gating clinician reads; each flips enforced=True with its own consent-interaction decision (ADR-0013) | ◻️ | ◻️ | ◻️ | One PR per key or grouped — judge at build time |
+| 4 | Observability & ops — error tracking (self-hosted-friendly), metrics, alerting hooks, Postgres backup drill; compliance pack (HIPAA ops checklist, BAA inventory, incident-response runbook) | ◻️ | ◻️ | ◻️ | Docs + code |
+
+**Wave 2 — Mobile app**: Capacitor wrap of the existing SPA (decision 2026-07-14 —
+professional staged approach; ADR to record the revisit trigger: native rebuild only
+if device/HealthKit integration lands). Biometric unlock + Keychain/Keystore token
+storage replace the web sessionStorage posture.
+
+**Wave 3 — EMR registrations**: Epic/Cerner sandbox enrollment (runbook + provider
+config surface), then production enrollment.
 
 ## Deferred (not scheduled)
 
-- BioMech API/SDK ingestion (V2)
-- Mobile app (biometric login)
-- EMR production/sandbox registrations (Epic/Cerner app enrollment)
+- BioMech API/SDK live ingestion (decision 2026-07-14: PDF stays primary; revisit
+  when BioMech provides API/SDK documentation — the ADR-0014 seam absorbs it)
