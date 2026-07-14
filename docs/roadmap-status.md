@@ -35,6 +35,7 @@ operable before new surface area).
 | 2 | Ops-auth surface — replace OPS_BOOTSTRAP_TOKEN with real ops identities for provisioning (ADR-0019) | ✅ | ✅ 100% cov | ⏳ | per-operator ops accounts + require_ops; clinician provisioning now needs an ops bearer (real actor attribution); OPS_BOOTSTRAP_TOKEN narrowed to self-closing first-ops bootstrap; per-operator deactivation; migration 0005 |
 | 3 | Wire the remaining toggles — `emr_connect` gating /emr connect flow, `ai_narrative` gating narrator scheduling, `share_with_clinic` gating clinician reads; each flips enforced=True with its own consent-interaction decision (ADR-0013) | ◻️ | ◻️ | ◻️ | One PR per key or grouped — judge at build time |
 | 4 | Observability & ops — error tracking (self-hosted-friendly), metrics, alerting hooks, Postgres backup drill; compliance pack (HIPAA ops checklist, BAA inventory, incident-response runbook) | ◻️ | ◻️ | ◻️ | Docs + code |
+| 5 | Browser-verify the shipped patient + clinician UIs (Playwright/Chromium: built app renders + key flows work + ZERO new console errors) — retroactive Definition-of-Done closure for ADR-0015/0016 UI portions (msw/unit tests are not sufficient proof) | ◻️ | ◻️ | ◻️ | Near-term; DoD gap-fill, no new surface |
 
 **Wave 2 — Mobile app**: Capacitor wrap of the existing SPA (decision 2026-07-14 —
 professional staged approach; ADR to record the revisit trigger: native rebuild only
@@ -43,6 +44,17 @@ storage replace the web sessionStorage posture.
 
 **Wave 3 — EMR registrations**: Epic/Cerner sandbox enrollment (runbook + provider
 config surface), then production enrollment.
+
+**Wave 4 — Reimbursement-enabling features (RTM-first)** — build the app capture/export
+that lets a covered entity submit a defensible claim, prioritized for RTM given the
+BioMech musculoskeletal/gait/balance + ADL self-report streams (see
+[`docs/product/reimbursement-analysis.md`](product/reimbursement-analysis.md) §7 for the
+prioritized backlog: parameterized ≥N-day adherence counter, interactive-time ledger,
+episode/setup event, billing-consent scope, PHI-safe billing-evidence export, BioMech
+device-provenance strengthening, and the FDA device-status ADR). **PENDING compliance
+validation** of the reimbursement analysis by a certified professional coder +
+compliance/legal **before any build** — this Wave enables billing pathways, it does not
+authorize billing, and nothing starts until that sign-off exists.
 
 ## Deferred (not scheduled)
 

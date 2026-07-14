@@ -1,0 +1,25 @@
+# Lessons — mistakes turned into rules
+
+Append-only. Each entry is a **finding-class we actually hit** (or a near-miss caught in
+adversarial review), rewritten as a **one-line preventive rule** so it never recurs.
+Newest at the bottom. Consult this list before building; add to it every time review or CI
+catches a class of mistake not already here.
+
+Format: `- **<short name>** — <one preventive rule>. (<where it bit us>)`
+
+## Rules
+
+- **Enforced-flag honesty** — never ship a settable toggle the feature ignores; a stored 'off' the code doesn't read is a false promise, so gate unwired keys read-only (`enforced=false`) until their consumer lands. (ADR-0013)
+- **Audit must commit, so return don't raise** — when an audit event must persist in the request transaction, return the denial response; a raised `HTTPException` propagates through the transaction dependency and rolls the audit write back. (ADR-0017)
+- **No check-then-write (TOCTOU)** — never guard a write with a prior read under concurrency; enforce uniqueness/single-use in storage (partial unique index, `DELETE ... RETURNING`, `FOR SHARE`), so the DB serializes the race. (ADR-0012 duplicate connections, ADR-0013 authority race, ADR-0017 pending-auth)
+- **Revocation enforced centrally, everywhere** — a revoked grant must be refused at authentication AND on the refresh/pull path, and its secret material deleted on revoke and re-link — not just blocked at one gate. (ADR-0017 token vault; ADR-0013 revocation flips authority)
+- **PHI can leak below the app** — app logs being clean is not enough; keep request/structured logs and the proxy/log layer PHI-free by construction, and audit PHI reads/writes with counts/references only, never values. (CLAUDE.md §5; ADR-0012/0014/0018)
+- **Migrations that change types need care** — `ALTER TYPE ... ADD VALUE` and NOT-NULL/enum additions run in an autocommit block with backfill; downgrades are reversible OR they explicitly refuse rather than orphan/data-lose. (ADR-0014 enum, ADR-0012 downgrade-refuses)
+- **Secret-scanner false positives** — never write `password = "..."` literals even in tests; use uppercase `SYNTHETIC_` constants so the secret scanner stays meaningful. (secret-scan gate; CLAUDE.md §5)
+- **No wall-clock in tests** — inject a fixed `now` into anything time-dependent (expiry, rate windows); time-of-day-dependent assertions flake in CI. (ADR-0013, ADR-0017 limiter)
+- **Never silently truncate parsed input** — a value from untrusted parsed text must fully consume its token or be skipped with a warning; a prefix match turning "1,234.5" into 1.0 is a corrupted measurement that looks valid. (ADR-0014 numeric truncation)
+- **Never compute cross-unit deltas** — if two readings carry different unit strings, show "unit changed / not judged"; do not compute a delta or a better/worse verdict across units. (ADR-0015/0016 unit-change honesty)
+- **Bound untrusted uploads before materializing** — cap Content-Length before the body is spooled, cap decompressed output, and run sync parsing off the event loop; a byte cap that fires after `read()` has already buffered the whole body is no cap. (ADR-0014 hardening)
+- **Fail closed, never fail plaintext / never fail open** — an unconfigured secret key falls back to the in-memory vault (never plaintext to disk); an unset ops gate returns 403; a malformed key stops boot and never echoes the rejected value. (ADR-0017)
+- **UI is proven in a real browser, not by mocks** — a passing unit/msw test does not prove a UI portion works; drive the built app in Chromium/Playwright and confirm render + key flows + zero new console errors before Done. (Definition of Done)
+- **Reimbursement guidance is not billing advice** — never assert a CPT/HCPCS code, threshold, or rate from memory; source every figure, mark it PENDING coder/compliance validation, and capture billable *facts* generically instead of hard-coding payer code numbers. (docs/product/reimbursement-analysis.md)
