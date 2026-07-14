@@ -140,7 +140,7 @@ async def test_pull_labs_persists_research_grade_observations_and_audits() -> No
         provider_name="Synthetic Health",
         status=EmrConnectionStatus.active,
         patient_fhir_id="fhir-patient-9",
-        token_ref=secret_store.put({"access_token": "the-access-token"}),
+        token_ref=await secret_store.put({"access_token": "the-access-token"}),
     )
     await service.connections.add(record)
 
@@ -179,7 +179,7 @@ async def test_pull_labs_names_fhir_base_when_provider_unknown() -> None:
         provider_name=None,
         status=EmrConnectionStatus.active,
         patient_fhir_id="fhir-patient-9",
-        token_ref=secret_store.put({"access_token": "the-access-token"}),
+        token_ref=await secret_store.put({"access_token": "the-access-token"}),
     )
     await service.connections.add(record)
     await service.pull_labs(record.id)
@@ -204,7 +204,7 @@ async def test_repeated_pulls_do_not_duplicate_observations() -> None:
         provider_name="Synthetic Health",
         status=EmrConnectionStatus.active,
         patient_fhir_id="fhir-patient-9",
-        token_ref=secret_store.put({"access_token": "the-access-token"}),
+        token_ref=await secret_store.put({"access_token": "the-access-token"}),
     )
     await service.connections.add(record)
 
@@ -279,11 +279,13 @@ async def test_duplicate_email_raises_domain_error_at_the_repository() -> None:
 
 async def test_callback_for_vanished_connection_is_404() -> None:
     """Defensive: a pending state whose connection was removed fails cleanly."""
-    from app.emr.service import EmrError, _PendingAuth
+    from app.emr.service import EmrError, PendingAuth
 
     service = EmrService(transport=_PullOnlyEmr(), client_id="c", redirect_uri="https://a/cb")
-    service._pending["s"] = _PendingAuth(  # noqa: SLF001 — contrived state
-        connection_id=uuid.uuid4(), code_verifier="v", token_endpoint="https://t"
+    await service._pending.put(  # noqa: SLF001 — contrived state
+        "s",
+        PendingAuth(connection_id=uuid.uuid4(), code_verifier="v", token_endpoint="https://t"),
+        now=datetime.now(UTC),
     )
 
     class _TokenOnly(_PullOnlyEmr):

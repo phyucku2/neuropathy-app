@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, String, func
+from sqlalchemy import DateTime, ForeignKey, Index, String, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -20,6 +20,11 @@ from app.db.base import Base, UUIDPrimaryKey
 
 class AuditEvent(UUIDPrimaryKey, Base):
     __tablename__ = "audit_event"
+    __table_args__ = (
+        # The sliding-window rate-limit counter reads (actor, action, occurred_at)
+        # on every gated request — keep it an index range scan (ADR-0017).
+        Index("ix_audit_event_actor_action_time", "actor_id", "action", "occurred_at"),
+    )
 
     # Append-only: created only, never updated. No updated_at by design.
     occurred_at: Mapped[datetime] = mapped_column(

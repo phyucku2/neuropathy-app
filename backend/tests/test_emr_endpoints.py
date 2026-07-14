@@ -163,6 +163,63 @@ def test_revoked_connection_cannot_pull(client: TestClient) -> None:
     assert client.post(f"/emr/connections/{connection_id}/pull").status_code == 409
 
 
+async def test_revoke_deletes_the_vaulted_tokens_and_clears_the_ref() -> None:
+    """Revocation removes the secret material itself, not just the status flag: a
+    revoked grant must not stay recoverable from the durable vault (ADR-0017)."""
+    from app.models.emr_connection import EmrConnectionStatus
+
+    service = EmrService(transport=FakeEmr(), client_id="c", redirect_uri="https://a/cb")
+    record, _, state = await service.start_connect(
+        patient_id=uuid4(), fhir_base=FHIR_BASE, provider_name=None
+    )
+    await service.complete_callback(state=state, code="auth-code")
+    ref = (await service.get_connection(record.id)).token_ref
+    assert ref is not None
+    assert await service.secret_store.get(ref) is not None
+
+    revoked = await service.revoke(record.id)
+    assert revoked.status is EmrConnectionStatus.revoked
+    assert revoked.token_ref is None  # the dangling reference goes with the secret
+    assert await service.secret_store.get(ref) is None
+    assert service.secret_store._secrets == {}  # nothing orphaned in the vault
+    # Idempotent: a second revoke finds no ref to delete and stays clean.
+    assert (await service.revoke(record.id)).token_ref is None
+
+
+async def test_relink_deletes_the_superseded_token_secret() -> None:
+    """A callback completing on a connection that already holds tokens (re-link)
+    replaces the vault entry — the old refresh token must not sit orphaned in the
+    vault forever (ADR-0017)."""
+    from datetime import UTC, datetime
+
+    from app.emr.service import PendingAuth
+
+    service = EmrService(transport=FakeEmr(), client_id="c", redirect_uri="https://a/cb")
+    record, _, state = await service.start_connect(
+        patient_id=uuid4(), fhir_base=FHIR_BASE, provider_name=None
+    )
+    await service.complete_callback(state=state, code="auth-code")
+    old_ref = (await service.get_connection(record.id)).token_ref
+    assert old_ref is not None
+
+    # A fresh handshake landing on the SAME connection — the re-link path.
+    await service._pending.put(
+        "relink-state",
+        PendingAuth(
+            connection_id=record.id,
+            code_verifier="synthetic-verifier",
+            token_endpoint="https://ehr.example/oauth/token",
+        ),
+        now=datetime.now(UTC),
+    )
+    await service.complete_callback(state="relink-state", code="auth-code")
+    new_ref = (await service.get_connection(record.id)).token_ref
+    assert new_ref is not None and new_ref != old_ref
+    assert await service.secret_store.get(old_ref) is None  # superseded secret deleted
+    assert await service.secret_store.get(new_ref) is not None
+    assert len(service.secret_store._secrets) == 1  # exactly the live secret remains
+
+
 def test_pull_before_callback_is_409(client: TestClient) -> None:
     connection_id, _ = _connect(client)
     assert client.post(f"/emr/connections/{connection_id}/pull").status_code == 409

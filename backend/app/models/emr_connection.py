@@ -1,7 +1,8 @@
 """EmrConnection — a patient's authorized link to their EMR via SMART on FHIR (ADR-0008).
 
-Holds connection metadata only. OAuth tokens are secrets kept in a secret manager and
-referenced by `token_ref`; raw tokens never live in the DB or logs.
+Holds connection metadata only. OAuth tokens are secrets kept behind the SecretStore
+(encrypted at rest in the `secret` table when a key is configured — ADR-0017) and
+referenced by `token_ref`; plaintext tokens never live in the DB or logs.
 """
 
 from __future__ import annotations
@@ -42,7 +43,7 @@ class EmrConnection(UUIDPrimaryKey, Timestamps, Base):
     granted_scope: Mapped[str | None] = mapped_column(String(500), nullable=True)
     patient_fhir_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
-    # Reference to the tokens in the secret manager — NOT the tokens themselves.
+    # Reference into the SecretStore vault — NOT the tokens themselves.
     token_ref: Mapped[str | None] = mapped_column(String(200), nullable=True)
     token_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

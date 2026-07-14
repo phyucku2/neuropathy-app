@@ -11,10 +11,12 @@ Covered by the integration tests in tests/integration/ against a real Postgres
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime
 
-from sqlalchemy import exists, func, select
+from cryptography.fernet import Fernet, InvalidToken
+from sqlalchemy import delete, exists, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -26,10 +28,13 @@ from app.models.connection import ClinicConnection, ConnectionStatus
 from app.models.emr_connection import EmrConnection
 from app.models.observation import Observation, ObservationStatus
 from app.models.patient import Patient
+from app.models.pending_auth import PendingAuthState
+from app.models.secret import StoredSecret
 from app.models.user import User
 from app.repositories.capability import DuplicateCapabilityKeyError
 from app.repositories.clinic_connection import DuplicateLiveConnectionError
 from app.repositories.emr_connection import ConnectionRecord
+from app.repositories.pending_auth import PendingAuth, pending_auth_ttl
 from app.repositories.user import DuplicateEmailError, UserRecord
 from app.services.observation import counts_toward_analysis
 
@@ -299,6 +304,115 @@ class PostgresAuditEventRepository:
             .order_by(AuditEvent.occurred_at)
         )
         return list((await self._session.scalars(stmt)).all())
+
+    async def count_actor_events_since(
+        self, *, actor_id: uuid.UUID, action: str, since: datetime
+    ) -> int:
+        # The sliding-window rate-limit counter (ADR-0017); indexed point-range read
+        # via ix_audit_event_actor_action_time.
+        stmt = select(func.count(AuditEvent.id)).where(
+            AuditEvent.actor_id == actor_id,
+            AuditEvent.action == action,
+            AuditEvent.occurred_at >= since,
+        )
+        return int(await self._session.scalar(stmt) or 0)
+
+
+def encrypt_tokens(fernet: Fernet, tokens: dict[str, str]) -> bytes:
+    """Serialize + encrypt token material for the `secret` table (ADR-0017)."""
+    return fernet.encrypt(json.dumps(tokens).encode())
+
+
+def decrypt_tokens(fernet: Fernet, ciphertext: bytes) -> dict[str, str] | None:
+    """Invert encrypt_tokens; None when the key cannot open the ciphertext (rotated
+    or wrong key) — the caller treats that exactly like a missing secret, fail closed."""
+    try:
+        raw = fernet.decrypt(ciphertext)
+    except InvalidToken:
+        return None
+    loaded: dict[str, str] = json.loads(raw.decode())
+    return loaded
+
+
+class PostgresSecretStore:
+    """SecretStore over the `secret` table — Fernet-encrypted at rest (ADR-0017).
+
+    Constructed per request (deps wiring) ONLY when settings.secret_store_key is
+    configured; plaintext secret material never reaches the database.
+    """
+
+    def __init__(self, session: AsyncSession, fernet: Fernet) -> None:
+        self._session = session
+        self._fernet = fernet
+
+    async def put(self, tokens: dict[str, str]) -> str:
+        ref = f"secret::{uuid.uuid4()}"
+        self._session.add(StoredSecret(ref=ref, ciphertext=encrypt_tokens(self._fernet, tokens)))
+        await self._session.flush()
+        return ref
+
+    async def get(self, ref: str) -> dict[str, str] | None:
+        row = await self._session.get(StoredSecret, ref)
+        if row is None:
+            return None
+        return decrypt_tokens(self._fernet, row.ciphertext)
+
+    async def delete(self, ref: str) -> None:
+        # Revocation/re-link removes the ciphertext row itself (ADR-0017): a revoked
+        # or superseded grant must not stay recoverable from a DB dump plus the key.
+        await self._session.execute(delete(StoredSecret).where(StoredSecret.ref == ref))
+        await self._session.flush()
+
+
+class PostgresPendingAuthStore:
+    """PendingAuthStore over the `pending_auth` table (ADR-0017).
+
+    Single-use is enforced by the database, not by check-then-delete: `consume` is
+    one DELETE ... RETURNING, so of two callbacks racing on the same state the second
+    waits on the row lock and then deletes nothing — exactly one wins.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def put(self, state: str, pending: PendingAuth, *, now: datetime) -> None:
+        # Opportunistic purge: expired handshakes are dead weight and must never be
+        # honored anyway; each put sweeps them (indexed by ix_pending_auth_expires_at).
+        await self._session.execute(
+            delete(PendingAuthState).where(PendingAuthState.expires_at <= now)
+        )
+        self._session.add(
+            PendingAuthState(
+                state=state,
+                connection_id=pending.connection_id,
+                code_verifier=pending.code_verifier,
+                token_endpoint=pending.token_endpoint,
+                expires_at=now + pending_auth_ttl(),
+            )
+        )
+        await self._session.flush()
+
+    async def consume(self, state: str, *, now: datetime) -> PendingAuth | None:
+        stmt = (
+            delete(PendingAuthState)
+            .where(PendingAuthState.state == state)
+            .returning(
+                PendingAuthState.connection_id,
+                PendingAuthState.code_verifier,
+                PendingAuthState.token_endpoint,
+                PendingAuthState.expires_at,
+            )
+        )
+        row = (await self._session.execute(stmt)).one_or_none()
+        if row is None or row.expires_at <= now:
+            # Unknown, already consumed, or expired (the expired row is now purged —
+            # deleting before judging expiry keeps replays of stale states silent).
+            return None
+        return PendingAuth(
+            connection_id=row.connection_id,
+            code_verifier=row.code_verifier,
+            token_endpoint=row.token_endpoint,
+        )
 
 
 class PostgresCapabilityRepository:

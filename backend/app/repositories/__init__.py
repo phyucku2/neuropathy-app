@@ -13,6 +13,8 @@ from app.repositories.postgres import (
     PostgresAuditEventRepository,
     PostgresEmrConnectionRepository,
     PostgresObservationRepository,
+    PostgresPendingAuthStore,
+    PostgresSecretStore,
     PostgresUserRepository,
 )
 from app.repositories.user import InMemoryUserRepository, UserRecord, UserRepository
@@ -29,6 +31,8 @@ __all__ = [
     "PostgresAuditEventRepository",
     "PostgresEmrConnectionRepository",
     "PostgresObservationRepository",
+    "PostgresPendingAuthStore",
+    "PostgresSecretStore",
     "PostgresUserRepository",
     "UserRecord",
     "UserRepository",
