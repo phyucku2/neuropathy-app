@@ -14,9 +14,13 @@
     "test:coverage": "vitest run --coverage",
     "preview": "vite preview --port 4318 --strictPort",
     "e2e": "playwright test",
-    "e2e:report": "playwright show-report"
+    "e2e:report": "playwright show-report",
+    "cap:sync": "cap sync",
+    "cap:copy": "cap copy",
+    "cap:open:android": "cap open android"
   },
   "dependencies": {
+    "@capacitor/core": "^6.2.1",
     "@fontsource/inter": "^5.1.0",
     "@fontsource/poppins": "^5.1.0",
     "react": "^18.3.1",
@@ -25,6 +29,8 @@
     "recharts": "^2.15.3"
   },
   "devDependencies": {
+    "@capacitor/android": "^6.2.1",
+    "@capacitor/cli": "^6.2.1",
     "@eslint/js": "^9.20.0",
     "@playwright/test": "1.56.0",
     "@testing-library/dom": "^10.4.0",

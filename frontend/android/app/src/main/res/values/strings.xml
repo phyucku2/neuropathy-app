@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Neuropathy</string>
+    <string name="title_activity_main">Neuropathy</string>
+    <string name="package_name">com.biomech.neuropathy</string>
+    <string name="custom_url_scheme">com.biomech.neuropathy</string>
+</resources>
