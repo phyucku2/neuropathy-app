@@ -125,7 +125,7 @@ lenses relevant to the specific topic being brainstormed:
 14. Caregiver / family
 15. Agile (operating model, phasing, backlog impact)
 16. DevOps (CI/CD, infra, release, observability impact)
-17. Reimbursement (Medicare/Medicaid) — for each data stream, billing-pathway fit (RTM/RPM/CCM/PCM/DMHT), what the app must CAPTURE or BUILD to make a claim defensible (device/FDA status, ≥N-day adherence counters, interactive-time logging, billing-consent, evidence export), and the compliance-to-claim gaps; enables pathways only, never billing/coding/legal advice. See [`docs/product/reimbursement-analysis.md`](docs/product/reimbursement-analysis.md).
+17. Reimbursement (Medicare/Medicaid) — for each data stream, billing-pathway fit (RTM/RPM/CCM/PCM/DMHT), what the app must CAPTURE or BUILD to help make a future claim defensible (pending coder/compliance validation) (device/FDA status, ≥N-day adherence counters, interactive-time logging, billing-consent, evidence export), and the compliance-to-claim gaps; enables pathways only, never billing/coding/legal advice. See [`docs/product/reimbursement-analysis.md`](docs/product/reimbursement-analysis.md).
 
 Rules of engagement:
 - Add topic-specific lenses beyond this list whenever the subject warrants it (e.g.

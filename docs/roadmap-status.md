@@ -46,7 +46,8 @@ storage replace the web sessionStorage posture.
 config surface), then production enrollment.
 
 **Wave 4 — Reimbursement-enabling features (RTM-first)** — build the app capture/export
-that lets a covered entity submit a defensible claim, prioritized for RTM given the
+that could enable a covered entity to pursue a compliant claim, pending compliance
+validation, prioritized for RTM given the
 BioMech musculoskeletal/gait/balance + ADL self-report streams (see
 [`docs/product/reimbursement-analysis.md`](product/reimbursement-analysis.md) §7 for the
 prioritized backlog: parameterized ≥N-day adherence counter, interactive-time ledger,

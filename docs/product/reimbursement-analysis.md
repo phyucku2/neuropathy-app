@@ -52,8 +52,9 @@ Two facts shape everything below:
 
 1. **Our richest, most differentiated stream is BioMech musculoskeletal/gait/balance data
    plus ADL self-report** → this is the natural fit for **RTM**, whose device codes are
-   explicitly *musculoskeletal-system* and *respiratory-system*, and which — unlike RPM —
-   **permits patient self-reported data**.[^hhs][^medbridge]
+   explicitly *musculoskeletal-system*, *respiratory-system*, and *cognitive behavioral
+   therapy (CBT)* system data, and which — unlike RPM —
+   **permits patient self-reported data**.[^hhs][^mtelehealth]
 2. Our labs are **physiologic but not continuously self-measured by an FDA device in the
    patient's hand** — they are point-in-time results pulled from EMR/lab systems. That
    makes them a **poor fit for RPM's device + 16-day auto-transmission rule** (see §3).
@@ -62,7 +63,7 @@ Two facts shape everything below:
 
 ## 2. RTM — Remote Therapeutic Monitoring (primary recommended pathway)
 
-**Codes (CY2025 baseline).**[^thoroughcare][^hhs][^medbridge]
+**Codes (CY2025 baseline).**[^thoroughcare][^hhs][^mtelehealth]
 
 | Code | What it covers | Key rule |
 |---|---|---|
@@ -74,9 +75,10 @@ Two facts shape everything below:
 | **98981** | Treatment-management, each additional 20 min / month | Add-on to 98980 |
 
 **The device must be a "medical device as defined by the FDA"** (FD&C Act §201(h)). RTM
-software *can* qualify as that device (Software as a Medical Device), but AMA does **not**
-verify FDA status — the burden is on the biller/manufacturer, and payers may add
-requirements.[^medbridge][^mtelehealth] **This is the single biggest gating constraint for
+software *can* qualify as that device (Software as a Medical Device); because the CPT code
+set is maintained by the AMA and does not itself adjudicate a device's FDA status, the
+burden of meeting the FDA-device definition rests on the biller/manufacturer, and payers
+may add requirements.[^cms2022][^mtelehealth] **This is the single biggest gating constraint for
 us:** RTM presumes the *data source* is an FDA-regulated device. For BioMech data that
 turns on **BioMech's device/software regulatory status**, not ours (we ingest and graph
 it; ADR-0014). For app-native ADL capture, it turns on **whether our software is itself
@@ -85,18 +87,27 @@ decision, not something this doc can assert.
 
 **Self-reported data is allowed for RTM** (objective device-integrated data *or*
 subjective patient inputs), which is exactly what ADL check-ins are — a genuine advantage
-over RPM.[^hhs][^medbridge] The service must be **ordered by a physician/QHP** (a physical
+over RPM.[^hhs][^mtelehealth] The service must be **ordered by a physician/QHP** (a physical
 therapist qualifies), and the data must relate to **signs, symptoms, and function of a
-therapeutic response** — again a clean match for gait/balance/ADL.[^medbridge]
+therapeutic response** — again a clean match for gait/balance/ADL.[^mtelehealth]
 
 **CY2026 change — build to this, not just 2025.** The CY2026 PFS final rule (CMS-1832-F,
-effective 2026-01-01) **added new short-window RTM device codes for 2–15 days of data**
-and **realigned the existing device codes (98976/98977/98978) to a 16–30 day window**, and
-**lowered the treatment-management time thresholds** (a new ~10–19-minute management code
-alongside the existing 20-minute codes).[^cms2026fact][^nixon2026] Exact new code numbers
-are reported inconsistently across secondary sources and **must be confirmed against the
-CMS final rule before use** — the design takeaway is stable regardless: **our adherence
-counter must be parameterized (2–15 vs 16–30 day tiers), not hard-coded to "16."**
+effective 2026-01-01) **added new short-window device codes for 2–15 days of data**,
+**revised the existing device-supply descriptors (98976/98977/98978) to a 16–30 day
+window**, and **added lower treatment-management time codes** (first 10–19 min/month)
+alongside the existing 20-minute codes.[^cms2026fr][^cmsmm14250][^nixon2026] The confirmed
+new/revised codes, all effective **2026-01-01**, are:
+
+- **RPM:** **99445** (device supply, 2–15 days of data in 30, paid at parity with 99454)
+  and **99470** (treatment management, first 10–19 min/month). **99454 continues to require
+  16+ days (unchanged).**
+- **RTM:** **98984** (respiratory, 2–15 days), **98985** (musculoskeletal, 2–15 days),
+  **98986** (CBT, 2–15 days), and **98979** (treatment management, first 10–19 min/month);
+  the **98976 / 98977 / 98978** device-supply descriptors are revised to the **16–30 day**
+  window.
+
+The design takeaway is stable regardless: **our adherence counter must be parameterized
+(2–15 vs 16–30 day tiers), not hard-coded to "16."**
 
 ### 2.1 RTM mapping — our streams → what we must build
 
@@ -120,7 +131,7 @@ counter must be parameterized (2–15 vs 16–30 day tiers), not hard-coded to "
 | Code | Covers | Key rule |
 |---|---|---|
 | **99453** | Device set-up & patient education | Once per episode |
-| **99454** | Device supply + daily recordings/transmission | ≥16 days in 30 days (CY2026: realigned to 16–30; new 2–15-day supply code added)[^cms2026fact][^nixon2026] |
+| **99454** | Device supply + daily recordings/transmission | ≥16 days in 30 days (**unchanged** in CY2026); CY2026 adds **99445** for 2–15 days of data, paid at parity[^cms2026fr][^cmsmm14250][^nixon2026] |
 | **99457** | Treatment-management, first 20 min/month | ≥1 interactive communication; CY2026 lowers initial-time threshold |
 | **99458** | Each additional 20 min/month | Add-on |
 | **99091** | Physician data review/interpretation, 30 min | Separate pathway |
@@ -129,7 +140,7 @@ counter must be parameterized (2–15 vs 16–30 day tiers), not hard-coded to "
 
 - **RPM requires *physiologic* data collected and transmitted by a medical device — and
   the device must *automatically* collect and transmit; manually recorded / self-keyed
-  data does NOT count.**[^hhs][^acp] Our labs are physiologic but arrive as EMR/lab-system
+  data does NOT count.**[^hhs][^cms2021] Our labs are physiologic but arrive as EMR/lab-system
   results (point-in-time, pulled), **not** a patient-worn device auto-transmitting ≥16
   days/30. ADL is self-reported → excluded from RPM by definition.
 - Therefore **labs and ADL, as currently modeled, do not satisfy RPM.** RPM only becomes
@@ -169,9 +180,13 @@ RTM/RPM when the time is not double-counted.
 | **99424 / 99425** | PCM, physician/QHP — first / additional 30 min | **Single** complex chronic condition expected ≥3 mo |
 | **99426 / 99427** | PCM, clinical-staff — first / additional 30 min | Single complex condition |
 
-**CCM (99490 family) and PCM (99424 family) are mutually exclusive in the same calendar
-month for the same patient** — pick one based on the patient's profile.[^prevounce][^nsight]
-Both require a **comprehensive care plan**, patient consent, and **time tracking**.
+**CCM (99490 family) and PCM (99424 family) cannot both be billed by the *same
+practitioner* for the *same patient* in the *same calendar month* — but a *different*
+practitioner may bill PCM (e.g. a specialist managing one condition) while another bills
+CCM, each under a separate care plan.**[^cmsccmfaq][^cmsmln909188] The exclusivity is
+**per-practitioner, not per-patient**; pick the right code per practitioner based on the
+patient's profile. Both require a **comprehensive care plan**, patient consent, and **time
+tracking**.
 
 ### 4.1 CCM/PCM mapping
 
@@ -192,7 +207,7 @@ not our unique gait/balance data). Recommended as a **second wave**, not first.
 The CY2025 PFS created HCPCS **G0552 / G0553 / G0554** for **Digital Mental Health
 Treatment (DMHT) devices** — supply + treatment-management of an **FDA-cleared** (510(k)
 or De Novo, under 21 CFR 882.5801; CY2026 extended to 882.5803) prescription digital
-device used *incident to* a behavioral-health treatment plan.[^aapc][^noridian][^cure][^nixon2025]
+device used *incident to* a behavioral-health treatment plan.[^aapc][^noridian][^cure][^cmsmm14315]
 
 **Relevance to us: low today.** Our product is a neuropathy monitoring/graphing tool, not
 an FDA-cleared behavioral-health treatment device, and DMHT requires the app itself to be
@@ -274,17 +289,19 @@ All accessed **2026-07-14**. Secondary billing-guidance sites are used for orien
 Medicaid policy** — confirm every code and threshold there before use.
 
 [^thoroughcare]: ThoroughCare — "Remote Therapeutic Monitoring: 2025 CPT Codes / Billing Rules." <https://www.thoroughcare.net/blog/remote-therapeutic-monitoring-billing-rules>
-[^hhs]: U.S. HHS Telehealth — "Billing for remote patient monitoring" (RPM vs RTM, physiologic vs therapeutic, self-report, 16-day, device rules). <https://telehealth.hhs.gov/providers/best-practice-guides/telehealth-and-remote-patient-monitoring/billing-remote-patient>
-[^medbridge]: Medbridge — "CPT Code 98977 Explained" (RTM musculoskeletal device supply; FDA §201(h) device; self-reported data allowed; ordered by physician/QHP incl. PT). <https://www.medbridge.com/blog/cpt-code-98977-explained-maximizing-reimbursement-for-rtm-devices>
-[^mtelehealth]: mTelehealth — "RTM Service Codes 98975/98976/98977 & Treatment-Management 98980/98981 FAQ" (device must meet FDA §201(h)). <https://www.mtelehealth.com/wp-content/uploads/2022/04/Remote-Therapeutic-Monitoring-FAQs-RTM-Service-Codes-98975-98976-98977-and-RTM-Treatment-Management-Codes-98980-and-98981.pdf>
-[^acp]: American College of Physicians — "Remote Patient Monitoring Billing, Coding and Regulations" (RPM device auto-transmit; 16 days; physiologic data). <https://www.acponline.org/practice-career/business-resources/telehealth-guidance-and-resources/remote-patient-monitoring-billing-coding-and-regulations-information>
+[^hhs]: U.S. HHS Telehealth — "Billing for remote patient monitoring" (RPM vs RTM, physiologic vs therapeutic, self-report allowed for RTM only, 16-day rule, device auto-transmission). <https://telehealth.hhs.gov/providers/best-practice-guides/telehealth-and-remote-patient-monitoring/billing-remote-patient>
+[^mtelehealth]: mTelehealth — "RTM Service Codes 98975/98976/98977 & Treatment-Management 98980/98981 FAQ" (device must meet FDA §201(h); RTM device categories incl. respiratory/MSK; self-reported data allowed; ordered by physician/QHP incl. PT). <https://www.mtelehealth.com/wp-content/uploads/2022/04/Remote-Therapeutic-Monitoring-FAQs-RTM-Service-Codes-98975-98976-98977-and-RTM-Treatment-Management-Codes-98980-and-98981.pdf>
+[^cms2022]: CMS / Federal Register — "Medicare Program; CY 2022 Payment Policies Under the Physician Fee Schedule" (86 FR 65112 et seq.; RTM device must meet the FDA §201(h) definition, and CPT/AMA does not adjudicate a device's FDA status — burden on biller/manufacturer). <https://www.federalregister.gov/documents/2021/11/19/2021-23972/medicare-program-cy-2022-payment-policies-under-the-physician-fee-schedule-and-other-changes-to-part>
+[^acp]: American College of Physicians — "Remote Patient Monitoring Billing, Coding and Regulations" (RPM 16-day requirement; physiologic data). <https://www.acponline.org/practice-career/business-resources/telehealth-guidance-and-resources/remote-patient-monitoring-billing-coding-and-regulations-information>
+[^cms2021]: CMS / Federal Register — "Medicare Program; CY 2021 Payment Policies Under the Physician Fee Schedule" (85 FR 84472 et seq.; RPM physiologic data must be electronically/automatically collected and transmitted by the device — manually self-entered data does not qualify). <https://www.federalregister.gov/documents/2020/12/28/2020-26815/medicare-program-cy-2021-payment-policies-under-the-physician-fee-schedule-and-other-changes-to-part>
 [^prevounce]: Prevounce — "Rules for CPT 99490 and the other Chronic Care Management codes" (2026 CCM). <https://blog.prevounce.com/rules-for-cpt-99490-and-the-other-chronic-care-management-codes>
 [^nsight]: Nsight Health — "Principal Care Management (PCM) CPT Codes 2026: Billing & Reimbursement Guide." <https://blog.nsightcare.com/blog-/principal-care-management-pcm-cpt-codes-2026-billing-reimbursement-guide>
+[^cmsccmfaq]: CMS — "Chronic Care Management Services FAQs" (CCM/PCM concurrency: the *same* practitioner may not bill CCM and PCM for the same patient in the same month, but *different* practitioners may bill CCM and PCM concurrently with separate care plans). <https://www.cms.gov/files/document/chronic-care-management-faqs.pdf>
+[^cmsmln909188]: CMS MLN909188 — "Chronic Care Management Services" (MLN Booklet; CCM vs PCM scope, care-plan and consent requirements, concurrency). <https://www.cms.gov/files/document/chroniccaremanagement.pdf>
 [^aapc]: AAPC Knowledge Center — "Medicare Implements Digital Mental Health Treatment Codes" (G0552–G0554; FDA clearance). <https://www.aapc.com/blog/93026-medicare-implements-digital-mental-health-treatment-codes/>
 [^noridian]: Noridian Medicare — "Understanding Digital Mental Health Treatments" (DMHT device / 21 CFR 882.5801). <https://med.noridianmedicare.com/web/jfa/article-detail/-/view/10529/understanding-digital-mental-health-treatments>
 [^cure]: CureAdvantage — "Billing G0552 DMHT Devices: The 2025 Compliance Playbook." <https://cureadvantage.com/billing-g0552-dmht-devices-the-2025-compliance-playbook/>
-[^nixon2025]: Nixon Law Group — "New Reimbursement Opportunities for Digital Mental Health Treatment in 2025 (CMS Final Rule)." <https://www.nixonlawgroup.com/resources/new-reimbursement-opportunities-for-digital-mental-health-treatment-in-2025-cms-final-rule>
-[^cms2026fact]: CMS — "Calendar Year (CY) 2026 Medicare Physician Fee Schedule Final Rule (CMS-1832-F)" fact sheet. <https://www.cms.gov/newsroom/fact-sheets/calendar-year-cy-2026-medicare-physician-fee-schedule-final-rule-cms-1832-f>
-[^nixon2026]: Nixon Law Group — "CMS Finalizes 2026 Remote Monitoring Reimbursement Updates: What Changed for RPM and RTM" (new 2–15-day device codes; 16–30-day realignment; reduced management-time thresholds). <https://www.nixonlawgroup.com/resources/cms-finalizes-2026-remote-monitoring-reimbursement-updates-what-changed-for-rpm-and-rtm>
-
-*Additional orientation consulted:* CMS CY2026 PFS Final Rule Summary (MM14315) <https://www.cms.gov/files/document/mm14315-medicare-physician-fee-schedule-final-rule-summary-cy-2026.pdf>.
+[^cmsmm14315]: CMS MLN Matters MM14315 — "Medicare Physician Fee Schedule Final Rule Summary CY 2026" (primary CMS summary covering DMHT/digital-device coverage and the CY2026 remote-monitoring updates). <https://www.cms.gov/files/document/mm14315-medicare-physician-fee-schedule-final-rule-summary-cy-2026.pdf>
+[^cms2026fr]: CMS / Federal Register — "Medicare and Medicaid Programs; CY 2026 Payment Policies Under the Physician Fee Schedule and Other Changes" (CMS-1832-F final rule; new 2–15-day RPM/RTM device codes, 16–30-day realignment of 98976/98977/98978, and new first-tier 10–19-minute management codes; effective 2026-01-01). <https://www.federalregister.gov/documents/2025/11/05/2025-19787/medicare-and-medicaid-programs-cy-2026-payment-policies-under-the-physician-fee-schedule-and-other>
+[^cmsmm14250]: CMS MLN Matters MM14250 — "Therapy Code List: 2026 Annual Update" (confirms new/revised RTM codes 98979/98984/98985/98986 and the 16–30-day revision of 98976/98977/98978). <https://www.cms.gov/files/document/mm14250-therapy-code-list-2026-annual-update.pdf>
+[^nixon2026]: Nixon Law Group — "CMS Finalizes 2026 Remote Monitoring Reimbursement Updates: What Changed for RPM and RTM" (secondary orientation: new 2–15-day device codes; 16–30-day realignment; reduced management-time thresholds). <https://www.nixonlawgroup.com/resources/cms-finalizes-2026-remote-monitoring-reimbursement-updates-what-changed-for-rpm-and-rtm>
