@@ -1,7 +1,11 @@
 /**
- * Auth context: session state + login/register/logout. On mount, a stored
- * refresh token (sessionStorage, tab-scoped) restores the session via
- * GET /auth/me — the client's refresh-on-401 retry mints the access token.
+ * Auth context: session state + login/register/logout.
+ *
+ * On mount a stored refresh token restores the session via GET /auth/me — the client's
+ * refresh-on-401 retry mints the access token. On WEB the token lives in sessionStorage
+ * (read synchronously, ADR-0015). On NATIVE it lives in the Keystore (ADR-0024): the
+ * provider first primes the token from the secure store and requires a biometric unlock
+ * before the restore may proceed, so a persisted session is never revealed silently.
  */
 
 import {
@@ -15,6 +19,8 @@ import {
 } from 'react';
 import { getMe, login as apiLogin, register as apiRegister } from '../api/endpoints';
 import type { MeOut, TokenOut } from '../api/types';
+import { resolveNativeRestore } from './nativeRestore';
+import { isNativePlatform } from './platform';
 import { clearSession, getRefreshToken, onSessionExpired, storeSession } from './tokenStore';
 
 export type AuthStatus = 'restoring' | 'authenticated' | 'anonymous';
@@ -30,9 +36,14 @@ export interface AuthValue {
 const AuthContext = createContext<AuthValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const native = isNativePlatform();
   const [status, setStatus] = useState<AuthStatus>(() =>
-    getRefreshToken() === null ? 'anonymous' : 'restoring',
+    // Web decides synchronously from sessionStorage (unchanged). Native cannot read the
+    // Keystore synchronously, so it starts in `restoring` and the preamble effect resolves it.
+    native ? 'restoring' : getRefreshToken() === null ? 'anonymous' : 'restoring',
   );
+  // Web is ready to restore immediately; native must prime the Keystore + pass biometric first.
+  const [primed, setPrimed] = useState<boolean>(!native);
   const [user, setUser] = useState<MeOut | null>(null);
 
   useEffect(() => {
@@ -42,8 +53,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // Native-only preamble (runs once): prime the Keystore token and require a biometric unlock
+  // (resolveNativeRestore). 'anonymous' means no token OR a failed/cancelled unlock — the token
+  // is left in the Keystore for a retry next launch (a denied prompt grants no access either way;
+  // only logout clears it), and staying anonymous means no authenticated request is issued, so a
+  // primed token is never used. 'restore' lets the getMe() effect below run.
   useEffect(() => {
-    if (status !== 'restoring') {
+    if (!native) {
+      return;
+    }
+    let cancelled = false;
+    void resolveNativeRestore().then((decision) => {
+      if (cancelled) return;
+      if (decision === 'anonymous') {
+        setStatus('anonymous');
+      }
+      setPrimed(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [native]);
+
+  useEffect(() => {
+    if (status !== 'restoring' || !primed) {
       return;
     }
     let cancelled = false;
@@ -63,14 +96,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [status]);
+  }, [status, primed]);
 
   // Tokens only stay persisted if the WHOLE sign-in sequence succeeds: if the
-  // profile read fails, the stored session (memory + sessionStorage) is cleared
+  // profile read fails, the stored session (memory + durable store) is cleared
   // before rethrowing, so a "failed" sign-in never leaves a live refresh token
   // behind (kiosk / shared-machine risk).
   const establishSession = useCallback(async (tokens: TokenOut) => {
-    storeSession(tokens);
+    await storeSession(tokens);
     let me: MeOut;
     try {
       me = await getMe();

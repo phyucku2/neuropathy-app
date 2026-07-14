@@ -27,6 +27,12 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['src/test/setup.ts'],
     restoreMocks: true,
+    // Run test FILES one at a time. Component tests that mount the app + drive msw are sensitive
+    // to cross-file CPU/scheduler contention: with enough parallel worker files, an unrelated
+    // `findBy*` intermittently loses its element (a fast detach/timing race, not a slow render, so
+    // a longer async timeout does not help). Serializing files makes the jsdom suite deterministic
+    // (~a few extra seconds) — tests within a file still run normally. (ADR-0024 review finding.)
+    fileParallelism: false,
     // Vitest owns the src unit/component suite; the Playwright E2E specs under
     // e2e/ (also *.spec.ts) run in a real browser and MUST NOT be collected here.
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
