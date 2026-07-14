@@ -49,9 +49,6 @@ def create_app() -> FastAPI:
         debug=settings.app_debug,
         lifespan=_lifespan,
     )
-    # Outermost middleware: times the whole request and logs one PHI-free JSON line
-    # (ADR-0018). Added before the upload guard below so it wraps it.
-    application.add_middleware(RequestLoggingMiddleware)
     application.include_router(api_router)
 
     @application.middleware("http")
@@ -73,6 +70,12 @@ def create_app() -> FastAPI:
                     content={"detail": "Upload exceeds the PDF size cap"},
                 )
         return await call_next(request)
+
+    # Registered LAST so Starlette makes it the OUTERMOST middleware (the last-added
+    # middleware wraps all earlier ones): it times the whole request and logs one
+    # PHI-free JSON line — including responses short-circuited by the upload guard above,
+    # which must still produce a log line and an X-Request-ID header (ADR-0018 §4).
+    application.add_middleware(RequestLoggingMiddleware)
 
     @application.get("/", include_in_schema=False)
     async def root() -> dict[str, str]:

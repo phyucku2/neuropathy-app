@@ -106,6 +106,44 @@ def test_json_formatter_degrades_for_plain_records() -> None:
     assert out == {"message": "plain msg", "level": "WARNING"}
 
 
+def test_request_logging_middleware_is_registered_outermost() -> None:
+    """Starlette wraps the LAST-added middleware outermost, so RequestLoggingMiddleware
+    must sit at index 0 of user_middleware — ahead of the inner upload guard. If it were
+    added first (inner), an upload-guard short-circuit would bypass logging entirely."""
+    from app.main import app
+
+    assert app.user_middleware[0].cls is RequestLoggingMiddleware
+
+
+def test_upload_guard_short_circuit_is_still_logged_with_request_id(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An over-declared upload trips the inner guard (422) before routing. Because the
+    logging middleware is outermost it must STILL emit exactly one JSON line and echo an
+    X-Request-ID header — the 'one line per request' contract holds for short-circuits."""
+    from app.core.config import settings
+    from app.main import app
+
+    monkeypatch.setattr(settings, "biomech_max_pdf_bytes", 64)
+    caplog.set_level(logging.INFO, logger=REQUEST_LOGGER_NAME)
+    client = TestClient(app)
+
+    # Body far beyond the (shrunk) cap + multipart overhead, so the declared Content-Length
+    # trips the guard before the multipart body is parsed.
+    over_declared = b"x" * (128 * 1024)
+    resp = client.post(
+        "/biomech/reports",
+        files={"file": ("report.pdf", over_declared, "application/pdf")},
+    )
+
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == "Upload exceeds the PDF size cap"
+    records = [r for r in caplog.records if r.name == REQUEST_LOGGER_NAME]
+    assert len(records) == 1
+    assert REQUEST_ID_HEADER in resp.headers
+    assert records[0].fields["request_id"] == resp.headers[REQUEST_ID_HEADER]  # type: ignore[attr-defined]
+
+
 def test_configure_logging_is_idempotent_and_sets_level() -> None:
     logger = logging.getLogger(REQUEST_LOGGER_NAME)
     for handler in list(logger.handlers):

@@ -27,7 +27,10 @@ from app.core.config import settings
 router = APIRouter(tags=["health"])
 
 # The readiness DB probe is bounded so a wedged connection cannot make /readyz hang and
-# turn a rotation check into an outage. Kept short: readiness must fail fast.
+# turn a rotation check into an outage. This bounds the WHOLE probe — the TCP connect +
+# Postgres handshake AND the SELECT 1 — not just the query: a network-partitioned DB
+# stalls at handshake, which used to fall outside the timeout. Kept short: readiness must
+# fail fast (the engine also caps connection establishment — see app/db/session.py).
 _READYZ_DB_TIMEOUT_SECONDS = 2.0
 
 
@@ -51,10 +54,12 @@ async def readyz(request: Request, response: Response) -> dict[str, str]:
         return {"status": "not_ready", "mode": "database"}
 
     try:
-        async with engine.connect() as conn:
-            await asyncio.wait_for(
-                conn.execute(text("SELECT 1")), timeout=_READYZ_DB_TIMEOUT_SECONDS
-            )
+        # Bound connect + handshake + query together: on a network partition the
+        # `engine.connect()` handshake is exactly what stalls, so the timeout must wrap
+        # the whole block, not the SELECT alone.
+        async with asyncio.timeout(_READYZ_DB_TIMEOUT_SECONDS):
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
     except (SQLAlchemyError, OSError, TimeoutError):
         # Unreachable/slow/erroring database — pull this instance from rotation. The
         # underlying error is deliberately NOT echoed: it can carry host/DSN detail.

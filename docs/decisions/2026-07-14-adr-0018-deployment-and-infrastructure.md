@@ -61,10 +61,15 @@ acceptable for staging; a production gateway would front the API on its own orig
 - `GET /healthz` — **liveness**: process is up. Checks no dependency, never touches the
   DB, always fast `200`. An orchestrator uses it to restart a hung process without being
   fooled by a slow-but-alive database.
-- `GET /readyz` — **readiness**: ready to serve traffic *now*. In DB mode it runs a
-  short-timeout (2s) `SELECT 1`; in in-memory mode it reports ready with no dependency.
-  Not ready → **503** with a fixed, PHI-free body, so a load balancer pulls the instance
-  from rotation without killing it.
+- `GET /readyz` — **readiness**: ready to serve traffic *now*. In DB mode it opens a
+  connection and runs `SELECT 1` with the **whole probe** — the TCP connect + Postgres
+  handshake *and* the query — bounded by a short (2s) timeout, so a network-partitioned
+  DB (which stalls at the handshake, outside a query-only timeout) still fails fast
+  instead of holding a pool checkout for asyncpg's 60s default. The engine additionally
+  caps connection *establishment* at 5s (`connect_args={"timeout": 5}`, app/db/session.py)
+  so establishment is bounded everywhere, not only under the probe. In-memory mode reports
+  ready with no dependency. Not ready → **503** with a fixed, PHI-free body, so a load
+  balancer pulls the instance from rotation without killing it.
 
 Neither endpoint exposes secrets, leaky version/build detail, or PHI — the bodies are
 fixed status dicts. The underlying DB error on `/readyz` is deliberately **not** echoed
@@ -72,10 +77,13 @@ fixed status dicts. The underlying DB error on `/readyz` is deliberately **not**
 
 ### 4. Structured, PHI-free request logging
 
-`app/core/logging.py` adds a `RequestLoggingMiddleware` (outermost, so it times the
-whole request) that emits **one JSON line per request** on stdout (Twelve-Factor). The
-line carries a **whitelist** only: `method`, `path`, `status`, `duration_ms`,
-`request_id`, `env`. Rules that make it PHI-free:
+`app/core/logging.py` adds a `RequestLoggingMiddleware` that emits **one JSON line per
+request** on stdout (Twelve-Factor). It is **registered last** in `create_app`, which is
+what makes it genuinely outermost — Starlette wraps the last-added middleware around all
+earlier ones, so it times the whole request *and* still logs (with an `X-Request-ID`)
+responses short-circuited by the inner upload guard, which an "added first" registration
+would have skipped. The line carries a **whitelist** only: `method`, `path`, `status`,
+`duration_ms`, `request_id`, `env`. Rules that make it PHI-free:
 
 - **`path` is the matched route *template*** (`/clinic/patients/{id}`), read from
   `request.scope["route"]` after routing — never the raw path, which can embed a patient
@@ -88,6 +96,19 @@ line carries a **whitelist** only: `method`, `path`, `status`, `duration_ms`,
   in the URL never reaches the line. Any widening breaks a test.
 - `request_id` comes from an inbound `X-Request-ID` or is generated, and is echoed on
   the response for trace correlation. Level follows `app_debug`.
+- **The nginx layer is PHI-free too.** nginx's built-in `combined` access-log format logs
+  the raw request line (`$request`) and query string, which would leak patient UUIDs
+  (`/clinic/patients/<uuid>/...`) and the single-use OAuth `code`+`state`
+  (`/emr/callback?...`) into captured stdout — re-introducing exactly what the backend
+  whitelist excludes. `nginx.conf.template` therefore defines a `phi_free` `log_format`
+  that logs **only** `$request_method`, `$status`, `$request_time`, `$upstream_status`,
+  and `$http_x_request_id` (so a line correlates with the backend's request id) — no
+  `$request`, `$request_uri`, `$query_string`, or `$uri`. `error_log` is set to `error`
+  (not `warn`) so routine chatter is dropped; nginx still appends the request line to a
+  message on a *hard* upstream error, the one unavoidable place a raw path can surface,
+  but at `error` level for these proxy paths that message carries no query string.
+  `tests/test_nginx_logging.py` asserts the access-log format contains none of the
+  path/query variables.
 
 ### 5. Staging compose topology (explicitly not production)
 
