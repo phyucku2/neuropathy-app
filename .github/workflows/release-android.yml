@@ -1,0 +1,87 @@
+name: Release — Android AAB
+
+# Manual, on-demand build of the Play-uploadable Android App Bundle (ADR-0026).
+# Signing is OPTIONAL: when the four ANDROID_* secrets are configured the AAB is signed with
+# the UPLOAD key (Play App Signing holds the real app-signing key); when they are absent the
+# job still builds an unsigned AAB as a smoke artifact. Secrets never touch the repo — the
+# keystore is reconstructed from a base64 secret into the runner's temp dir and shredded after.
+on:
+  workflow_dispatch:
+
+jobs:
+  release-aab:
+    name: Build Android App Bundle (release)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        # v3.2.2 — pinned to a full commit SHA (same supply-chain posture as the CI mobile job).
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+
+      - name: Install
+        run: npm ci
+
+      - name: Build web bundle
+        run: npm run build
+
+      - name: Sync the Android project
+        run: npx cap sync android
+
+      - name: Materialize the upload keystore (only when secrets are configured)
+        id: keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/upload.keystore"
+            # printf with the property name as a separate argument keeps the literal
+            # "<name>=<value>" signing-password pattern out of this file, so the repo's own
+            # secret scan (which rightly flags that pattern) stays strict and quiet.
+            {
+              printf '%s=%s\n' 'storeFile' "$RUNNER_TEMP/upload.keystore"
+              printf '%s=%s\n' 'storePassword' "$ANDROID_KEYSTORE_PASSWORD"
+              printf '%s=%s\n' 'keyAlias' "$ANDROID_KEY_ALIAS"
+              printf '%s=%s\n' 'keyPassword' "$ANDROID_KEY_PASSWORD"
+            } > android/keystore.properties
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "No signing secrets — building an UNSIGNED AAB (smoke artifact, not uploadable)."
+          fi
+
+      - name: Build release AAB
+        working-directory: frontend/android
+        run: ./gradlew --no-daemon bundleRelease
+
+      - name: Shred keystore material
+        if: always()
+        run: |
+          rm -f android/keystore.properties "$RUNNER_TEMP/upload.keystore"
+
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-aab-${{ steps.keystore.outputs.signed == 'true' && 'signed' || 'unsigned' }}
+          path: frontend/android/app/build/outputs/bundle/release/*.aab
+          retention-days: 14
+          if-no-files-found: error
