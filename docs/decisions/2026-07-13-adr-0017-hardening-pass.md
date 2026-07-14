@@ -95,17 +95,41 @@ configuration. A rotated/wrong key makes old ciphertext undecryptable; `get` ret
 None and the pull path answers the existing 409 "reconnect your EMR" — key rotation
 with re-encryption is out of scope (patients re-link).
 
+**Deletion on revoke and re-link (adversarial-review finding):** a durable vault
+must not out-retain the grant it protects — the old process-memory vault forgot
+revoked tokens on restart, and the DB vault must be no weaker: a patient who revoked
+must not stay one database dump + key away from a working refresh token months
+later. `SecretStore` therefore carries `delete(ref)` (in-memory pop; Postgres row
+DELETE), `EmrService.revoke` deletes the vaulted tokens and clears `token_ref` when
+it flips the status, and a re-link (`complete_callback` on a connection that already
+holds a `token_ref`) deletes the superseded secret before vaulting the new one — no
+orphaned ciphertext either way. Rows orphaned by the earlier flows do not exist
+pre-launch, so there is nothing to backfill.
+
 ### 4. Ops bootstrap gate hardening
 
 The bootstrap token keeps its constant-time compare and fail-closed-when-unset 403,
 and gains: (a) **minimum length enforced at settings load** — a configured
 `OPS_BOOTSTRAP_TOKEN` under 32 chars stops boot with a generation hint (fail closed:
-a short token is a guessable ops gate); (b) **every failed attempt is audited**
-(`action='bootstrap_denied'`, actor_role='ops', detail = failure shape only — never
-token material), so brute-forcing leaves a trail. (c) This gate remains interim:
-**a dedicated ops-auth surface (SSO/mTLS-backed) replaces the bootstrap token at
-production readiness** — that surface is out of scope for this pass and stays on
-the roadmap as the ADR-0010/0012 follow-up.
+a short token is a guessable ops gate), and the load-time error **never echoes the
+rejected value** (`hide_input_in_errors`; adversarial-review finding — pydantic's
+default rendering appends `input_value=...`, which would print a nearly-valid token
+or secret-store key verbatim into boot-loop logs); (b) **failed attempts are
+audited** (`action='bootstrap_denied'`, actor_role='ops', actor_id = a fixed
+sentinel uuid5 for 'ops-bootstrap', detail = failure shape only — never token
+material), so brute-forcing leaves a trail. Denial audits are **capped by the same
+sliding-window limiter** counting the `bootstrap_denied` events themselves under
+that sentinel (settings-driven: default 20 per 3600 s; adversarial-review finding):
+the endpoint is unauthenticated, so unbounded per-request audit writes were a
+log-flood/DoS primitive against the PHI database. Beyond the cap the byte-identical
+403 still answers and only the audit write is skipped. **Tradeoff, accepted:** the
+forensic trail of a sustained brute-force is bounded to the window budget (the
+first N attempts per window are recorded; the tail is not) in exchange for a
+bounded audit table — an attacker can no longer grow it without limit, and a
+capped-out window is itself the loudest possible signal in the recorded rows.
+(c) This gate remains interim: **a dedicated ops-auth surface (SSO/mTLS-backed)
+replaces the bootstrap token at production readiness** — that surface is out of
+scope for this pass and stays on the roadmap as the ADR-0010/0012 follow-up.
 
 ### 5. CI: Python security/license scans now block
 
@@ -113,9 +137,15 @@ The security job installs the backend into an isolated venv (pip-audit cannot pa
 our pyproject directly; the installed environment is the real resolved tree) and
 runs, blocking: `pip-licenses --python <scan-env> --allow-only <permissive list>`
 (CLAUDE.md §4, spelled as the tree spells them: MIT/BSD/Apache variants, ISC,
-PSF-2.0, MIT-0, Unlicense) and then `pip-audit --skip-editable` (skips only our own
-unpublished package; every dependency vulnerability fails CI). Order matters: the
-license gate runs before pip-audit's own dependencies land in the scan env.
+PSF-2.0, MIT-0, Unlicense) and then pip-audit. Both scan tools live OUTSIDE the
+scan venv and judge it from there (adversarial-review finding: pip-audit was
+installed INTO the scan env, so its own ~26 dependencies — requests, urllib3,
+rich, ... — joined the audited set and could gate merges, contradicting the venv's
+whole purpose). pip-audit audits a fully pinned freeze snapshot:
+`<scan-env>/bin/pip freeze --exclude-editable` (drops only our own unpublished
+package) piped to `pip-audit -r <snapshot> --no-deps` (the snapshot IS the resolved
+tree; nothing left to resolve) — every real dependency is audited and any known
+vulnerability fails CI.
 **Documented exception:** `certifi` (MPL-2.0) is skipped by name in the license
 gate — it is the Mozilla CA certificate bundle consumed unmodified as data via
 httpx, and MPL's file-level terms are met by upstream; no other MPL dependency is
@@ -129,8 +159,10 @@ admitted (anything new fails the allowlist and lands here for review).
   (handshakes in flight; tokens the patient re-grants by reconnecting), never
   health data, so unlike 0002 there is nothing to refuse over.
 - Config: `secret_store_key`, `pending_auth_ttl_seconds`, `invite_rate_limit_max`,
-  `invite_rate_limit_window_seconds`; startup validation on `ops_bootstrap_token`
-  and `secret_store_key`. `.env.example` (placeholders only) is now committed;
+  `invite_rate_limit_window_seconds`, `bootstrap_denied_audit_max`,
+  `bootstrap_denied_audit_window_seconds`; startup validation on
+  `ops_bootstrap_token` and `secret_store_key` (rejected values are never echoed
+  into the error). `.env.example` (placeholders only) is now committed;
   `.gitignore` un-ignores exactly that file.
 - deps.py: DB mode wires `PostgresPendingAuthStore` per request and
   `PostgresSecretStore` when the key is configured; in-memory mode is unchanged.
@@ -141,8 +173,11 @@ admitted (anything new fails the allowlist and lands here for review).
 - Tests: limiter window math on fixed timestamps; 429 + refusal audit +
   limiter-before-lookup order; pending-auth TTL/single-use incl. a live two-session
   consume race; Fernet round-trip + ciphertext-not-plaintext + wrong-key fail-closed;
-  bootstrap min-length rejection + denied-attempt audit; migration 0004
-  upgrade/downgrade/re-upgrade with autogenerate parity.
+  bootstrap min-length rejection (asserting the rejected value never appears in the
+  error) + denied-attempt audit + denial-audit cap (identical 403 beyond it, audits
+  resume once the window passes — fixed timestamps); token deletion on revoke and
+  re-link (in-memory and Postgres: secret row gone, pull after revoke still 409s);
+  migration 0004 upgrade/downgrade/re-upgrade with autogenerate parity.
 
 ## Options considered
 

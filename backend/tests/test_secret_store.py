@@ -22,6 +22,18 @@ async def test_in_memory_store_round_trips_and_mints_unique_refs() -> None:
     assert await store.get("secret::never-issued") is None
 
 
+async def test_in_memory_store_delete_removes_the_secret_for_good() -> None:
+    """delete backs revocation/re-link (ADR-0017): the material is gone from the
+    vault itself, not merely unreadable — and an unknown ref is a quiet no-op."""
+    store = InMemorySecretStore()
+    ref = await store.put(SYNTHETIC_TOKENS)
+    await store.delete(ref)
+    assert await store.get(ref) is None
+    assert store._secrets == {}
+    await store.delete(ref)  # already gone — idempotent
+    await store.delete("secret::never-issued")  # never existed — still a no-op
+
+
 def test_fernet_codec_round_trips() -> None:
     fernet = Fernet(Fernet.generate_key())
     ciphertext = encrypt_tokens(fernet, SYNTHETIC_TOKENS)

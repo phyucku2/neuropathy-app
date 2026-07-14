@@ -41,22 +41,32 @@ from app.schemas.clinic import (
 from app.schemas.ingestion import ObservationPage
 from app.schemas.trajectory import Trajectory
 from app.services.auth import AuthApiError
-from app.services.clinic import ClinicService
+from app.services.clinic import (
+    OPS_BOOTSTRAP_ACTOR_ID,
+    ClinicService,
+    bootstrap_denial_audit_limiter,
+)
 from app.services.rate_limit import RateLimitExceededError
 from app.services.trajectory import compute_patient_trajectory
 
 router = APIRouter(prefix="/clinic", tags=["clinic"])
 
 
-async def _bootstrap_denial(provided: str | None, service: ClinicService) -> JSONResponse | None:
+async def _bootstrap_denial(
+    provided: str | None, service: ClinicService, *, now: datetime
+) -> JSONResponse | None:
     """Ops gate for clinician provisioning: fail closed when unconfigured.
 
     Clinicians are provisioned, never self-registered (ADR-0010). Until the dedicated
     ops-auth surface replaces this gate (ADR-0017), provisioning requires the
     settings-provided OPS_BOOTSTRAP_TOKEN (min length enforced at settings load); no
     token configured means no provisioning at all. Constant-time comparison, same 403
-    for missing and wrong tokens — and every FAILED attempt is audited (no token
-    material, only which failure class) so brute-forcing the gate leaves a trail.
+    for missing and wrong tokens — and FAILED attempts are audited (no token material,
+    only which failure class) so brute-forcing the gate leaves a trail. The denial
+    audit is CAPPED by a sliding window on the fixed sentinel actor (ADR-0017): this
+    endpoint is unauthenticated, so unbounded per-request audit writes would hand any
+    anonymous client a log-flood primitive against the PHI database. Beyond the budget
+    the byte-identical 403 still answers and only the audit write is skipped.
 
     The denial is RETURNED, not raised: an HTTPException would propagate through the
     request-transaction dependency and roll the just-written audit event back in DB
@@ -69,16 +79,17 @@ async def _bootstrap_denial(provided: str | None, service: ClinicService) -> JSO
         and pysecrets.compare_digest(configured.encode(), provided.encode())
     ):
         return None
-    await service.audit.add(
-        AuditEvent(
-            actor_id=None,
-            actor_role="ops",
-            action="bootstrap_denied",
-            patient_id=None,
-            # Never the tokens themselves — only the shape of the failure.
-            detail={"configured": bool(configured), "token_presented": provided is not None},
+    if await bootstrap_denial_audit_limiter(service.audit).allow(OPS_BOOTSTRAP_ACTOR_ID, now=now):
+        await service.audit.add(
+            AuditEvent(
+                actor_id=OPS_BOOTSTRAP_ACTOR_ID,
+                actor_role="ops",
+                action="bootstrap_denied",
+                patient_id=None,
+                # Never the tokens themselves — only the shape of the failure.
+                detail={"configured": bool(configured), "token_presented": provided is not None},
+            )
         )
-    )
     return JSONResponse(status_code=403, content={"detail": "Bootstrap token required"})
 
 
@@ -91,7 +102,7 @@ async def create_clinician(
 ) -> ClinicianOut | JSONResponse:
     """Provision a clinician account (ops/bootstrap): join an existing clinic by id
     or found a new one by name."""
-    denial = await _bootstrap_denial(x_bootstrap_token, service)
+    denial = await _bootstrap_denial(x_bootstrap_token, service, now=datetime.now(UTC))
     if denial is not None:
         return denial
     founded = body.clinic_id is None

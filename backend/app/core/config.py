@@ -3,6 +3,8 @@
 Security-sensitive values are validated at load time and fail CLOSED: a configured
 ops bootstrap token shorter than the minimum, or a malformed secret-store key, stops
 the process with a clear error instead of booting into a weaker posture (ADR-0017).
+The error never echoes the rejected value (`hide_input_in_errors`): startup failures
+land in boot-loop logs, and a nearly-valid secret printed there is still a secret.
 """
 
 from __future__ import annotations
@@ -18,7 +20,11 @@ OPS_BOOTSTRAP_TOKEN_MIN_LENGTH = 32
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # hide_input_in_errors: a rejected value must NEVER be echoed back — pydantic's
+    # default ValidationError rendering appends `input_value=...`, which would print a
+    # too-short OPS_BOOTSTRAP_TOKEN or a mistyped SECRET_STORE_KEY verbatim into
+    # boot-loop logs (ADR-0017 review finding).
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", hide_input_in_errors=True)
 
     app_env: str = "local"
     app_debug: bool = False
@@ -63,6 +69,13 @@ class Settings(BaseSettings):
     # invite_rate_limit_max accepted invitations per clinician per sliding window.
     invite_rate_limit_max: int = 20
     invite_rate_limit_window_seconds: int = 3600
+
+    # Bootstrap-denial audit cap (ADR-0017): failed attempts on the UNAUTHENTICATED
+    # provisioning gate are audited, but at most bootstrap_denied_audit_max rows per
+    # sliding window — beyond the cap the 403 is unchanged and only the audit write is
+    # skipped, so an anonymous client cannot flood the audit table with denial rows.
+    bootstrap_denied_audit_max: int = 20
+    bootstrap_denied_audit_window_seconds: int = 3600
 
     # SMART on FHIR / EMR pull (ADR-0008). Client secret (if any) and OAuth tokens live
     # in a secret manager, never here.

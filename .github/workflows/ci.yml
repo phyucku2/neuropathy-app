@@ -119,11 +119,12 @@ jobs:
           /tmp/scan-env/bin/pip install --upgrade pip
           /tmp/scan-env/bin/pip install -e ./backend
 
-      # Runs BEFORE pip-audit lands its own deps in the scan env. Allowlist per
-      # CLAUDE.md §4 (permissive only), spelled the way the resolved tree spells
-      # them (SPDX ids + classifier strings + the PSF/Unlicense variants).
-      # certifi is skipped by name: it is the Mozilla CA certificate bundle
-      # (MPL-2.0) consumed unmodified as data — the one reviewed exception,
+      # Both scan tools live OUTSIDE the scan env (the runner's default python) and
+      # judge it from there, so their own dependencies are never part of the scanned
+      # tree. Allowlist per CLAUDE.md §4 (permissive only), spelled the way the
+      # resolved tree spells them (SPDX ids + classifier strings + the PSF/Unlicense
+      # variants). certifi is skipped by name: it is the Mozilla CA certificate
+      # bundle (MPL-2.0) consumed unmodified as data — the one reviewed exception,
       # recorded in ADR-0017.
       - name: License policy (Python — blocking allowlist)
         run: |
@@ -132,12 +133,18 @@ jobs:
             --ignore-packages neuropathy-app-backend certifi \
             --allow-only "MIT;MIT License;MIT-0;MIT AND PSF-2.0;BSD License;BSD-2-Clause;BSD-3-Clause;Apache Software License;Apache-2.0;Apache-2.0 OR BSD-2-Clause;Apache-2.0 OR BSD-3-Clause;ISC License (ISCL);PSF-2.0;The Unlicense (Unlicense)"
 
-      # --skip-editable skips only our own unpublished package (never on PyPI);
-      # every real dependency is audited and any known vulnerability fails CI.
+      # pip-audit mirrors the pip-licenses approach: installed OUTSIDE the scan env
+      # and pointed at a fully pinned freeze snapshot of it, so pip-audit's own ~26
+      # dependencies (requests, rich, urllib3, ...) never join the audited set and
+      # cannot gate merges. --exclude-editable drops only our own unpublished
+      # package (never on PyPI); every real dependency is audited and any known
+      # vulnerability fails CI. --no-deps is safe because the snapshot IS the fully
+      # resolved tree — there is nothing left to resolve.
       - name: Dependency vulnerability audit (Python — blocking)
         run: |
-          /tmp/scan-env/bin/pip install pip-audit
-          /tmp/scan-env/bin/pip-audit --skip-editable
+          pip install pip-audit
+          /tmp/scan-env/bin/pip freeze --exclude-editable > /tmp/scan-freeze.txt
+          pip-audit -r /tmp/scan-freeze.txt --no-deps
 
       - name: Set up Node 22
         uses: actions/setup-node@v4

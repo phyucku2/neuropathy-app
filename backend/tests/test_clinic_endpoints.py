@@ -13,8 +13,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_auth_service, get_clinic_service
+from app.api.routes.clinic import _bootstrap_denial
 from app.core.config import settings
 from app.main import app
+from app.models.audit import AuditEvent
 from app.models.connection import ClinicConnection, ConnectionStatus, Initiator
 from app.models.observation import DataOrigin, Observation, ObservationStatus, SourceType
 from app.models.user import UserRole
@@ -24,7 +26,7 @@ from app.repositories.clinic_connection import (
 )
 from app.repositories.user import InMemoryUserRepository, UserRecord
 from app.services.auth import AuthService
-from app.services.clinic import ClinicService
+from app.services.clinic import OPS_BOOTSTRAP_ACTOR_ID, ClinicService
 from app.services.rate_limit import RateLimitExceededError
 
 NOW = datetime.now(UTC)
@@ -288,7 +290,7 @@ def test_failed_bootstrap_attempts_are_audited_without_token_material(
         {"configured": False, "token_presented": True},  # gate unconfigured (fail closed)
     ]
     for event in denied:
-        assert event.actor_id is None
+        assert event.actor_id == OPS_BOOTSTRAP_ACTOR_ID  # the fixed sentinel, no real user
         assert event.actor_role == "ops"
         assert event.patient_id is None
         assert "wrong-token" not in str(event.detail)
@@ -302,6 +304,67 @@ def test_successful_bootstrap_writes_no_denied_event(
     actions = [e.action for e in clinic_service.audit._events]
     assert "create_clinician" in actions
     assert "bootstrap_denied" not in actions
+
+
+def test_bootstrap_denial_audits_are_capped_but_the_403_is_unchanged(
+    client: TestClient, clinic_service: ClinicService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The provisioning gate is UNAUTHENTICATED: without a cap, every anonymous failed
+    attempt commits a durable audit row — a log-flood primitive against the PHI
+    database (ADR-0017). Beyond the settings-driven budget the answer stays the
+    byte-identical 403; only the audit write is skipped."""
+    monkeypatch.setattr(settings, "bootstrap_denied_audit_max", 2)
+    body = {
+        "email": "dr@example.com",
+        "password": "a-strong-password",
+        "display_name": "Dr",
+        "clinic_name": "C",
+    }
+    responses = [
+        client.post("/clinic/clinicians", headers={"X-Bootstrap-Token": "wrong-token"}, json=body)
+        for _ in range(5)
+    ]
+    assert [r.status_code for r in responses] == [403] * 5
+    # Capped and uncapped denials must be indistinguishable to the caller.
+    assert len({r.content for r in responses}) == 1
+    denied = [e for e in clinic_service.audit._events if e.action == "bootstrap_denied"]
+    assert len(denied) == 2  # the durable trail is bounded to the window budget
+
+
+async def test_bootstrap_denial_audits_resume_after_the_window_passes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Window math on FIXED injected timestamps (the ADR-0013 CI-flake rule): inside a
+    full window the denial audit is skipped; once the old denials slide out, auditing
+    resumes — and every answer is the same 403 throughout."""
+    monkeypatch.setattr(settings, "ops_bootstrap_token", BOOTSTRAP_TOKEN)
+    monkeypatch.setattr(settings, "bootstrap_denied_audit_max", 1)
+    service = ClinicService()
+    window = timedelta(seconds=settings.bootstrap_denied_audit_window_seconds)
+    t0 = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
+    # The window is already spent: one denial audited at t0.
+    await service.audit.add(
+        AuditEvent(
+            actor_id=OPS_BOOTSTRAP_ACTOR_ID,
+            occurred_at=t0,
+            actor_role="ops",
+            action="bootstrap_denied",
+            patient_id=None,
+            detail={},
+        )
+    )
+
+    capped = await _bootstrap_denial("wrong-token", service, now=t0 + timedelta(minutes=30))
+    assert capped is not None and capped.status_code == 403  # still denied...
+    denied = [e for e in service.audit._events if e.action == "bootstrap_denied"]
+    assert len(denied) == 1  # ...but nothing new written inside the full window
+
+    resumed = await _bootstrap_denial(
+        "wrong-token", service, now=t0 + window + timedelta(seconds=1)
+    )
+    assert resumed is not None and resumed.status_code == 403
+    denied = [e for e in service.audit._events if e.action == "bootstrap_denied"]
+    assert len(denied) == 2  # the t0 denial left the window — auditing resumed
 
 
 # ---------------------------------------------------------------- invitations

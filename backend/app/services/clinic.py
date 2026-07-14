@@ -44,7 +44,17 @@ from app.repositories.user import InMemoryUserRepository, UserRecord, UserReposi
 from app.services.connection import may_transmit_to_clinic
 from app.services.rate_limit import RateLimitExceededError, SlidingWindowRateLimiter
 
-__all__ = ["ClinicService", "PanelEntry", "invitation_rate_limiter"]
+__all__ = [
+    "OPS_BOOTSTRAP_ACTOR_ID",
+    "ClinicService",
+    "PanelEntry",
+    "bootstrap_denial_audit_limiter",
+    "invitation_rate_limiter",
+]
+
+# Denied bootstrap attempts have no authenticated actor, so their audit rows — and the
+# denial-audit limiter that caps them — key on this fixed sentinel id (ADR-0017).
+OPS_BOOTSTRAP_ACTOR_ID = uuid.uuid5(uuid.NAMESPACE_URL, "urn:neuropathy-app:ops-bootstrap")
 
 
 def invitation_rate_limiter(counter: AuditEventRepository) -> SlidingWindowRateLimiter:
@@ -57,6 +67,20 @@ def invitation_rate_limiter(counter: AuditEventRepository) -> SlidingWindowRateL
         action="invite_patient",
         max_events=settings.invite_rate_limit_max,
         window=timedelta(seconds=settings.invite_rate_limit_window_seconds),
+    )
+
+
+def bootstrap_denial_audit_limiter(counter: AuditEventRepository) -> SlidingWindowRateLimiter:
+    """The settings-driven cap on 'bootstrap_denied' audit WRITES (ADR-0017), counting
+    the denial events themselves under the fixed sentinel actor. The provisioning gate
+    is unauthenticated, so without a cap every anonymous failed attempt would commit a
+    durable audit row — a log-flood primitive against the PHI database. Beyond the
+    budget the identical 403 still answers; only the audit write is skipped."""
+    return SlidingWindowRateLimiter(
+        counter=counter,
+        action="bootstrap_denied",
+        max_events=settings.bootstrap_denied_audit_max,
+        window=timedelta(seconds=settings.bootstrap_denied_audit_window_seconds),
     )
 
 

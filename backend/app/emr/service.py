@@ -79,6 +79,15 @@ class SecretStore(Protocol):
         """The vaulted tokens, or None when the ref is unknown (or undecryptable)."""
         ...
 
+    async def delete(self, ref: str) -> None:
+        """Remove the vaulted tokens for good; an unknown ref is a quiet no-op.
+
+        Revocation and re-linking call this so secret material never outlives the
+        grant it belongs to (ADR-0017): a revoked or superseded refresh token must
+        not remain recoverable from a database dump plus the vault key.
+        """
+        ...
+
 
 class InMemorySecretStore:
     """Dict-backed vault for unit tests, DB-less development, and DB mode without a
@@ -94,6 +103,9 @@ class InMemorySecretStore:
 
     async def get(self, ref: str) -> dict[str, str] | None:
         return self._secrets.get(ref)
+
+    async def delete(self, ref: str) -> None:
+        self._secrets.pop(ref, None)
 
 
 @dataclass
@@ -171,6 +183,11 @@ class EmrService:
         tokens = {"access_token": str(access_token)}
         if token_response.get("refresh_token"):
             tokens["refresh_token"] = str(token_response["refresh_token"])
+        if record.token_ref is not None:
+            # Re-linking replaces the vaulted tokens: delete the superseded secret
+            # before storing the new one, or the old (still-working) refresh token
+            # would sit orphaned in the vault forever (ADR-0017).
+            await self.secret_store.delete(record.token_ref)
         record.token_ref = await self.secret_store.put(tokens)
         record.patient_fhir_id = (
             str(token_response["patient"]) if token_response.get("patient") else None
@@ -260,9 +277,18 @@ class EmrService:
         return imported
 
     async def revoke(self, connection_id: uuid.UUID) -> ConnectionRecord:
+        """Revoke the connection AND delete its vaulted tokens (ADR-0017).
+
+        Flipping the status alone would leave the encrypted access+refresh tokens in
+        the durable vault forever — a patient who revokes must not stay one DB dump +
+        key away from a working refresh token. Idempotent: re-revoking finds no ref.
+        """
         record = await self.get_connection(connection_id)
         record.status = EmrConnectionStatus.revoked
         record.revoked_at = datetime.now(UTC)
+        if record.token_ref is not None:
+            await self.secret_store.delete(record.token_ref)
+            record.token_ref = None
         await self.connections.update(record)
         return record
 

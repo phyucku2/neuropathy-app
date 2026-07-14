@@ -34,6 +34,27 @@ def test_boundary_bootstrap_token_lengths() -> None:
         _settings(ops_bootstrap_token="x" * (OPS_BOOTSTRAP_TOKEN_MIN_LENGTH - 1))
 
 
+def test_rejected_bootstrap_token_never_appears_in_the_error() -> None:
+    """The startup failure lands in boot-loop logs — pydantic's default rendering
+    would echo the rejected value back as `input_value=...`, printing a nearly-valid
+    token verbatim (hide_input_in_errors, ADR-0017 review finding)."""
+    leaked = "synthetic-distinctive-9f3a1c"  # < 32 chars, and unmistakable in output
+    with pytest.raises(ValidationError) as exc_info:
+        _settings(ops_bootstrap_token=leaked)
+    assert leaked not in str(exc_info.value)
+    assert leaked not in repr(exc_info.value)
+
+
+def test_rejected_secret_store_key_never_appears_in_the_error() -> None:
+    """A mistyped SECRET_STORE_KEY is one character away from the real key — the
+    load-time error must never echo it (hide_input_in_errors, ADR-0017)."""
+    leaked = "synthetic-almost-a-fernet-key-7b2d4e=="
+    with pytest.raises(ValidationError) as exc_info:
+        _settings(secret_store_key=leaked)
+    assert leaked not in str(exc_info.value)
+    assert leaked not in repr(exc_info.value)
+
+
 def test_unset_and_empty_bootstrap_token_mean_disabled_not_invalid() -> None:
     """Unset stays the fail-closed 'provisioning disabled' posture; an empty env var
     means the same thing — it must not trip the length rule."""

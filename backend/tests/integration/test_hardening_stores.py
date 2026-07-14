@@ -32,6 +32,7 @@ from app.core.config import settings
 from app.emr.service import PendingAuth
 from app.main import create_app
 from app.models.audit import AuditEvent
+from app.models.emr_connection import EmrConnection
 from app.models.patient import Patient
 from app.models.pending_auth import PendingAuthState
 from app.models.secret import StoredSecret
@@ -428,3 +429,67 @@ def test_oauth_flow_survives_process_restarts_between_every_leg(
         pull = third_process.post(f"/emr/connections/{connection_id}/pull", headers=headers)
         assert pull.status_code == 200, pull.text  # tokens outlived the vaulting process
         assert pull.json()["imported"] == 1
+
+
+# ---------------------------------------------------------------- deletion on revoke
+
+
+async def _connection_token_ref(url: str, connection_id: str) -> str | None:
+    engine = create_async_engine(url)
+    try:
+        maker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+        async with maker() as session:
+            return await session.scalar(
+                select(EmrConnection.token_ref).where(EmrConnection.id == uuid.UUID(connection_id))
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _secret_row_count(url: str, ref: str) -> int:
+    engine = create_async_engine(url)
+    try:
+        maker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+        async with maker() as session:
+            stmt = select(func.count()).select_from(StoredSecret).where(StoredSecret.ref == ref)
+            return int(await session.scalar(stmt) or 0)
+    finally:
+        await engine.dispose()
+
+
+def test_revoke_deletes_the_secret_row_and_pull_still_409s(
+    db_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Deletion-on-revoke in DB mode (ADR-0017): revoking removes the encrypted token
+    row itself — a database dump taken afterwards holds no ciphertext to decrypt —
+    and a pull after revocation answers the clean 409, never a 500."""
+    monkeypatch.setattr(settings, "secret_store_key", Fernet.generate_key().decode())
+    fake = _FakeEmr()
+    monkeypatch.setattr(deps, "_process_transport", lru_cache(maxsize=1)(lambda: fake))
+    _reset_process_singletons()
+
+    email = f"revoke-{uuid.uuid4().hex[:12]}@example.com"
+    with TestClient(create_app()) as client:
+        tokens = _register(client, email, SYNTHETIC_PASSWORD)
+        headers = _auth_header(tokens["access_token"])
+        started = client.post(
+            "/emr/connect", json={"fhir_base": "https://ehr.example/fhir"}, headers=headers
+        )
+        assert started.status_code == 200, started.text
+        connection_id, state = started.json()["connection_id"], started.json()["state"]
+        callback = client.get(
+            "/emr/callback", params={"state": state, "code": "auth-code"}, headers=headers
+        )
+        assert callback.status_code == 200, callback.text
+        ref = asyncio.run(_connection_token_ref(db_url, connection_id))
+        assert ref is not None
+        assert asyncio.run(_secret_row_count(db_url, ref)) == 1  # vaulted, encrypted
+
+        revoked = client.delete(f"/emr/connections/{connection_id}", headers=headers)
+        assert revoked.status_code == 200
+        assert revoked.json()["status"] == "revoked"
+        # The ciphertext row AND the dangling reference are both gone for good.
+        assert asyncio.run(_secret_row_count(db_url, ref)) == 0
+        assert asyncio.run(_connection_token_ref(db_url, connection_id)) is None
+        pull = client.post(f"/emr/connections/{connection_id}/pull", headers=headers)
+        assert pull.status_code == 409  # revoked answers the clean conflict, never a 500

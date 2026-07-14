@@ -357,6 +357,12 @@ class PostgresSecretStore:
             return None
         return decrypt_tokens(self._fernet, row.ciphertext)
 
+    async def delete(self, ref: str) -> None:
+        # Revocation/re-link removes the ciphertext row itself (ADR-0017): a revoked
+        # or superseded grant must not stay recoverable from a DB dump plus the key.
+        await self._session.execute(delete(StoredSecret).where(StoredSecret.ref == ref))
+        await self._session.flush()
+
 
 class PostgresPendingAuthStore:
     """PendingAuthStore over the `pending_auth` table (ADR-0017).
