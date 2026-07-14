@@ -28,30 +28,38 @@ export async function initNativeShell(goBack: () => void): Promise<() => void> {
     return () => undefined;
   }
 
-  // Dark status-bar content (icons/text) over the app's light header. Cosmetic and safe to
-  // tune on-device; never fatal, so a surface that lacks a status bar is ignored.
+  // LIGHT status-bar content (Capacitor Style.Dark = "light text for dark backgrounds"):
+  // the OS status bar overlays the header's dark navy gradient (--gradient-header), whose
+  // own text is white. Cosmetic and safe to tune on-device; never fatal, so a surface that
+  // lacks a status bar is ignored.
   try {
-    await StatusBar.setStyle({ style: Style.Light });
+    await StatusBar.setStyle({ style: Style.Dark });
   } catch {
     // no status bar on this surface — ignore
   }
 
-  const handle = await CapApp.addListener('backButton', ({ canGoBack }) => {
-    if (backAction(canGoBack) === 'back') {
-      goBack();
-    } else {
-      void CapApp.exitApp();
-    }
-  });
-
-  // Reveal the app only once React has mounted and requested init — no white flash.
+  // Reveal the app FIRST — with launchAutoHide:false the app owns dismissing the splash, so
+  // hide() must not sit behind any await that could reject (a stuck splash is a total hang).
   try {
     await SplashScreen.hide();
   } catch {
     // splash already gone — ignore
   }
 
-  return () => {
-    void handle.remove();
-  };
+  try {
+    const handle = await CapApp.addListener('backButton', ({ canGoBack }) => {
+      if (backAction(canGoBack) === 'back') {
+        goBack();
+      } else {
+        void CapApp.exitApp();
+      }
+    });
+    return () => {
+      void handle.remove();
+    };
+  } catch {
+    // Listener registration failed: the OS default back behavior applies. Degraded but
+    // never fatal — and the splash is already hidden above.
+    return () => undefined;
+  }
 }
