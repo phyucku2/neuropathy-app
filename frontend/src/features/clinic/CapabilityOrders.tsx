@@ -7,6 +7,10 @@
  * a fresh read of the list so it never acts on a stale snapshot.
  * enforced=false rows are read-only ("not wired yet"): their features do not
  * consult the toggle, so offering the switch would be a false promise.
+ * managed_by='patient' rows (patient-held consent, e.g. share_with_clinic) are
+ * ALSO read-only here: the clinician can never set them — the backend refuses
+ * with 409 (PatientHeldCapabilityError, ADR-0020 §3(b)) — so the console shows
+ * their status informationally rather than inviting a write that must fail.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -60,6 +64,24 @@ function CapabilityOrderRow({
           <small>Not wired to its feature yet — read-only until it is.</small>
         </div>
         <span className="pill off">Not wired yet</span>
+      </div>
+    );
+  }
+
+  // A patient-held consent key (e.g. share_with_clinic) is the patient's own
+  // control — the clinic can never set it (backend 409, ADR-0020 §3(b)). Show
+  // its current status read-only; offering a switch or renewal here would be a
+  // misleading affordance that inverts the consent model.
+  if (capability.managed_by === 'patient') {
+    return (
+      <div className="src">
+        <div className="info">
+          <b>{capability.name}</b>
+          <small>Controlled by the patient — read-only here.</small>
+        </div>
+        <span className={capability.active ? 'pill on' : 'pill off'}>
+          {capability.active ? 'On' : 'Off'}
+        </span>
       </div>
     );
   }

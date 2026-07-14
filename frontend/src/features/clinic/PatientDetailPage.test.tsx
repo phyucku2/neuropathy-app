@@ -331,6 +331,34 @@ describe('PatientDetailPage — features tab (capability orders)', () => {
     expect(screen.getByText('Changes are logged and shown to the patient.')).toBeInTheDocument();
   });
 
+  it('renders a patient-held consent key read-only — no switch, no renewal input (ADR-0020 §3(b))', async () => {
+    // share_with_clinic is enforced but managed_by='patient': the clinician can
+    // never set it (backend 409, PatientHeldCapabilityError). The console must
+    // show its status read-only, NOT a switch + renewal that would 409 on save.
+    actAsClinician();
+    await openTab('Features');
+    // A clinic-managed enforced key still gets the full interactive affordance.
+    expect(
+      await screen.findByRole('switch', { name: 'BioMech report upload' }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Renewal date for BioMech report upload')).toBeInTheDocument();
+    // The patient-held key shows its status but offers NO switch and NO renewal.
+    expect(screen.getByText('Share data with my clinic')).toBeInTheDocument();
+    expect(screen.getByText('Controlled by the patient — read-only here.')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('switch', { name: 'Share data with my clinic' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('checkbox', { name: 'Share data with my clinic' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText('Renewal date for Share data with my clinic'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Set renewal for Share data with my clinic' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('turns a capability on through the server-confirmed state', async () => {
     actAsClinician();
     const user = await openTab('Features');

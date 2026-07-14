@@ -232,6 +232,17 @@ export const CLINIC_CAPABILITIES: CapabilityStateOut[] = [
     // Wired to narrator scheduling as of ADR-0020 — interactive, not "not wired yet".
     enforced: true,
   },
+  {
+    key: 'share_with_clinic',
+    name: 'Share data with my clinic',
+    active: true,
+    // Patient-held consent (ADR-0020 §3(b)): always managed_by='patient', even
+    // while the patient is clinically managed. The clinician console renders it
+    // read-only — a clinician write is refused 409 (PatientHeldCapabilityError).
+    managed_by: 'patient',
+    expires_at: null,
+    enforced: true,
+  },
 ];
 
 export const CONNECTION_PENDING: ConnectionOut = {
