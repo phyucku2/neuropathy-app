@@ -137,10 +137,14 @@ kills the RTM-first premise (D1).
 ## 4. THE FDA QUESTION (for the regulatory consultant)
 
 **Why it decides everything:** CMS requires that RTM (and RPM) data come from a **"medical
-device as defined by the FDA"** — the FD&C Act **§201(h)** definition — and CMS/AMA do not
-adjudicate any product's FDA status; the burden rests on the manufacturer/biller
-([CY2022 PFS final rule, 86 FR 65112](https://www.federalregister.gov/documents/2021/11/19/2021-23972/medicare-program-cy-2022-payment-policies-under-the-physician-fee-schedule-and-other-changes-to-part);
+device as defined by the FDA"** — the FD&C Act **§201(h)** definition
+([CY2022 PFS final rule, 86 FR 65115](https://www.federalregister.gov/documents/2021/11/19/2021-23972/medicare-program-cy-2022-payment-policies-under-the-physician-fee-schedule-and-other-changes-to-part);
 [CMS Remote Patient Monitoring coverage page](https://www.cms.gov/medicare/coverage/telehealth/remote-patient-monitoring)).
+Neither cited source states who adjudicates a product's device status; in practice the
+determination is made against FDA's definition by the manufacturer/biller and their
+advisors — WHICH IS EXACTLY WHY this packet asks the regulatory consultant for a written
+determination rather than treating the question as settled (inference, not a cited CMS
+statement — reviewer to confirm).
 FDA's own framing of the definition and of when software is a device:
 [How to Determine if Your Product is a Medical Device](https://www.fda.gov/medical-devices/classify-your-medical-device/how-determine-if-your-product-medical-device)
 and [Software as a Medical Device (SaMD)](https://www.fda.gov/medical-devices/digital-health-center-excellence/software-medical-device-samd).

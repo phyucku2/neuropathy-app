@@ -113,9 +113,10 @@ clinic/therapist bills; the vendor supplies monitoring software plus billing evi
 - **Data captured:** 30+ gait parameters (gait speed, stride length, cadence,
   double-support, symmetry, variability), 15+ functional tests, fall-risk signals, PROs,
   passive daily-life data ("28 days of meaningful data every month").
-- **Codes billed — BILLING-VERIFIED:** vendor RTM page documents **98975 (~$19.38), 98977
-  (16-of-30 days, ~$55.72), 98980 (~$50.18), 98981 (~$40.83)**; a 2026 vendor blog adds
-  **98985** and **98979**.
+- **Codes billed — BILLING-VERIFIED (families):** the vendor RTM page documents the
+  **98975/77** and **98980/81** code families (shorthand as printed on the page; it does
+  not publish per-code dollar rates, day-count thresholds, or the 2026 codes —
+  UNVERIFIED beyond the family level).
   [onestep.co/solutions/remote-therapeutic-monitoring](https://onestep.co/solutions/remote-therapeutic-monitoring).
   Vendor-published economics: "**$112–$114 average RTM reimbursement per patient per
   month** for OneStep clients" (same page — vendor claim, not payer data). No RPM claims.
@@ -257,8 +258,12 @@ tooling — both are RPM-first, neither documents RTM.
 - **Data captured:** device vitals (BP, glucose, weight, SpO2), care-plan goals,
   encounter/time tracking.
 - **Codes billed — BILLING-VERIFIED (RPM/CCM, not RTM):** vendor blog documentation of
-  **99453** (setup, ~$19.65) and the RPM family 99454/99457/99458, plus CCM 99490/99439
-  ([vendor 99453 guide](https://vivocaresolutions.com/blog/a-top-blog-rewrite-definitive-guide-to-cpt-code-99453/)).
+  **99453** (setup, ~$19.65) and the RPM family 99454/99457/99458
+  ([vendor 99453 guide](https://vivocaresolutions.com/blog/a-top-blog-rewrite-definitive-guide-to-cpt-code-99453/)),
+  plus CCM **99490**
+  ([vendor 99490 guide](https://vivocaresolutions.com/blog/chronic-care-management-cpt-code-99490-fresh-insights-2025/))
+  and **99439**
+  ([vendor 99439 guide](https://vivocaresolutions.com/blog/chronic-care-management-cpt-code-99439-fresh-insights-2025/)).
   **No RTM.**
 - **FDA status:** no clearance or registration/listing found for the platform itself
   (UNVERIFIED-NEGATIVE; it orchestrates third-party FDA-regulated vitals devices).
@@ -291,7 +296,7 @@ labs) — see [`reimbursement-signoff-packet.md`](reimbursement-signoff-packet.m
 | **Our app** | **BioMech balance/gait + ADL self-report + EMR labs (SMART on FHIR)** — multi-stream, provenance-complete, non-diagnostic | **Indirect**: BioMech's device data via PDF import (`document_imported`); direct `device_measured` API path deferred | 98977 family **candidate — PENDING professional validation** (analysis §2) | **UNDETERMINED — the open question** (sign-off packet §4) | **Enabler** (clinic bills; app exports evidence) | Both: patient app (web + Android) + consent-gated clinician panel |
 | Limber Health | HEP adherence + pain + PROs | No (self-report software only) | **Billing-verified**: 98975/77/80/81 + 98985/79 | None found | Enabler | Both |
 | Exer AI | CV joint angles/ROM + self-report | Yes (camera CV, own software) | **Billing-verified**: 98975/77/80/81 | Registered/listed (QKC, ISD); **active FDA Warning Letter** | Enabler | Both |
-| OneStep | 30+ smartphone-IMU gait params + PROs, passive daily monitoring | Yes (phone IMU, own software) | **Billing-verified**: 98975/77/80/81 + 98985/79 | FDA-listed (ISD) | Enabler | Both |
+| OneStep | 30+ smartphone-IMU gait params + PROs, passive daily monitoring | Yes (phone IMU, own software) | **Billing-verified (families)**: 98975/77 + 98980/81 | FDA-listed (ISD) | Enabler | Both |
 | Plethy Recupe | Wearable IMU ROM/reps + PROs + coach notes | Yes (own sensor) | **Unverified** (generic "RPM and RTM billing") | Registered/listed (ISD, KQW) | Enabler + coach service; employer-funded in workers' comp | Both |
 | Hinge Health | CV kinematics + PROs; Enso neurostim | Yes (own CV + cleared device) | **Unverified — bills B2B contracts, not RTM codes** | Hardware 510(k)-**cleared** (K233784, K254216); software none | **Biller** (company contracts) | Patient-first; internal care team |
 | Sword Health | CV kinematics (Thrive Pad) + wearable + PROs | Yes (own hardware) | **Unverified — outcome-priced B2B contracts** | Registered/listed (ISD, KXQ); no 510(k) | **Biller** (company contracts) | Patient-first; internal PT team |
