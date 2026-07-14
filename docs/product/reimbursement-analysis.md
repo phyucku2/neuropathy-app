@@ -3,6 +3,7 @@
 **Date:** 2026-07-14
 **Status:** Draft for product/design planning — **PENDING compliance validation**
 **Owner action required:** certified coder + compliance/legal sign-off before any build ships or any claim is submitted.
+**Operational layer:** for the "how a claim actually gets paid" playbook (enrollment, supervision, consent/order/time deliverables, MAC/LCD + Medicaid verification, audit defense, and the app's evidence-export contract), see [`reimbursement-operations.md`](reimbursement-operations.md).
 
 ---
 
