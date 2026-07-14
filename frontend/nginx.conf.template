@@ -1,0 +1,133 @@
+# Frontend nginx (ADR-0018). Serves the built SPA and reverse-proxies the API to the
+# backend so the browser talks to ONE origin (the backend has no CORS layer; same-origin
+# sidesteps it). Runs fully NON-ROOT: pid + temp paths under /tmp, listens on 8080.
+#
+# Rendered at container start by docker-entrypoint.sh via envsubst, which substitutes
+# ONLY ${BACKEND_ORIGIN} and ${API_CONNECT_SRC} (never nginx's own $uri/$host runtime
+# variables). Cache-Control is set with `expires` rather than `add_header` on purpose:
+# a location-level add_header would drop the inherited security headers (nginx replaces,
+# not merges), so `expires` keeps the headers while still controlling caching.
+
+worker_processes auto;
+pid /tmp/nginx.pid;
+# Real ops errors only (upstream failures, config faults). Raised from `warn` to `error`
+# so routine warn-level chatter never reaches captured logs. NOTE: on a hard proxy error
+# nginx appends the request line to its message (", request: \"GET /path HTTP/1.1\"") —
+# this is the ONE place a raw path could surface, and it cannot be suppressed by config.
+# It is acceptable only because at `error` level for these proxy paths the message never
+# carries the query string, and the access log below is fully PHI-free (ADR-0018 §4).
+error_log /dev/stderr error;
+
+events {
+  worker_connections 1024;
+}
+
+http {
+  include /etc/nginx/mime.types;
+  default_type application/octet-stream;
+
+  # Writable temp paths — no root-owned directories required.
+  client_body_temp_path /tmp/nginx/client;
+  proxy_temp_path       /tmp/nginx/proxy;
+  fastcgi_temp_path     /tmp/nginx/fastcgi;
+  uwsgi_temp_path       /tmp/nginx/uwsgi;
+  scgi_temp_path        /tmp/nginx/scgi;
+
+  # PHI-free access log (ADR-0018 §4): nginx's built-in `combined` format logs the raw
+  # request line ($request) and query string, which would leak patient UUIDs
+  # (/clinic/patients/<uuid>/...) and the single-use OAuth code+state (/emr/callback?...)
+  # into captured stdout — defeating the PHI-free backend logging. This format logs ONLY
+  # the method, status, timing, upstream status, and the request id (so a line correlates
+  # with the backend's X-Request-ID). It deliberately carries NO path, URI, or query.
+  log_format phi_free 'method=$request_method status=$status '
+                      'request_time=$request_time upstream_status=$upstream_status '
+                      'request_id=$http_x_request_id';
+  access_log /dev/stdout phi_free;
+  sendfile on;
+  tcp_nopush on;
+  server_tokens off;
+
+  gzip on;
+  gzip_vary on;
+  gzip_min_length 1024;
+  gzip_types text/plain text/css application/javascript application/json image/svg+xml;
+
+  # The backend caps PDF uploads at ~10 MB; allow a little multipart framing overhead.
+  client_max_body_size 12m;
+
+  server {
+    listen 8080;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Resolve the backend at REQUEST time (Docker's embedded DNS), not at startup, so
+    # nginx boots even if the backend isn't up yet and picks up its address if it moves.
+    # Using a variable in proxy_pass forces this lazy resolution — hence $request_uri is
+    # appended explicitly (a variable proxy_pass does not inherit the matched URI).
+    resolver 127.0.0.11 ipv6=off valid=10s;
+    set $backend_origin "${BACKEND_ORIGIN}";
+
+    # Security headers on every response (inherited by the locations below, which set
+    # no add_header of their own so as not to drop these).
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options DENY always;
+    add_header Referrer-Policy no-referrer always;
+    add_header Cross-Origin-Opener-Policy same-origin always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ${API_CONNECT_SRC}; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" always;
+
+    # Common proxy headers, inherited by every API location below.
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    # Frontend-container liveness — distinct from the backend's /readyz, which is
+    # probed on the backend container directly.
+    location = /healthz {
+      access_log off;
+      default_type text/plain;
+      return 200 "ok\n";
+    }
+
+    # ---- API reverse proxy (same-origin) ----
+    location /auth/          { proxy_pass http://$backend_origin$request_uri; }
+    location /emr/           { proxy_pass http://$backend_origin$request_uri; }
+    location /biomech/       { proxy_pass http://$backend_origin$request_uri; }
+    location /connections    { proxy_pass http://$backend_origin$request_uri; }
+    location = /labs         { proxy_pass http://$backend_origin$request_uri; }
+    location = /adl          { proxy_pass http://$backend_origin$request_uri; }
+    location = /observations { proxy_pass http://$backend_origin$request_uri; }
+    location = /trajectory   { proxy_pass http://$backend_origin$request_uri; }
+    location = /capabilities { proxy_pass http://$backend_origin$request_uri; }
+    location /capabilities/  { proxy_pass http://$backend_origin$request_uri; }
+
+    # `/clinic` is BOTH an SPA route (`/clinic`, `/clinic/patients/{id}`) and an API
+    # namespace. Proxy ONLY the exact API routes and the id-with-suffix API routes; the
+    # bare SPA routes have no matching proxy location and fall through to the SPA shell.
+    location = /clinic/clinicians       { proxy_pass http://$backend_origin$request_uri; }
+    location = /clinic/invitations      { proxy_pass http://$backend_origin$request_uri; }
+    location = /clinic/patients         { proxy_pass http://$backend_origin$request_uri; }
+    location ~ ^/clinic/patients/[^/]+/.+ { proxy_pass http://$backend_origin$request_uri; }
+
+    # ---- static assets ----
+    # Hashed build assets are content-addressed and immutable — cache hard.
+    location /assets/ {
+      expires 1y;
+      try_files $uri =404;
+    }
+
+    # Runtime config carries deploy-time values and must always be revalidated.
+    location = /config.js {
+      expires -1;
+    }
+
+    # ---- SPA history fallback ----
+    # The app shell is never long-cached (it references per-build hashed assets).
+    location / {
+      expires -1;
+      try_files $uri /index.html;
+    }
+  }
+}

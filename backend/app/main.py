@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.router import api_router
 from app.core.config import settings
+from app.core.logging import RequestLoggingMiddleware, configure_logging
 from app.db.session import create_engine_and_sessionmaker
 
 # Multipart framing allowance on top of the PDF byte cap for the upload route's
@@ -41,6 +42,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     """Application factory — tests boot isolated instances to simulate restarts."""
+    configure_logging(debug=settings.app_debug)
     application = FastAPI(
         title="neuropathy-app backend",
         version="0.1.0",
@@ -68,6 +70,12 @@ def create_app() -> FastAPI:
                     content={"detail": "Upload exceeds the PDF size cap"},
                 )
         return await call_next(request)
+
+    # Registered LAST so Starlette makes it the OUTERMOST middleware (the last-added
+    # middleware wraps all earlier ones): it times the whole request and logs one
+    # PHI-free JSON line — including responses short-circuited by the upload guard above,
+    # which must still produce a log line and an X-Request-ID header (ADR-0018 §4).
+    application.add_middleware(RequestLoggingMiddleware)
 
     @application.get("/", include_in_schema=False)
     async def root() -> dict[str, str]:

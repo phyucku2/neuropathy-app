@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="referrer" content="no-referrer" />
     <title>Neuropathy</title>
+    <!-- Deploy-time runtime config (ADR-0018): sets window.__APP_CONFIG__ before the
+         app bundle runs. The container entrypoint overwrites /config.js per environment,
+         so the API base URL changes without a rebuild. Loaded synchronously (no defer)
+         so it is present before the deferred module executes. -->
+    <script src="/config.js"></script>
   </head>
   <body>
     <div id="root"></div>

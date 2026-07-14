@@ -172,3 +172,36 @@ jobs:
             echo "::error::Possible secret committed"; exit 1
           fi
           echo "No obvious secrets found."
+
+  # Catch image + topology breakage on every PR (ADR-0018): lint both Dockerfiles,
+  # validate the compose file, and build BOTH images (no push). Existing jobs are
+  # untouched.
+  docker:
+    name: Docker — lint, compose, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Hadolint — backend Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: backend/Dockerfile
+
+      - name: Hadolint — frontend Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: frontend/Dockerfile
+
+      - name: Validate compose config
+        # .env.example carries dev defaults/placeholders (never real secrets); it only
+        # needs to exist so ${VAR} interpolation resolves for a config-only render.
+        run: |
+          cp .env.example .env
+          docker compose config >/dev/null
+          rm -f .env
+
+      - name: Build backend image (no push)
+        run: docker build -t neuropathy-backend:ci ./backend
+
+      - name: Build frontend image (no push)
+        run: docker build -t neuropathy-frontend:ci ./frontend

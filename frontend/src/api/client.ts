@@ -8,6 +8,7 @@
  */
 
 import type { AccessTokenOut } from './types';
+import { apiBaseUrl } from './runtimeConfig';
 import {
   getAccessToken,
   getRefreshToken,
@@ -15,11 +16,10 @@ import {
   setAccessToken,
 } from '../auth/tokenStore';
 
-export const API_BASE_URL: string = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? '';
-
-/** Absolute URL for an API path (same-origin by default; VITE_API_BASE_URL overrides). */
+/** Absolute URL for an API path. Base resolved per call so runtime config (deploy-time
+ * /config.js) always wins over the build-time fallback (ADR-0018). */
 function apiUrl(path: string): string {
-  return new URL(`${API_BASE_URL}${path}`, window.location.origin).toString();
+  return new URL(`${apiBaseUrl()}${path}`, window.location.origin).toString();
 }
 
 export class ApiError extends Error {

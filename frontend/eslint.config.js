@@ -5,7 +5,9 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist', 'coverage', 'node_modules'] },
+  // `public/` holds static assets served verbatim (e.g. the runtime config.js shim,
+  // ADR-0018), not part of the TypeScript program — excluded from linting.
+  { ignores: ['dist', 'coverage', 'node_modules', 'public'] },
   js.configs.recommended,
   ...tseslint.configs.strict,
   jsxA11y.flatConfigs.recommended,

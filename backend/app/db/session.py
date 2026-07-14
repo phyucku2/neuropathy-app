@@ -22,6 +22,13 @@ from sqlalchemy.ext.asyncio import (
 
 from app.core.config import settings
 
+# Cap on asyncpg connection *establishment* (TCP connect + Postgres handshake). asyncpg's
+# default is 60s; a network-partitioned DB would otherwise make every new connection —
+# and the /readyz probe that opens one — hang for ~a minute. This bounds establishment
+# only (not query execution or waiting for a pool slot, which pool_timeout covers), so it
+# is generous enough never to fail a healthy connection under load (ADR-0018 §3).
+_CONNECT_TIMEOUT_SECONDS = 5
+
 
 def create_engine_and_sessionmaker(
     url: str,
@@ -37,6 +44,7 @@ def create_engine_and_sessionmaker(
         pool_size=10,
         max_overflow=20,
         pool_timeout=5,
+        connect_args={"timeout": _CONNECT_TIMEOUT_SECONDS},
     )
     return engine, async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
