@@ -18,6 +18,9 @@ export default tseslint.config(
       'playwright-report',
       'test-results',
       'android',
+      // Node build tooling (store-asset generators): console output and process.exit are
+      // their job; they are not part of the browser app's TS program (ADR-0026 assets).
+      'scripts',
     ],
   },
   js.configs.recommended,

@@ -126,7 +126,14 @@ async function renderPng(page, { w, h, html, transparent, out }) {
 async function main() {
   const { readFileSync } = await import('node:fs');
   const poppins = readFileSync(
-    join(FRONTEND, 'node_modules', '@fontsource', 'poppins', 'files', 'poppins-latin-600-normal.woff2'),
+    join(
+      FRONTEND,
+      'node_modules',
+      '@fontsource',
+      'poppins',
+      'files',
+      'poppins-latin-600-normal.woff2',
+    ),
   );
   const poppinsDataUri = `data:font/woff2;base64,${poppins.toString('base64')}`;
 
@@ -140,12 +147,16 @@ async function main() {
   const MIPMAP = { mdpi: 48, hdpi: 72, xhdpi: 96, xxhdpi: 144, xxxhdpi: 192 };
   for (const [density, size] of Object.entries(MIPMAP)) {
     jobs.push({
-      w: size, h: size, transparent: true,
+      w: size,
+      h: size,
+      transparent: true,
       out: join(RES, `mipmap-${density}`, 'ic_launcher.png'),
       html: assetHtml({ w: size, h: size, background: GRADIENT, glyphFrac: 0.62, radius: '18%' }),
     });
     jobs.push({
-      w: size, h: size, transparent: true,
+      w: size,
+      h: size,
+      transparent: true,
       out: join(RES, `mipmap-${density}`, 'ic_launcher_round.png'),
       html: assetHtml({ w: size, h: size, background: GRADIENT, glyphFrac: 0.6, radius: '50%' }),
     });
@@ -156,7 +167,9 @@ async function main() {
   const FOREGROUND = { mdpi: 108, hdpi: 162, xhdpi: 216, xxhdpi: 324, xxxhdpi: 432 };
   for (const [density, size] of Object.entries(FOREGROUND)) {
     jobs.push({
-      w: size, h: size, transparent: false,
+      w: size,
+      h: size,
+      transparent: false,
       out: join(RES, `mipmap-${density}`, 'ic_launcher_foreground.png'),
       html: assetHtml({ w: size, h: size, background: GRADIENT, glyphFrac: 0.42 }),
     });
@@ -164,7 +177,7 @@ async function main() {
 
   // ---- Splash screens (exact existing sizes/paths) ----
   const SPLASH = {
-    'drawable': [480, 320],
+    drawable: [480, 320],
     'drawable-land-mdpi': [480, 320],
     'drawable-land-hdpi': [800, 480],
     'drawable-land-xhdpi': [1280, 720],
@@ -178,7 +191,9 @@ async function main() {
   };
   for (const [dir, [w, h]] of Object.entries(SPLASH)) {
     jobs.push({
-      w, h, transparent: false,
+      w,
+      h,
+      transparent: false,
       out: join(RES, dir, 'splash.png'),
       html: assetHtml({ w, h, background: GRADIENT, glyphFrac: 0.28 }),
     });
@@ -186,13 +201,17 @@ async function main() {
 
   // ---- Play listing assets ----
   jobs.push({
-    w: 512, h: 512, transparent: false,
+    w: 512,
+    h: 512,
+    transparent: false,
     out: join(STORE_ASSETS, 'icon-512.png'),
     // Play requires a full-bleed square (Play applies its own corner mask).
     html: assetHtml({ w: 512, h: 512, background: GRADIENT, glyphFrac: 0.62 }),
   });
   jobs.push({
-    w: 1024, h: 500, transparent: false,
+    w: 1024,
+    h: 500,
+    transparent: false,
     out: join(STORE_ASSETS, 'feature-graphic-1024x500.png'),
     html: featureGraphicHtml(poppinsDataUri),
   });
