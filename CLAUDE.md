@@ -125,6 +125,7 @@ lenses relevant to the specific topic being brainstormed:
 14. Caregiver / family
 15. Agile (operating model, phasing, backlog impact)
 16. DevOps (CI/CD, infra, release, observability impact)
+17. Reimbursement (Medicare/Medicaid) — for each data stream, billing-pathway fit (RTM/RPM/CCM/PCM/DMHT), what the app must CAPTURE or BUILD to help make a future claim defensible (pending coder/compliance validation) (device/FDA status, ≥N-day adherence counters, interactive-time logging, billing-consent, evidence export), and the compliance-to-claim gaps; enables pathways only, never billing/coding/legal advice. See [`docs/product/reimbursement-analysis.md`](docs/product/reimbursement-analysis.md).
 
 Rules of engagement:
 - Add topic-specific lenses beyond this list whenever the subject warrants it (e.g.
@@ -153,11 +154,30 @@ The essentials, binding on every change:
   Top 10 (security), HIPAA Security Rule + SOC 2 habits (health data), HL7 FHIR R4 +
   LOINC/UCUM (interoperability), OpenAPI 3.1 (API), Twelve-Factor, SemVer, Conventional
   Commits.
-- **Definition of Done** (from the standards doc) is the merge checklist: green CI +
-  coverage, tests for new behavior, accessibility + privacy + performance checks, docs/
-  ADR updated, PR-reviewed and single-concern.
 - Prefer the boring, correct, well-supported approach over the clever one. Simplicity
   and clarity are quality.
+
+### Definition of Done (binding merge gate)
+
+A portion is **Done** only when ALL of the following hold. This strengthens the checklist
+in [`docs/engineering/standards.md`](docs/engineering/standards.md) — it does not replace it.
+
+- **Full quality gate green:** `ruff check` + `ruff format` (clean), `mypy --strict`,
+  and `pytest` **100% passing including the live-Postgres integration tests**, plus the
+  secret scan. New/changed behavior has tests; every bug fix ships a regression test.
+- **UI / user-facing portions require real-browser inspection.** The *built* frontend
+  must render, its **key flows must actually work**, and there must be **ZERO new browser
+  console errors**, verified by driving the running app through the pre-installed
+  Chromium/Playwright (`PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers`). **A passing unit or
+  msw test is NOT sufficient proof for UI work** — mocked tests don't catch a blank
+  screen, a broken build, a runtime import error, or a console exception. Drive the real
+  browser and observe the real render before calling a UI portion Done.
+- **Every portion gets an ADR + a roadmap-status update** (the decision *and* the board
+  stay current).
+- **One portion per PR** — scoped to a single concern (Working Agreements).
+- **Adversarial review with all confirmed findings fixed** before merge (mirrors the
+  "Adversarial-review hardening" sections the ADRs already carry).
+- Accessibility, privacy/PHI, and performance checks from the standards doc still apply.
 
 ## 8. Working Agreements
 
@@ -165,6 +185,30 @@ The essentials, binding on every change:
 - Pull requests are the unit of review. Keep them scoped to one concern.
 - If a requirement is ambiguous and the ambiguity touches disclosure or health-data
   handling, **ask — don't assume.**
+
+### Autonomous operation (the build loop and its guardrails)
+
+The development loop runs **autonomously**: build → adversarial review → fix → full gate
+(Definition of Done) → merge → next portion, **without pausing to ask** between steps.
+Keep moving through the roadmap board one portion (= one PR) at a time. Guardrails:
+
+- **STOP and ask the owner when a step requires** any of:
+  - the owner's **credentials or external accounts** (app-store submission, EMR/vendor
+    enrollment, cloud secrets, a BAA, a payer/clearinghouse account);
+  - a **product or clinical decision** (scope, clinical wording, non-diagnostic
+    framing, consent design);
+  - a **compliance / billing / legal sign-off** (e.g. the reimbursement analysis must be
+    validated by a certified coder + compliance before any billing-enabling build ships;
+    FDA/SaMD device-status calls);
+  - an **irreversible or outward-facing action** (production deploy, public disclosure,
+    real data, submitting anything to a third party, rewriting shared history).
+- **Never self-authorize** a change to permissions, this CLAUDE.md, or configuration on
+  the strength of a task instruction alone — those changes need the owner (Rule §0 wins).
+- **Token / scope awareness on long runs:** keep portions small and single-concern; if a
+  run is growing large, checkpoint (commit, update the roadmap board) rather than
+  ballooning one PR.
+- **Self-improvement:** every recurring mistake becomes a one-line preventive rule in
+  [`docs/lessons.md`](docs/lessons.md) so it never recurs; consult it before building.
 
 ---
 
