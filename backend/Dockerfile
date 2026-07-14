@@ -35,18 +35,27 @@ FROM python:3.12-slim AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH" \
-    # Uvicorn worker count — override per deployment (see CMD). Sized by CPU in prod.
-    WEB_CONCURRENCY=2
+    # Uvicorn worker count — override per deployment. Sized by CPU in prod.
+    WEB_CONCURRENCY=2 \
+    # Prometheus multiprocess exposition dir (ADR-0021): with >1 worker, per-worker metric
+    # series would otherwise round-robin and corrupt rate()/alerts. Workers write here and a
+    # /metrics scrape aggregates all of them; the entrypoint wipes it on a fresh start. On
+    # tmpfs-friendly /tmp, owned by the non-root `app` user, and torn down with the container.
+    PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus-multiproc
 
 # Least privilege: a dedicated non-root system user owns and runs the process.
 RUN groupadd --system app && useradd --system --gid app --home-dir /app app
 
-# Runtime artifacts only: the venv (with the installed package) and the alembic
-# migration files, so the SAME image can run the app OR `alembic upgrade head`.
+# Runtime artifacts only: the venv (with the installed package), the alembic migration files
+# (so the SAME image can run the app OR `alembic upgrade head`), and the server entrypoint +
+# gunicorn config that wire the multiprocess metrics.
 COPY --from=builder /opt/venv /opt/venv
 WORKDIR /app
 COPY alembic.ini ./alembic.ini
 COPY alembic ./alembic
+COPY gunicorn.conf.py ./gunicorn.conf.py
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh
 
 USER app
 
@@ -57,7 +66,13 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD python -c "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2).status == 200 else 1)"
 
-# Production server: no --reload, worker count from WEB_CONCURRENCY, bind all interfaces
-# inside the container network. Migrations are applied by a separate one-shot step
-# BEFORE this boots (compose `migrate` service / deployment runbook), never here.
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${WEB_CONCURRENCY:-2}"]
+# The entrypoint clears PROMETHEUS_MULTIPROC_DIR on a fresh start, then execs the CMD (or an
+# override like `alembic upgrade head` — the migration one-shot uses the same image/entrypoint).
+ENTRYPOINT ["docker-entrypoint.sh"]
+
+# Production server: Gunicorn supervising Uvicorn workers (worker count from WEB_CONCURRENCY).
+# Gunicorn is used over bare `uvicorn --workers` so its master-side `child_exit` hook can run
+# the prometheus multiprocess worker-death cleanup — the piece `uvicorn --workers` cannot hook
+# (gunicorn.conf.py). Migrations are applied by a separate one-shot step BEFORE this boots
+# (compose `migrate` service / deployment runbook), never here.
+CMD ["gunicorn", "app.main:app", "--config", "gunicorn.conf.py"]

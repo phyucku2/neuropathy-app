@@ -36,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.narrative import AnthropicNarrator, Narrator
 from app.core.config import settings
+from app.core.errors import ErrorReporter, HttpErrorReporter
 from app.core.security import AuthError, TokenKind, decode_token
 from app.db.session import get_db_session
 from app.emr.service import (
@@ -393,3 +394,23 @@ def get_narrator() -> Narrator | None:
 
 
 NarratorDep = Annotated[Narrator | None, Depends(get_narrator)]
+
+
+@lru_cache(maxsize=1)
+def _default_error_reporter() -> HttpErrorReporter | None:
+    """The error-reporting seam activates ONLY when a self-hosted collector URL is
+    configured (ADR-0021) — unset means OFF, fail-safe, exactly like the narrator seam is
+    off without a key + BAA. One pooled reporter per process (holds an httpx client)."""
+    if settings.error_reporting_dsn:
+        return HttpErrorReporter(
+            settings.error_reporting_dsn, timeout=settings.error_reporting_timeout_seconds
+        )
+    return None
+
+
+def get_error_reporter() -> ErrorReporter | None:
+    """Reporter accessor for the error-reporting middleware (mirrors get_narrator).
+
+    Not a request dependency: the middleware resolves it per request via this function so
+    a test can monkeypatch the module-level factory to inject a stub or force OFF."""
+    return _default_error_reporter()

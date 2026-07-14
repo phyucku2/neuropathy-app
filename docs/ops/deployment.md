@@ -12,7 +12,7 @@ Two images, both multi-stage, non-root, secret-free:
 
 | Image | Build context | Serves | Port |
 |---|---|---|---|
-| backend | `backend/` | FastAPI via uvicorn (`app.main:app`) | 8000 |
+| backend | `backend/` | FastAPI via Gunicorn + Uvicorn workers (`app.main:app`) | 8000 |
 | frontend | `frontend/` | Built SPA via non-root nginx (reverse-proxies the API) | 8080 |
 
 ```bash
@@ -36,12 +36,15 @@ the repo. Security-sensitive values **fail closed at startup** with an actionabl
 | `DATABASE_URL` | secret (embeds DB password) | for durable mode | `postgresql+asyncpg://USER:PASSWORD@HOST:5432/DB`. Unset = in-memory (non-durable; dev/test only). |
 | `APP_ENV` | no | no | Environment label (e.g. `staging`, `production`); appears in logs. |
 | `APP_DEBUG` | no | no | `true` raises log verbosity and enables SQL echo. Keep `false` in prod. |
-| `WEB_CONCURRENCY` | no | no | uvicorn worker count (default 2). Size by CPU. |
+| `WEB_CONCURRENCY` | no | no | Worker count (default 2). Size by CPU. Drives Gunicorn's Uvicorn workers (`gunicorn.conf.py`). |
+| `PROMETHEUS_MULTIPROC_DIR` | no | no | Shared dir for multi-worker Prometheus metrics (ADR-0021). **Set by the image** (default `/tmp/prometheus-multiproc`) so a `/metrics` scrape aggregates all workers; the entrypoint wipes it on start. Unset it only to run single-process (dev), where `/metrics` renders the in-process registry. |
 | `JWT_SECRET` | **SECRET** | yes for durable auth | Signs JWT access/refresh tokens (ADR-0010). Without it, tokens don't survive restarts/multiple workers. `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
 | `SECRET_STORE_KEY` | **SECRET** | if storing EMR tokens | Fernet key encrypting the DB OAuth token vault (ADR-0017). Fail-closed: without it, tokens stay in a per-process in-memory vault (never written to the DB in plaintext). **Back this up separately from the database** (see backup-restore.md). `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
 | `OPS_BOOTSTRAP_TOKEN` | **SECRET** | to provision clinicians | Ops gate for clinician provisioning (ADR-0012/0017). Min 32 chars — shorter is refused at startup. Unset = provisioning disabled (fails closed). `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
 | `SMART_CLIENT_ID` / `SMART_REDIRECT_URI` | client id no / secret lives in the vault | for EMR pull | SMART on FHIR config (ADR-0008/0009). |
 | `AI_API_KEY` + `AI_BAA_CONFIRMED` | **SECRET** (key) | for AI narrative | The narrative layer stays OFF without both a key AND the explicit BAA attestation (ADR-0011). |
+| `ERROR_REPORTING_DSN` | no (a URL you host) | no | Self-hosted, permissive error collector URL (ADR-0021). Unset = error reporting OFF. Payload is PHI-scrubbed; must be self-hosted or BAA-covered. Never a committed SaaS DSN. |
+| `ERROR_REPORTING_TIMEOUT_SECONDS` | no | no | Upper bound on the fire-and-forget error POST (default 3.0s); a slow collector never drags an already-failed request. |
 
 Frontend (set at container start):
 
@@ -71,6 +74,10 @@ docker run --rm -e DATABASE_URL="postgresql+asyncpg://USER:PASSWORD@HOST:5432/DB
   neuropathy-backend:<tag> alembic upgrade head
 ```
 
+The image `ENTRYPOINT` (`docker-entrypoint.sh`) `exec`s whatever command it is given, so this
+override runs `alembic upgrade head` unchanged; only the default `CMD` (the Gunicorn server)
+is replaced.
+
 In compose this is the one-shot `migrate` service; `backend` waits for it via
 `depends_on: { migrate: { condition: service_completed_successfully } }`.
 
@@ -92,10 +99,14 @@ The SPA is published on `http://localhost:${FRONTEND_PORT}` (default 8080).
   the database is unreachable. Use for load-balancer rotation / readiness probes so an
   instance that can't reach its DB is pulled without being killed.
 - **Frontend liveness** — `GET /healthz` on the frontend serves nginx's own `200`.
+- **Metrics** — `GET /metrics` → Prometheus text (PHI-free by construction; ADR-0021).
+  Unauthenticated like the probes; scrape on the internal network. See
+  `docs/ops/observability.md` for scrape config and alert rules.
 
 ```bash
 curl -fsS http://BACKEND:8000/healthz
 curl -fsS http://BACKEND:8000/readyz
+curl -fsS http://BACKEND:8000/metrics
 ```
 
 ## Roll back
@@ -112,7 +123,8 @@ is a redeploy of the previous tag:
 
 ## Not covered here (production hardening)
 
-TLS termination, a real API gateway, managed/replicated Postgres, secret rotation,
-centralized logging/metrics/alerting, and autoscaling are production concerns owned by
-the ops/observability portions — deliberately out of scope for this staging topology
-(ADR-0018).
+TLS termination, a real API gateway, managed/replicated Postgres, secret rotation, and
+autoscaling remain production concerns not covered by this staging topology (ADR-0018).
+Metrics, error tracking, alerting hooks, and the backup drill are now provided (ADR-0021,
+`docs/ops/observability.md`); wiring the scraper, Alertmanager, and a self-hosted error
+collector into a specific environment is still deployment-owned.

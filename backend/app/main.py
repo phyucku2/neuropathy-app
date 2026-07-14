@@ -8,9 +8,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
+from app.api.deps import get_error_reporter
 from app.api.router import api_router
 from app.core.config import settings
+from app.core.errors import ErrorReportingMiddleware
 from app.core.logging import RequestLoggingMiddleware, configure_logging
+from app.core.metrics import MetricsMiddleware
 from app.db.session import create_engine_and_sessionmaker
 
 # Multipart framing allowance on top of the PDF byte cap for the upload route's
@@ -71,10 +74,25 @@ def create_app() -> FastAPI:
                 )
         return await call_next(request)
 
-    # Registered LAST so Starlette makes it the OUTERMOST middleware (the last-added
-    # middleware wraps all earlier ones): it times the whole request and logs one
-    # PHI-free JSON line — including responses short-circuited by the upload guard above,
-    # which must still produce a log line and an X-Request-ID header (ADR-0018 §4).
+    # Middleware onion, outermost → innermost (Starlette wraps the LAST-added around all
+    # earlier ones, so these are registered in reverse of the desired nesting):
+    #
+    #   RequestLoggingMiddleware  (outermost — MUST stay index 0, ADR-0018 §4)
+    #     └─ MetricsMiddleware      (counts every request incl. 5xx; PHI-free labels)
+    #         └─ ErrorReportingMiddleware  (forwards scrubbed unhandled-exception events)
+    #             └─ _reject_oversized_uploads  (inner upload guard, added first above)
+    #
+    # ErrorReporting sits inside metrics/logging but OUTSIDE the router, so it catches an
+    # unhandled exception on its way to the normal 500 handler and re-raises it unchanged
+    # (the client-facing response never changes). Metrics records in a `finally`, so a 5xx
+    # is still counted. Logging stays outermost so even an upload-guard short-circuit is
+    # logged with an X-Request-ID (ADR-0018 §4) — the `is-outermost` test still holds.
+    application.add_middleware(
+        ErrorReportingMiddleware,
+        reporter_factory=get_error_reporter,
+        env=settings.app_env,
+    )
+    application.add_middleware(MetricsMiddleware)
     application.add_middleware(RequestLoggingMiddleware)
 
     @application.get("/", include_in_schema=False)

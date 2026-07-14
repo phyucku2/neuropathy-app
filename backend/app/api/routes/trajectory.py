@@ -18,6 +18,7 @@ from fastapi import APIRouter, BackgroundTasks
 from app.ai.narrative import NARRATIVE_CACHE, narrate_into_cache, narrative_cache_key
 from app.api.deps import CapabilityServiceDep, EmrServiceDep, NarratorDep, PatientUserDep
 from app.core.config import settings
+from app.core.metrics import record_ai_narrative_event
 from app.models.audit import AuditEvent
 from app.schemas.trajectory import Trajectory
 from app.services.trajectory import compute_patient_trajectory
@@ -85,5 +86,9 @@ async def get_trajectory(
                     detail={"model": settings.ai_model, "event": "requested"},  # never content
                 )
             )
+            # Subject-free metric alongside the audit row: counts that a disclosure was
+            # requested by TYPE, never by patient (ADR-0021) — feeds the disclosure-rate
+            # alert without any subject entering a label.
+            record_ai_narrative_event("requested")
             background.add_task(narrate_into_cache, narrator, trajectory, key, NARRATIVE_CACHE)
     return trajectory

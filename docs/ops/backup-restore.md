@@ -1,8 +1,8 @@
 # Backup & restore drill
 
 Postgres backup/restore for the neuropathy app, plus the one operational trap that will
-silently make a restore useless. Decisions: **ADR-0018**. Storage model and durability:
-`backend/README.md`, ADR-0017.
+silently make a restore useless. Decisions: **ADR-0018**, **ADR-0021** (the scripted
+verification drill). Storage model and durability: `backend/README.md`, ADR-0017.
 
 ## ⚠️ The `SECRET_STORE_KEY` trap (read this first)
 
@@ -89,14 +89,52 @@ docker run --rm -e DATABASE_URL="postgresql+asyncpg://USER:PASSWORD@HOST:5432/ne
 curl -fsS http://BACKEND:8000/readyz
 ```
 
-## Verify a restore (drill)
+## Verify a restore (scripted drill)
 
-Practice restores on a schedule; an unverified backup is not a backup.
+Practice restores on a schedule; an unverified backup is not a backup. The repo ships a
+concrete, tested drill script that performs a `pg_dump` → `pg_restore`-to-scratch roundtrip
+with a read-back check, then tears the scratch copy down. It is **safe by construction**: it
+never writes to the source database and refuses to clobber an existing scratch database.
 
-1. Restore the latest dump into a scratch database (steps above).
-2. Boot the backend against it with the matching `SECRET_STORE_KEY`.
-3. `GET /readyz` returns `200`.
-4. Log in with a known **synthetic** account and confirm its trajectory/observations
-   read back, and that an EMR connection's vaulted token still decrypts (proves the key
+```bash
+# Runs a full dump/restore roundtrip against a THROWAWAY scratch database, then drops it.
+# SOURCE_DSN uses SYNTHETIC data only — never point it at production from a laptop.
+SOURCE_DSN="postgresql://USER:PASSWORD@HOST:5432/neuropathy" \
+  scripts/pg_backup_drill.sh
+```
+
+The script (`scripts/pg_backup_drill.sh`, ADR-0021):
+
+1. `pg_dump` the source to a custom-format dump under a temp dir (removed on exit).
+2. Refuse to proceed if the scratch database already exists (no silent clobber).
+3. Create the scratch database and `pg_restore` the dump into it.
+4. Read-back check: assert the restore produced ≥1 public table (a zero-table restore fails
+   the drill loudly).
+5. Tear down the scratch database and the dump copy (`KEEP_SCRATCH=1` leaves the scratch DB
+   for manual inspection).
+
+Connection details come only from the environment (`SOURCE_DSN`, and libpq's standard `PG*`
+vars for the scratch admin connection); **no password is written to disk or echoed**.
+
+### Full end-to-end drill (with the app + the key)
+
+The script proves the **database** half. A complete drill also proves the
+`SECRET_STORE_KEY` pairing that the script cannot automate:
+
+1. Run `scripts/pg_backup_drill.sh` (or restore the latest dump into a scratch DB manually).
+2. Boot the backend against the scratch DB with the `SECRET_STORE_KEY` **from the same era**
+   as the dump.
+3. `GET /readyz` returns `200`; `GET /metrics` renders (both PHI-free — ADR-0021).
+4. Log in with a known **synthetic** account and confirm its trajectory/observations read
+   back, and that an EMR connection's vaulted token still decrypts (proves the key
    pairing). Never use real patient data for the drill.
 5. Record the drill outcome and tear down the scratch database and its dump copy.
+
+### Manual-verification checklist (when a scripted drill isn't possible)
+
+- [ ] A dump exists from within the retention window and is stored encrypted, access-logged.
+- [ ] The matching-era `SECRET_STORE_KEY` (and `JWT_SECRET`) is backed up **separately** and
+      retrievable.
+- [ ] A test restore into a scratch DB completed within the last review period.
+- [ ] Post-restore: `/readyz` 200, a synthetic account reads back, a vaulted token decrypts.
+- [ ] Scratch DB and dump copies were destroyed after the drill; outcome recorded.

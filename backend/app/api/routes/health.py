@@ -12,6 +12,13 @@ Two distinct probes with distinct contracts:
 
 Neither endpoint exposes secrets, build/version detail that would aid an attacker, or
 any PHI — the bodies are fixed, minimal status dicts (ADR-0018).
+
+``GET /metrics`` lives here too (ADR-0021): it renders Prometheus-format metrics for a
+scraper. It is unauthenticated like ``/healthz``/``/readyz`` and, by the same posture,
+exposes **nothing sensitive** — every metric is PHI-free by construction (route templates,
+not raw paths; aggregate counters, never a subject). In a K8s deployment it is scraped on
+the internal network; keeping it PHI-free means exposure is not a PHI risk regardless of
+where it is bound (ADR-0021 §1).
 """
 
 from __future__ import annotations
@@ -23,6 +30,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import settings
+from app.core.metrics import CONTENT_TYPE_LATEST, render_metrics, update_db_pool_gauge
 
 router = APIRouter(tags=["health"])
 
@@ -67,3 +75,16 @@ async def readyz(request: Request, response: Response) -> dict[str, str]:
         return {"status": "not_ready", "mode": "database"}
 
     return {"status": "ready", "mode": "database"}
+
+
+@router.get("/metrics", include_in_schema=False)
+async def metrics(request: Request) -> Response:
+    """Prometheus metrics — PHI-free by construction (ADR-0021).
+
+    Refreshes the DB pool gauge from the live engine at scrape time (an integer off the
+    in-process pool; 0 in in-memory mode), then renders the registry as Prometheus text.
+    Unauthenticated like the health probes; exposes no secret, no version detail, no PHI —
+    labels are route *templates* and fixed vocabularies only, never raw paths or subjects.
+    """
+    update_db_pool_gauge(getattr(request.app.state, "db_engine", None))
+    return Response(content=render_metrics(), media_type=CONTENT_TYPE_LATEST)

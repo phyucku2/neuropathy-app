@@ -38,6 +38,17 @@ def _app_with_logging() -> FastAPI:
     return application
 
 
+def _app_with_logging_that_raises() -> FastAPI:
+    application = FastAPI()
+    application.add_middleware(RequestLoggingMiddleware)
+
+    @application.get("/boom/{token}")
+    async def boom(token: str) -> dict[str, str]:
+        raise RuntimeError(f"synthetic failure for {token}")
+
+    return application
+
+
 def _only_request_record(caplog: pytest.LogCaptureFixture) -> logging.LogRecord:
     records = [r for r in caplog.records if r.name == REQUEST_LOGGER_NAME]
     assert len(records) == 1
@@ -87,6 +98,27 @@ def test_unmatched_route_withholds_the_raw_path(caplog: pytest.LogCaptureFixture
     fields = _only_request_record(caplog).fields  # type: ignore[attr-defined]
     assert fields["path"] == UNMATCHED_ROUTE
     assert "patient-secret-42" not in json.dumps(fields)
+
+
+def test_unhandled_exception_still_emits_one_phi_free_log_line(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A 500 is not a logging blind spot: an unhandled exception still produces exactly one
+    request-log line (status 500) with a generated request id and the route TEMPLATE — the
+    raising handler's raw path segment never reaches the line — then re-raises unchanged."""
+    caplog.set_level(logging.INFO, logger=REQUEST_LOGGER_NAME)
+    client = TestClient(_app_with_logging_that_raises(), raise_server_exceptions=False)
+
+    leaky = "leaky-secret-777"
+    resp = client.get(f"/boom/{leaky}")
+
+    assert resp.status_code == 500  # normal error response, unchanged
+    fields = _only_request_record(caplog).fields  # type: ignore[attr-defined]
+    assert set(fields) == _EXPECTED_FIELDS
+    assert fields["status"] == 500
+    assert fields["path"] == "/boom/{token}"  # template, never the raw path segment
+    assert isinstance(fields["request_id"], str) and len(fields["request_id"]) == 32
+    assert leaky not in json.dumps(fields)  # PHI-free even on the error path
 
 
 def test_json_formatter_renders_structured_fields() -> None:
