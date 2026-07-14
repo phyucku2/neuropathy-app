@@ -44,6 +44,10 @@ class PatientCapabilityRepository(Protocol):
         """All of one patient's activation rows, oldest first."""
         ...
 
+    async def delete_for_patient(self, patient_id: uuid.UUID) -> None:
+        """Destroy every activation row for one patient (ADR-0027 account deletion)."""
+        ...
+
 
 class InMemoryPatientCapabilityRepository:
     """Dict-backed store for unit tests and DB-less development."""
@@ -88,3 +92,6 @@ class InMemoryPatientCapabilityRepository:
     async def list_for_patient(self, patient_id: uuid.UUID) -> list[PatientCapability]:
         rows = [r for r in self._rows.values() if r.patient_id == patient_id]
         return sorted(rows, key=lambda r: r.created_at)
+
+    async def delete_for_patient(self, patient_id: uuid.UUID) -> None:
+        self._rows = {key: row for key, row in self._rows.items() if key[0] != patient_id}

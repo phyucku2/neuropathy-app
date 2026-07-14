@@ -61,6 +61,7 @@ from app.repositories.postgres import (
     PostgresSecretStore,
     PostgresUserRepository,
 )
+from app.services.account_deletion import AccountDeletionService
 from app.services.auth import AuthService
 from app.services.capability import CapabilityService
 from app.services.clinic import ClinicService
@@ -358,6 +359,46 @@ def get_capability_service(session: DbSessionDep = None) -> CapabilityService:
 
 
 CapabilityServiceDep = Annotated[CapabilityService, Depends(get_capability_service)]
+
+
+@lru_cache(maxsize=1)
+def _default_account_deletion_service() -> AccountDeletionService:
+    """Process-wide AccountDeletionService for in-memory mode (ADR-0027). Every store
+    is the SAME singleton the auth/EMR/clinic/capability services use, so the
+    deletion removes exactly the data those features wrote — including the vaulted
+    EMR tokens, purged through the same in-memory SecretStore revoke uses."""
+    emr = _default_emr_service()
+    return AccountDeletionService(
+        users=_default_auth_service().users,
+        emr_connections=emr.connections,
+        pending_auth=emr._pending,
+        secret_store=emr.secret_store,
+        clinic_connections=_default_clinic_service().connections,
+        patient_capabilities=_process_patient_capability_repo(),
+        observations=emr.observations,
+        audit=emr.audit,
+    )
+
+
+def get_account_deletion_service(session: DbSessionDep = None) -> AccountDeletionService:
+    if session is None:
+        return _default_account_deletion_service()
+    return AccountDeletionService(
+        users=PostgresUserRepository(session),
+        emr_connections=PostgresEmrConnectionRepository(session),
+        pending_auth=PostgresPendingAuthStore(session),
+        # The same fail-closed vault selection every EMR request gets (ADR-0017):
+        # encrypted Postgres vault with a key, the per-process store without one —
+        # so deletion purges tokens from wherever they actually live.
+        secret_store=_secret_store_for(session),
+        clinic_connections=PostgresClinicConnectionRepository(session),
+        patient_capabilities=PostgresPatientCapabilityRepository(session),
+        observations=PostgresObservationRepository(session),
+        audit=PostgresAuditEventRepository(session),
+    )
+
+
+AccountDeletionDep = Annotated[AccountDeletionService, Depends(get_account_deletion_service)]
 
 
 def require_capability(key: str) -> Callable[[CurrentUser, CapabilityService], Awaitable[None]]:

@@ -9,6 +9,7 @@ import {
   CLINICIAN_ME,
   CONNECTION_ACTIVE,
   CONNECTION_PENDING,
+  DELETE_WRONG_PASSWORD_DETAIL,
   ME,
   OBSERVATIONS,
   PANEL,
@@ -86,6 +87,19 @@ export const handlers = [
   http.get('/auth/me', ({ request }) =>
     isAuthorized(request) ? HttpResponse.json(ME) : unauthorized(),
   ),
+
+  // Account & data deletion (ADR-0027): 204 on the right password, 403 with the
+  // backend's verbatim detail otherwise (nothing is deleted then).
+  http.delete('/auth/me', async ({ request }) => {
+    if (!isAuthorized(request)) {
+      return unauthorized();
+    }
+    const body = (await request.json()) as { password: string };
+    if (body.password === TEST_PASSWORD) {
+      return new HttpResponse(null, { status: 204 });
+    }
+    return HttpResponse.json({ detail: DELETE_WRONG_PASSWORD_DETAIL }, { status: 403 });
+  }),
 
   http.get('/trajectory', ({ request }) =>
     isAuthorized(request) ? HttpResponse.json(TRAJECTORY_IMPROVING) : unauthorized(),

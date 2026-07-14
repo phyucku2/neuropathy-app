@@ -29,6 +29,9 @@ import type {
 
 export const SYNTHETIC_EMAIL = 'pat.example@example.com';
 export const SYNTHETIC_PASSWORD = 'synthetic-test-passphrase';
+
+/** The real backend's DELETE /auth/me wrong-password detail (ADR-0027), verbatim. */
+export const DELETE_WRONG_PASSWORD_DETAIL = "That password didn't match. Nothing was deleted.";
 const SYNTHETIC_ACCESS_TOKEN = 'synthetic-access-token';
 const SYNTHETIC_REFRESHED_ACCESS_TOKEN = 'synthetic-access-token-2';
 export const SYNTHETIC_REFRESH_TOKEN = 'synthetic-refresh-token';
@@ -221,6 +224,13 @@ export const CLINIC_OBSERVATIONS: ObservationItem[] = buildClinicObservations();
 
 // ---- scenario + install ----
 
+/** What the mock backend observed — specs assert against this (e.g. that a deletion
+ *  actually reached the API, not just that the UI navigated away). */
+export interface MockApiState {
+  /** How many DELETE /auth/me requests succeeded (password matched -> 204). */
+  accountDeletions: number;
+}
+
 export interface Scenario {
   me?: MeOut;
   trajectory?: Trajectory;
@@ -263,7 +273,8 @@ const patientNotFound = (route: Route) => fulfillJson(route, 404, { detail: 'Pat
  * build (so we test the REAL production bundle). `/favicon.ico` is fulfilled 204
  * so it never logs a benign 404 to the console.
  */
-export async function installApiMocks(page: Page, scenario: Scenario = {}): Promise<void> {
+export async function installApiMocks(page: Page, scenario: Scenario = {}): Promise<MockApiState> {
+  const state: MockApiState = { accountDeletions: 0 };
   const me = scenario.me ?? ME;
   const trajectory = scenario.trajectory ?? TRAJECTORY_IMPROVING;
   const observations = scenario.observations ?? OBSERVATIONS;
@@ -329,6 +340,16 @@ export async function installApiMocks(page: Page, scenario: Scenario = {}): Prom
 
       if (method === 'GET' && path === '/auth/me') {
         return fulfillJson(route, 200, me);
+      }
+      // Account & data deletion (ADR-0027): 204 on the right password (recorded in
+      // MockApiState), 403 with the backend's verbatim detail otherwise.
+      if (method === 'DELETE' && path === '/auth/me') {
+        const body = req.postDataJSON() as { password: string };
+        if (body.password === SYNTHETIC_PASSWORD) {
+          state.accountDeletions += 1;
+          return route.fulfill({ status: 204, body: '' });
+        }
+        return fulfillJson(route, 403, { detail: DELETE_WRONG_PASSWORD_DETAIL });
       }
       if (method === 'GET' && path === '/trajectory') {
         return fulfillJson(route, 200, trajectory);
@@ -460,6 +481,7 @@ export async function installApiMocks(page: Page, scenario: Scenario = {}): Prom
       return fulfillJson(route, 500, { detail: `Unmocked ${method} ${path}` });
     },
   );
+  return state;
 }
 
 export { CLINICALLY_MANAGED_409, FEATURE_OFF_409 };

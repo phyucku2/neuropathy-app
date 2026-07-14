@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime
 
 from cryptography.fernet import Fernet, InvalidToken
-from sqlalchemy import delete, exists, func, select
+from sqlalchemy import delete, exists, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -155,6 +155,15 @@ class PostgresUserRepository:
         await self._session.flush()
         return OpsDeactivateResult(OpsDeactivateOutcome.deactivated, _user_to_record(row))
 
+    async def delete_with_patient(self, *, user_id: uuid.UUID, patient_id: uuid.UUID) -> None:
+        # The mirror of add(): the auth identity and its Patient clinical record fall
+        # together. The patient row goes LAST — its deletion is the statement that
+        # fires audit_event's ON DELETE SET NULL (migration 0006), so the retained
+        # audit history detaches in the same flush (ADR-0027).
+        await self._session.execute(delete(User).where(User.id == user_id))
+        await self._session.execute(delete(Patient).where(Patient.id == patient_id))
+        await self._session.flush()
+
 
 class PostgresClinicRepository:
     """ClinicRepository over the clinic table."""
@@ -240,6 +249,12 @@ class PostgresClinicConnectionRepository:
         row.revoked_at = connection.revoked_at
         await self._session.flush()
 
+    async def delete_for_patient(self, patient_id: uuid.UUID) -> None:
+        await self._session.execute(
+            delete(ClinicConnection).where(ClinicConnection.patient_id == patient_id)
+        )
+        await self._session.flush()
+
 
 class PostgresEmrConnectionRepository:
     """EmrConnectionRepository over the emr_connection table."""
@@ -278,6 +293,22 @@ class PostgresEmrConnectionRepository:
         row.token_ref = connection.token_ref
         row.token_expires_at = connection.token_expires_at
         row.revoked_at = connection.revoked_at
+        await self._session.flush()
+
+    async def list_for_patient(self, patient_id: uuid.UUID) -> list[ConnectionRecord]:
+        stmt = (
+            select(EmrConnection)
+            .where(EmrConnection.patient_id == patient_id)
+            .order_by(EmrConnection.created_at)
+        )
+        return [_connection_to_record(row) for row in (await self._session.scalars(stmt)).all()]
+
+    async def delete_for_patient(self, patient_id: uuid.UUID) -> None:
+        # Callers (ADR-0027) have already removed the pending_auth rows referencing
+        # these connections and purged their vaulted secrets via SecretStore.delete.
+        await self._session.execute(
+            delete(EmrConnection).where(EmrConnection.patient_id == patient_id)
+        )
         await self._session.flush()
 
 
@@ -352,6 +383,17 @@ class PostgresObservationRepository:
             stmt = stmt.where(Observation.code == code)
         return int(await self._session.scalar(stmt) or 0)
 
+    async def delete_for_patient(self, patient_id: uuid.UUID) -> None:
+        # Clear the self-referencing supersede FK first: a correction row and its
+        # target both belong to this patient (cross-patient supersession does not
+        # exist), so nulling revises_id lets one DELETE take the whole chain without
+        # ordering rows parent-before-child (ADR-0027).
+        await self._session.execute(
+            update(Observation).where(Observation.patient_id == patient_id).values(revises_id=None)
+        )
+        await self._session.execute(delete(Observation).where(Observation.patient_id == patient_id))
+        await self._session.flush()
+
 
 class PostgresAuditEventRepository:
     """AuditEventRepository over the audit_event table (append-only)."""
@@ -386,6 +428,16 @@ class PostgresAuditEventRepository:
             AuditEvent.occurred_at >= since,
         )
         return int(await self._session.scalar(stmt) or 0)
+
+    async def detach_patient(self, patient_id: uuid.UUID) -> None:
+        # Defense in depth only: the ON DELETE SET NULL FK (migration 0006) has
+        # already detached every retained row when the patient row was deleted, so
+        # this UPDATE matches nothing in Postgres. The in-memory twin is where the
+        # detach actually happens (no FK to do it there).
+        await self._session.execute(
+            update(AuditEvent).where(AuditEvent.patient_id == patient_id).values(patient_id=None)
+        )
+        await self._session.flush()
 
 
 def encrypt_tokens(fernet: Fernet, tokens: dict[str, str]) -> bytes:
@@ -484,6 +536,14 @@ class PostgresPendingAuthStore:
             token_endpoint=row.token_endpoint,
         )
 
+    async def delete_for_connections(self, connection_ids: list[uuid.UUID]) -> None:
+        if not connection_ids:
+            return
+        await self._session.execute(
+            delete(PendingAuthState).where(PendingAuthState.connection_id.in_(connection_ids))
+        )
+        await self._session.flush()
+
 
 class PostgresCapabilityRepository:
     """CapabilityRepository over the capability table."""
@@ -574,6 +634,12 @@ class PostgresPatientCapabilityRepository:
             .order_by(PatientCapability.created_at)
         )
         return list((await self._session.scalars(stmt)).all())
+
+    async def delete_for_patient(self, patient_id: uuid.UUID) -> None:
+        await self._session.execute(
+            delete(PatientCapability).where(PatientCapability.patient_id == patient_id)
+        )
+        await self._session.flush()
 
 
 def _user_to_record(row: User) -> UserRecord:

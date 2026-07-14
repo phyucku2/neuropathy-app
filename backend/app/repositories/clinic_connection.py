@@ -68,6 +68,12 @@ class ClinicConnectionRepository(Protocol):
         """Persist the current state of an existing connection."""
         ...
 
+    async def delete_for_patient(self, patient_id: uuid.UUID) -> None:
+        """Destroy every clinic connection row for one patient (ADR-0027 account
+        deletion). Deleting the rows also ends any live consent: with no connection
+        left, `may_transmit_to_clinic` can never pass for this patient again."""
+        ...
+
 
 class InMemoryClinicConnectionRepository:
     """Dict-backed store for unit tests and DB-less development."""
@@ -114,3 +120,8 @@ class InMemoryClinicConnectionRepository:
 
     async def update(self, connection: ClinicConnection) -> None:
         self._connections[connection.id] = connection
+
+    async def delete_for_patient(self, patient_id: uuid.UUID) -> None:
+        self._connections = {
+            cid: c for cid, c in self._connections.items() if c.patient_id != patient_id
+        }

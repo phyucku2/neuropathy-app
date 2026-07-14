@@ -37,6 +37,16 @@ export function getMe(): Promise<MeOut> {
   return request<MeOut>('/auth/me');
 }
 
+/**
+ * Permanently delete the signed-in patient's account and ALL health data
+ * (ADR-0027). Requires the password as fresh re-authentication — a bearer token
+ * alone must never destroy an account. 204 on success; 403 with a verbatim-shown
+ * detail when the password doesn't match (nothing is deleted then).
+ */
+export async function deleteAccount(password: string): Promise<void> {
+  await request<unknown>('/auth/me', { method: 'DELETE', body: { password } });
+}
+
 // ---- trajectory ----
 
 export function getTrajectory(): Promise<Trajectory> {

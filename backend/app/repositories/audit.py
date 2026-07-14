@@ -1,7 +1,10 @@
 """Audit event repository — interface + in-memory implementation (CLAUDE.md §5).
 
-Append-only by contract: events are added and listed, never updated or deleted.
-Works directly with `models.AuditEvent`.
+Append-only by contract: events are added and listed, never updated or deleted. The
+single exception is `detach_patient` (ADR-0027): when a patient account is deleted,
+their PHI-free events are RETAINED but anonymized — patient_id becomes NULL, exactly
+what the ON DELETE SET NULL FK (migration 0006) does in Postgres. Event content is
+still never rewritten. Works directly with `models.AuditEvent`.
 """
 
 from __future__ import annotations
@@ -36,6 +39,16 @@ class AuditEventRepository(Protocol):
         """
         ...
 
+    async def detach_patient(self, patient_id: uuid.UUID) -> None:
+        """Anonymize a deleted patient's retained events: patient_id becomes NULL.
+
+        The storage twin of migration 0006's ON DELETE SET NULL (ADR-0027). In
+        Postgres the FK has ALREADY detached the rows by the time this runs (it fires
+        with the patient-row delete), so it is a defense-in-depth no-op there; the
+        in-memory twin performs the detach here. Event content is never touched.
+        """
+        ...
+
 
 class InMemoryAuditEventRepository:
     """List-backed store for unit tests and DB-less development."""
@@ -64,3 +77,9 @@ class InMemoryAuditEventRepository:
             for e in self._events
             if e.actor_id == actor_id and e.action == action and e.occurred_at >= since
         )
+
+    async def detach_patient(self, patient_id: uuid.UUID) -> None:
+        # Events are retained; only the subject link is severed (mirrors the FK).
+        for event in self._events:
+            if event.patient_id == patient_id:
+                event.patient_id = None
