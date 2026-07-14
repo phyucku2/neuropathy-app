@@ -127,6 +127,27 @@ def test_refresh_for_deleted_account_is_401(client: TestClient) -> None:
     assert resp.status_code == 401
 
 
+def test_refresh_for_deactivated_account_is_401(client: TestClient) -> None:
+    """Revocation within one TTL (ADR-0019): a deactivated account cannot keep minting
+    fresh access tokens through /auth/refresh for the refresh token's lifetime."""
+    tokens = _register(client, email="revoked@example.com")
+    service = app.dependency_overrides[get_auth_service]()
+    service.users._by_email["revoked@example.com"].active = False  # noqa: SLF001
+    resp = client.post("/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
+    assert resp.status_code == 401
+
+
+def test_deactivated_account_token_is_401(client: TestClient) -> None:
+    """Revocation enforced centrally at authentication (ADR-0019): a still-valid access
+    token from a now-deactivated account is refused at get_current_user, for every role
+    — here the patient's own /auth/me."""
+    tokens = _register(client, email="off@example.com")
+    service = app.dependency_overrides[get_auth_service]()
+    service.users._by_email["off@example.com"].active = False  # noqa: SLF001
+    resp = client.get("/auth/me", headers={"Authorization": f"Bearer {tokens['access_token']}"})
+    assert resp.status_code == 401
+
+
 def test_default_auth_service_is_cached_singleton() -> None:
     from app.api.deps import get_auth_service as real_dep
 

@@ -14,7 +14,12 @@ from fastapi import HTTPException
 from app.api.deps import CurrentUser, require_ops
 from app.core.security import verify_password
 from app.models.user import UserRole
-from app.repositories.user import InMemoryUserRepository, UserRecord
+from app.repositories.user import (
+    InMemoryUserRepository,
+    OpsAlreadyExistsError,
+    OpsDeactivateOutcome,
+    UserRecord,
+)
 from app.services.auth import AuthApiError, AuthService
 
 # Uppercase constants keep the CI secret scanner from matching synthetic credentials.
@@ -97,6 +102,70 @@ async def test_ops_login_surfaces_role_ops() -> None:
     user, tokens = await auth.login(email="ops@example.com", password=SYNTHETIC_PASSWORD)
     assert user.role is UserRole.ops
     assert tokens.access_token  # the same JWT machinery, role=ops
+
+
+# ------------------------------------------------------------- first-ops guard (create_first_ops)
+
+
+async def test_create_first_ops_succeeds_when_zero_ops() -> None:
+    auth = AuthService(secret="unit-test-secret")
+    user = await auth.create_first_ops(
+        email="ops@example.com", password=SYNTHETIC_PASSWORD, display_name="Ops"
+    )
+    assert user.role is UserRole.ops
+    assert await auth.ops_account_exists() is True
+
+
+async def test_create_first_ops_refuses_when_an_ops_already_exists() -> None:
+    """The single documented 'first operator' invariant (ADR-0019): a second first-ops
+    insert is a 409 even with a distinct email the unique index would not catch — the
+    guard, not the email index, is what enforces exactly-one."""
+    auth = AuthService(secret="unit-test-secret")
+    await auth.create_first_ops(
+        email="ops@example.com", password=SYNTHETIC_PASSWORD, display_name="Ops"
+    )
+    with pytest.raises(AuthApiError) as exc:
+        await auth.create_first_ops(
+            email="ops2@example.com", password=OTHER_SYNTHETIC_PASSWORD, display_name="Ops 2"
+        )
+    assert exc.value.status_code == 409
+
+
+async def test_create_first_ops_duplicate_email_is_409() -> None:
+    auth = AuthService(secret="unit-test-secret")
+    await auth.register_patient(
+        email="taken@example.com", password=SYNTHETIC_PASSWORD, display_name="Pat"
+    )
+    with pytest.raises(AuthApiError) as exc:
+        await auth.create_first_ops(
+            email="taken@example.com", password=OTHER_SYNTHETIC_PASSWORD, display_name="Ops"
+        )
+    assert exc.value.status_code == 409
+
+
+async def test_add_first_ops_raises_when_ops_exists() -> None:
+    """The in-memory twin of the advisory-lock guard: with an ops already present, a
+    first-ops insert raises rather than minting a second 'first' operator."""
+    repo = InMemoryUserRepository()
+    first = UserRecord(
+        id=uuid.uuid4(),
+        email="a@example.com",
+        password_hash="h",
+        display_name="A",
+        role=UserRole.ops,
+        patient_id=None,
+    )
+    await repo.add_first_ops(first)
+    second = UserRecord(
+        id=uuid.uuid4(),
+        email="b@example.com",
+        password_hash="h",
+        display_name="B",
+        role=UserRole.ops,
+        patient_id=None,
+    )
+    with pytest.raises(OpsAlreadyExistsError):
+        await repo.add_first_ops(second)
 
 
 # ---------------------------------------------------------------- existence / counts
@@ -186,3 +255,61 @@ async def test_count_with_role_active_only() -> None:
 async def test_set_active_on_missing_user_returns_none() -> None:
     repo = InMemoryUserRepository()
     assert await repo.set_active(uuid.uuid4(), active=False, disabled_at=None) is None
+
+
+async def test_deactivate_ops_guarded_outcomes() -> None:
+    """The atomic guard's four outcomes (ADR-0019): unknown -> not_found, the last active
+    -> refused, an active non-last -> deactivated, and a second call -> already_inactive."""
+    repo = InMemoryUserRepository()
+    when = datetime.now(UTC)
+    a = UserRecord(
+        id=uuid.uuid4(),
+        email="a@example.com",
+        password_hash="h",
+        display_name="A",
+        role=UserRole.ops,
+        patient_id=None,
+    )
+    await repo.add(a)
+    # Only one active ops: refuse to remove the last one.
+    assert (
+        await repo.deactivate_ops_guarded(a.id, disabled_at=when)
+    ).outcome is OpsDeactivateOutcome.refused_last_active
+    # Unknown id: not found.
+    assert (
+        await repo.deactivate_ops_guarded(uuid.uuid4(), disabled_at=when)
+    ).outcome is OpsDeactivateOutcome.not_found
+    # A second active ops makes `a` deactivatable.
+    b = UserRecord(
+        id=uuid.uuid4(),
+        email="b@example.com",
+        password_hash="h",
+        display_name="B",
+        role=UserRole.ops,
+        patient_id=None,
+    )
+    await repo.add(b)
+    first = await repo.deactivate_ops_guarded(a.id, disabled_at=when)
+    assert first.outcome is OpsDeactivateOutcome.deactivated
+    assert first.record is not None and first.record.active is False
+    # Idempotent: deactivating the already-inactive `a` again is a quiet no-op.
+    assert (
+        await repo.deactivate_ops_guarded(a.id, disabled_at=when)
+    ).outcome is OpsDeactivateOutcome.already_inactive
+
+
+async def test_reactivate_ops_restores_and_is_recoverable() -> None:
+    auth = AuthService(secret="unit-test-secret")
+    ops = await auth.create_ops(
+        email="ops@example.com", password=SYNTHETIC_PASSWORD, display_name="Ops"
+    )
+    await auth.deactivate_ops(ops.id)
+    restored = await auth.reactivate_ops(ops.id)
+    assert restored is not None
+    assert restored.active is True
+    assert restored.disabled_at is None
+    # Login works again after reactivation.
+    user, _ = await auth.login(email="ops@example.com", password=SYNTHETIC_PASSWORD)
+    assert user.active is True
+    # Unknown id -> None.
+    assert await auth.reactivate_ops(uuid.uuid4()) is None

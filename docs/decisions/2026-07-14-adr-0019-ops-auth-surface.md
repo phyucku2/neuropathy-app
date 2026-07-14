@@ -47,11 +47,23 @@ carries neither.
 ### 2. Login and role gate — ops authenticate like everyone else
 
 Operators log in through the **same** `POST /auth/login`; their JWT carries `role=ops`.
-`require_ops` (`app/api/deps.py`) is the gate — 403 for any non-ops or deactivated
-caller — mirroring `require_clinician`. Because a short-lived access token can outlive a
-just-issued deactivation by up to the token TTL, `require_ops` re-checks the `active`
-flag from the freshly-fetched user record, not just the role; login is not the only
-place revocation bites.
+`require_ops` (`app/api/deps.py`) is the role gate — 403 for any non-ops caller —
+mirroring `require_clinician`.
+
+**Revocation is enforced centrally, at authentication, for every role.** Because a
+short-lived access token can outlive a just-issued deactivation by up to the token TTL,
+`get_current_user` re-checks the freshly-fetched user's `active` flag on **every**
+authenticated request and refuses a deactivated principal — patient, clinician, or ops —
+with a 401 (a PHI-free reason, indistinguishable from a deleted account) before it
+reaches any endpoint or role gate. This subsumes the per-gate check: it is not enough for
+`require_ops` alone to test `active`, because `require_patient`/`require_clinician` and
+plain `get_current_user` endpoints (`/auth/me`) would otherwise let a deactivated
+clinician or patient holding a live (or refresh-renewed) access token reach PHI. `refresh`
+performs the same `active` re-check, so a deactivated account cannot keep minting fresh
+access tokens for its refresh token's lifetime — revocation bites within one access-token
+TTL, as documented. `require_ops` keeps its own `active` test purely as defense-in-depth
+(the central gate already guarantees an active principal, so it never fires a second,
+differing status).
 
 ### 3. Provisioning now requires an ops bearer, and records the real actor
 
@@ -77,8 +89,26 @@ moment**: `POST /ops/accounts`.
   the denial-audit + rate-limit protection moved here with it.
 - **The moment any ops account exists** (checked by `count_with_role(ops) == 0`), that
   path self-closes: `POST /ops/accounts` requires a valid ops bearer (`require_ops`), and
-  the bootstrap token opens nothing — presenting it without a bearer is a 401. A
-  **deactivated** ops still counts as "exists", so the gate never silently reopens.
+  the bootstrap token opens nothing. A **deactivated** ops still counts as "exists", so
+  the gate never silently reopens.
+
+**The two branches must not be an existence oracle.** A request lacking the credential
+valid in the *current* state — a missing/wrong bootstrap token before any ops exists, or a
+missing/wrong/non-ops bearer after — gets **one byte-identical denial** either way (a 403
+with a generic `"Not authorized to create ops accounts"` detail). An earlier version
+answered 403 "Bootstrap token required" while un-bootstrapped and 401 "Missing bearer
+token" once bootstrapped, letting an anonymous client read the status/body as an oracle
+for whether any ops account exists. Collapsing every unauthorized-credential response to
+the same 403 closes that: only a genuine ops bearer (steady state) or a valid bootstrap
+token (while zero ops exist) is a way through, and both of those require actually holding
+the credential.
+
+**The first-ops insert is atomic (single-first-operator invariant).** Two concurrent
+first-ops bootstraps would both read `count(ops) == 0` and — with distinct emails the
+unique index does not catch — both insert, minting two "first" operators. With zero ops
+rows there is nothing to row-lock, so the first-ops insert (`add_first_ops`) serializes on
+a transaction-scoped Postgres **advisory lock**, re-reads the ops count under it, and
+refuses (409) if any ops now exists. Exactly one bootstrap wins.
 
 This preserves fail-closed end to end: **no token configured + no ops accounts = no ops
 can be bootstrapped = no clinician can be provisioned.** The shared secret is off the
@@ -88,12 +118,30 @@ steady-state path entirely; it fires at most once in a deployment's life.
 
 `POST /ops/accounts/{id}/deactivate` (require_ops) flips an `active` flag and stamps
 `disabled_at`. A deactivated operator fails login (same 401 as an unknown email — no
-enumeration) and fails `require_ops` immediately. This is per-operator revocation and, by
-extension, rotation: stand up a replacement operator, deactivate the old one, and no other
-operator is touched. Deactivation is idempotent (a second call is a quiet success with no
-second audit event) and **refuses (409) to remove the last active operator** — with the
-bootstrap gate closed once any ops exists, removing the last one would lock the
-provisioning surface out entirely.
+enumeration) and is refused centrally at authentication immediately. This is per-operator
+revocation and, by extension, rotation: stand up a replacement operator, deactivate the
+old one, and no other operator is touched. Deactivation is idempotent (a second call is a
+quiet success with no second audit event) and **refuses (409) to remove the last active
+operator** — with the bootstrap gate closed once any ops exists, removing the last one
+would lock the provisioning surface out entirely.
+
+**The last-active guard and the flip are one atomic step.** Reading `active_ops_count()`
+and then deactivating in separate steps under READ COMMITTED let two concurrent
+deactivations both observe two active ops, both pass the `> 1` check, and both flip — zero
+active ops, a **permanent** provisioning lockout (there is no reactivation via the closed
+bootstrap gate). `deactivate_ops_guarded` fuses the count and the flip: in Postgres it
+locks the active-ops set `FOR UPDATE`, so concurrent deactivations serialize and the
+second waiter re-reads the just-committed flip (EvalPlanQual), sees only one active
+operator left, and is refused with 409. The in-memory mode never awaits between the count
+and the flip, so the single event loop gives it the same atomicity.
+
+**Reactivation is a bounded recovery path** (defense-in-depth). `POST
+/ops/accounts/{id}/reactivate` (require_ops) sets `active` back on and clears
+`disabled_at`, idempotently, so an accidental over-deactivation is recoverable **without
+DB surgery**. It only ever *adds* an active operator, so it needs no lockout guard, and it
+is not a reopening of the bootstrap gate — it requires an authenticated ops bearer like
+every other steady-state action. The last-active guard above still guarantees there is
+always at least one active operator to perform it.
 
 The `active`/`disabled_at` columns live on `app_user` generally (not an ops-only side
 table): the flag is a natural account property and login enforces it for every role, so a
@@ -108,17 +156,21 @@ the deactivation *endpoint*.
   activation state, never an account or its credentials, so unlike migration 0002 there is
   nothing to refuse over. Models updated so autogenerate parity holds.
 - **New surface:** `app/api/routes/ops.py` (`POST /ops/accounts`, `POST
-  /ops/accounts/{id}/deactivate`), `app/schemas/ops.py`, `require_ops`/`OpsUserDep` in
-  deps, and `AuthService.create_ops` / `ops_account_exists` / `active_ops_count` /
-  `deactivate_ops`. The `UserRepository` gains `count_with_role` and `set_active`
-  (in-memory + Postgres).
+  /ops/accounts/{id}/deactivate`, `POST /ops/accounts/{id}/reactivate`),
+  `app/schemas/ops.py`, `require_ops`/`OpsUserDep` in deps, and `AuthService.create_ops` /
+  `create_first_ops` / `ops_account_exists` / `active_ops_count` / `deactivate_ops` /
+  `deactivate_ops_guarded` / `reactivate_ops`. The `UserRepository` gains
+  `count_with_role`, `set_active`, `add_first_ops` (advisory-locked in Postgres), and
+  `deactivate_ops_guarded` (`FOR UPDATE`-locked in Postgres) — in-memory + Postgres. The
+  `/ops` namespace is already proxied wholesale by nginx, so `reactivate` needs no
+  frontend or proxy change.
 - **Config/docs:** `OPS_BOOTSTRAP_TOKEN`'s documented role narrows to first-ops bootstrap
   in `config.py` and both `.env.example` files. The validators (min-length, never-echo)
   are unchanged.
 - **Auditing:** new actions `create_ops` (actor = the creating operator, or null with
-  `bootstrap: true` for the first-ops creation) and `deactivate_ops` (actor = the acting
-  operator). `create_clinician` now records the real operator. `bootstrap_denied` keeps
-  its meaning but is now emitted by the first-ops surface.
+  `bootstrap: true` for the first-ops creation), `deactivate_ops`, and `reactivate_ops`
+  (actor = the acting operator). `create_clinician` now records the real operator.
+  `bootstrap_denied` keeps its meaning but is now emitted by the first-ops surface.
 - **Compatibility:** the `X-Bootstrap-Token` path on `POST /clinic/clinicians` is gone —
   a purely operator-facing break with no patient/clinician impact. The frontend never
   called `/clinic/clinicians` (provisioning is a back-office action, not a UI screen), so
@@ -140,9 +192,12 @@ the deactivation *endpoint*.
   running container. The self-close gives it the same fail-closed one-shot property a seed
   script would have.
 - **Reopen the bootstrap gate when zero *active* ops remain (anti-lockout):** rejected —
-  that turns the bootstrap token back into a standing backdoor. Instead the last-active-ops
-  deactivation guard guarantees there is always at least one active operator, so the gate
-  never needs to reopen; recovering from a hypothetical all-ops-disabled state is a
+  that turns the bootstrap token back into a standing backdoor. Instead the *atomic*
+  last-active-ops deactivation guard guarantees there is always at least one active
+  operator (concurrent deactivations serialize on a row lock and cannot both reach zero),
+  and the authenticated `reactivate` endpoint recovers an individual accidental
+  deactivation — so the gate never needs to reopen. Recovering from a hypothetical
+  all-ops-disabled state (which the guard is designed to make unreachable) remains a
   deliberate DB-level action, not a token replay.
 - **An `active` flag on an ops-only table rather than on `app_user`:** rejected — the flag
   is a general account property; putting it on `app_user` lets login enforce it for every

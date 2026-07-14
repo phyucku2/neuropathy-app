@@ -37,6 +37,7 @@ from app.api.deps import AuthDep, ClinicServiceDep, OpsUserDep, get_current_user
 from app.core.config import settings
 from app.models.audit import AuditEvent
 from app.models.user import UserRole
+from app.repositories.user import OpsDeactivateOutcome
 from app.schemas.ops import OpsAccountCreateIn, OpsAccountOut
 from app.services.auth import AuthApiError, AuthService
 from app.services.clinic import (
@@ -52,6 +53,19 @@ router = APIRouter(prefix="/ops", tags=["ops"])
 # requires one. auto_error=False lets us choose the posture from the ops-count, not
 # from the presence of a header.
 _optional_bearer = HTTPBearer(auto_error=False)
+
+# ONE byte-identical denial for every POST /accounts request lacking the credential
+# valid in the CURRENT bootstrap state — a missing/wrong bootstrap token before any ops
+# exists, or a missing/wrong/non-ops bearer after (ADR-0019). The two branches otherwise
+# answered differently (403 "Bootstrap token required" vs 401 "Missing bearer token"),
+# which let an anonymous client read the status/body as an oracle for whether ops
+# accounts exist. Same status + body across states closes that oracle; a genuine ops
+# bearer (or a valid bootstrap token while zero ops exist) is the only way through.
+_PROVISION_DENIED = {"detail": "Not authorized to create ops accounts"}
+
+
+def _provision_denied() -> JSONResponse:
+    return JSONResponse(status_code=403, content=_PROVISION_DENIED)
 
 
 async def _first_ops_bootstrap_denial(
@@ -87,7 +101,7 @@ async def _first_ops_bootstrap_denial(
                 detail={"configured": bool(configured), "token_presented": provided is not None},
             )
         )
-    return JSONResponse(status_code=403, content={"detail": "Bootstrap token required"})
+    return _provision_denied()
 
 
 async def _authenticated_ops(
@@ -112,11 +126,21 @@ async def create_ops_account(
 
     Zero ops accounts exist -> first-ops bootstrap (OPS_BOOTSTRAP_TOKEN required, and
     that gate then closes forever). Otherwise -> a valid ops bearer is required and the
-    new account is attributed to that operator."""
+    new account is attributed to that operator. A request lacking the credential valid
+    for the current state gets one byte-identical denial either way (_provision_denied),
+    so the branch is not an oracle for whether ops accounts exist."""
     now = datetime.now(UTC)
-    if await auth.ops_account_exists():
-        # Steady state: the shared token opens nothing here anymore — attributed ops only.
-        actor_id: uuid.UUID | None = await _authenticated_ops(credentials, auth)
+    bootstrap = not await auth.ops_account_exists()
+    actor_id: uuid.UUID | None
+    if not bootstrap:
+        # Steady state: the shared token opens nothing here anymore — attributed ops
+        # only. Any auth failure (no/invalid bearer, wrong role, deactivated) collapses
+        # to the SAME denial the first-ops path returns, so the two states are
+        # indistinguishable to a client without a valid credential.
+        try:
+            actor_id = await _authenticated_ops(credentials, auth)
+        except HTTPException:
+            return _provision_denied()
     else:
         # First operator: the one remaining, self-closing use of the bootstrap token.
         denial = await _first_ops_bootstrap_denial(x_bootstrap_token, service, now=now)
@@ -124,9 +148,16 @@ async def create_ops_account(
             return denial
         actor_id = None
     try:
-        user = await auth.create_ops(
-            email=body.email, password=body.password, display_name=body.display_name
-        )
+        if bootstrap:
+            # Atomically guarded so two concurrent bootstraps can't both mint a "first"
+            # operator (ADR-0019); the loser gets a 409.
+            user = await auth.create_first_ops(
+                email=body.email, password=body.password, display_name=body.display_name
+            )
+        else:
+            user = await auth.create_ops(
+                email=body.email, password=body.password, display_name=body.display_name
+            )
     except AuthApiError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.reason) from exc
     # Provisioning an operator is a privileged config change — audited (CLAUDE.md §5).
@@ -153,28 +184,67 @@ async def deactivate_ops_account(
 
     404 for a non-ops or unknown id. Idempotent — deactivating an already-disabled
     operator is a quiet success (no second audit event). Refuses (409) to remove the
-    LAST active operator: with the bootstrap gate closed once any ops exists, that
-    would lock provisioning out entirely."""
+    LAST active operator: with the bootstrap gate closed once any ops exists, that would
+    lock provisioning out entirely.
+
+    The last-active guard and the flip run as ONE atomic, lock-serialized step
+    (deactivate_ops_guarded), so two concurrent deactivations cannot both pass the >1
+    check and drive active ops to zero — the second sees the reduced count and 409s."""
+    result = await auth.deactivate_ops_guarded(user_id)
+    if result.outcome is OpsDeactivateOutcome.not_found:
+        raise HTTPException(status_code=404, detail="Ops account not found")
+    if result.outcome is OpsDeactivateOutcome.refused_last_active:
+        raise HTTPException(status_code=409, detail="Cannot deactivate the last active ops account")
+    record = result.record
+    assert record is not None  # already_inactive and deactivated both carry the record
+    if result.outcome is OpsDeactivateOutcome.deactivated:
+        await service.audit.add(
+            AuditEvent(
+                actor_id=current.user_id,
+                actor_role="ops",
+                action="deactivate_ops",
+                patient_id=None,
+                detail={"user_id": str(user_id), "self": user_id == current.user_id},
+            )
+        )
+    # already_inactive falls through: a quiet idempotent success, nothing new to record.
+    return OpsAccountOut(
+        user_id=record.id,
+        email=record.email,
+        display_name=record.display_name,
+        active=record.active,
+    )
+
+
+@router.post("/accounts/{user_id}/reactivate", response_model=OpsAccountOut)
+async def reactivate_ops_account(
+    user_id: uuid.UUID, current: OpsUserDep, auth: AuthDep, service: ClinicServiceDep
+) -> OpsAccountOut:
+    """Restore a deactivated operator (ADR-0019 defense-in-depth): set active on, clear
+    disabled_at, and let that operator log in again.
+
+    A recovery path for an accidental over-deactivation without DB surgery — reactivation
+    only ADDS an active operator, so it needs no lockout guard. 404 for a non-ops or
+    unknown id. Idempotent — reactivating an already-active operator is a quiet success
+    (no second audit event)."""
     target = await auth.get_user(user_id)
     if target is None or target.role is not UserRole.ops:
         raise HTTPException(status_code=404, detail="Ops account not found")
-    if not target.active:
-        # Already revoked — idempotent success, nothing new to record.
+    if target.active:
+        # Already active — idempotent success, nothing new to record.
         return OpsAccountOut(
             user_id=target.id,
             email=target.email,
             display_name=target.display_name,
             active=target.active,
         )
-    if await auth.active_ops_count() <= 1:
-        raise HTTPException(status_code=409, detail="Cannot deactivate the last active ops account")
-    updated = await auth.deactivate_ops(user_id)
+    updated = await auth.reactivate_ops(user_id)
     assert updated is not None  # get_user just found it under the same request/transaction
     await service.audit.add(
         AuditEvent(
             actor_id=current.user_id,
             actor_role="ops",
-            action="deactivate_ops",
+            action="reactivate_ops",
             patient_id=None,
             detail={"user_id": str(user_id), "self": user_id == current.user_id},
         )

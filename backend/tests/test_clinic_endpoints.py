@@ -663,6 +663,19 @@ def test_clinic_patient_views_require_clinician(client: TestClient) -> None:
         assert anon.get("/clinic/patients").status_code == 401
 
 
+def test_deactivated_clinician_is_denied_phi_endpoints(
+    client: TestClient, clinic_service: ClinicService
+) -> None:
+    """Central revocation (ADR-0019): a deactivated clinician holding a still-valid
+    access token is refused at authentication (get_current_user), so it never reaches
+    the panel PHI read — revocation bites for clinicians, not just ops."""
+    clinician, _clinic_id, _user_id = _create_clinician(client)
+    assert client.get("/clinic/patients", headers=clinician).status_code == 200  # active: allowed
+    clinic_service.users._by_email["dr@example.com"].active = False  # noqa: SLF001
+    denied = client.get("/clinic/patients", headers=clinician)
+    assert denied.status_code == 401  # refused centrally, before the clinician gate
+
+
 # ---------------------------------------------------------------- audit trail
 
 

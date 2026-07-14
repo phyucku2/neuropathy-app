@@ -120,15 +120,35 @@ def test_bootstrap_rejects_wrong_or_missing_token(client: TestClient) -> None:
 
 def test_bootstrap_self_disables_once_an_ops_exists(client: TestClient) -> None:
     """THE lifecycle invariant (ADR-0019): the token creates the FIRST ops, then opens
-    nothing. A second /ops/accounts with the same valid token but no ops bearer is a
-    401 — the shared secret is off the steady-state path for good."""
+    nothing. A second /ops/accounts with the same valid token but no ops bearer is
+    refused with the generic credential denial — the shared secret is off the
+    steady-state path for good, and the refusal is indistinguishable from the pre-ops
+    one so it is not an existence oracle."""
     _bootstrap_first_ops(client)
     second = client.post(
         "/ops/accounts",
         headers=BOOTSTRAP,  # valid token, but an ops now exists -> bearer required
         json={"email": "ops2@example.com", "password": SYNTHETIC_PASSWORD, "display_name": "Ops 2"},
     )
-    assert second.status_code == 401  # require_ops via get_current_user: no bearer
+    assert second.status_code == 403  # unified credential denial, no bearer presented
+
+
+def test_missing_credential_denial_is_indistinguishable_across_bootstrap_state(
+    client: TestClient,
+) -> None:
+    """No-credential POST /ops/accounts returns the SAME status + body whether or not an
+    ops account exists (ADR-0019): the bootstrap-state branch is not an existence oracle
+    for an anonymous client. Pre-ops it is the first-ops token denial; post-ops it is the
+    steady-state no-bearer denial — collapsed to one identical response."""
+    body = {"email": "x@example.com", "password": SYNTHETIC_PASSWORD, "display_name": "X"}
+    before = client.post("/ops/accounts", json=body)  # zero ops exist
+    _bootstrap_first_ops(client)  # a first ops now exists -> steady state
+    after = client.post(
+        "/ops/accounts", json={**body, "email": "y@example.com"}
+    )  # still no credential
+    assert before.status_code == 403
+    assert after.status_code == 403
+    assert before.json() == after.json()  # byte-identical body across bootstrap states
 
 
 def test_duplicate_ops_email_is_409(client: TestClient) -> None:
@@ -173,7 +193,9 @@ def test_create_ops_rejects_patient_and_clinician_bearers(client: TestClient) ->
         json={"email": "x@example.com", "password": SYNTHETIC_PASSWORD, "display_name": "X"},
     )
     assert resp.status_code == 403
-    assert resp.json()["detail"] == "Ops account required"
+    # The wrong-role rejection collapses to the SAME generic credential denial as every
+    # other unauthorized POST /accounts, so no response reveals the bootstrap state.
+    assert resp.json()["detail"] == "Not authorized to create ops accounts"
 
 
 # ---------------------------------------------------------------- deactivation
@@ -260,6 +282,62 @@ def test_deactivation_requires_an_ops_bearer(client: TestClient) -> None:
     assert client.post(f"/ops/accounts/{ops1_id}/deactivate", headers=patient).status_code == 403
     with TestClient(app) as anon:
         assert anon.post(f"/ops/accounts/{ops1_id}/deactivate").status_code == 401
+
+
+# ---------------------------------------------------------------- reactivation (ADR-0019)
+
+
+def test_reactivate_restores_a_deactivated_ops(
+    client: TestClient, clinic_service: ClinicService
+) -> None:
+    """Defense-in-depth recovery (ADR-0019): reactivate flips active back on, clears
+    disabled_at, and the operator can log in again — no DB surgery."""
+    ops1, _ = _bootstrap_first_ops(client)
+    created = client.post(
+        "/ops/accounts",
+        headers=ops1,
+        json={"email": "ops2@example.com", "password": SYNTHETIC_PASSWORD, "display_name": "Ops 2"},
+    )
+    target_id = created.json()["user_id"]
+    assert client.post(f"/ops/accounts/{target_id}/deactivate", headers=ops1).status_code == 200
+    # Deactivated: login is refused...
+    blocked = client.post(
+        "/auth/login", json={"email": "ops2@example.com", "password": SYNTHETIC_PASSWORD}
+    )
+    assert blocked.status_code == 401
+
+    resp = client.post(f"/ops/accounts/{target_id}/reactivate", headers=ops1)
+    assert resp.status_code == 200
+    assert resp.json()["active"] is True
+    # ...and after reactivation the operator logs in again.
+    relogin = client.post(
+        "/auth/login", json={"email": "ops2@example.com", "password": SYNTHETIC_PASSWORD}
+    )
+    assert relogin.status_code == 200
+    events = [e for e in clinic_service.audit._events if e.action == "reactivate_ops"]
+    assert len(events) == 1
+    assert events[0].detail == {"user_id": target_id, "self": False}
+
+
+def test_reactivate_is_idempotent(client: TestClient, clinic_service: ClinicService) -> None:
+    ops1, ops1_id = _bootstrap_first_ops(client)
+    # ops1 is already active: reactivation is a quiet success with no audit event.
+    resp = client.post(f"/ops/accounts/{ops1_id}/reactivate", headers=ops1)
+    assert resp.status_code == 200
+    assert resp.json()["active"] is True
+    assert not [e for e in clinic_service.audit._events if e.action == "reactivate_ops"]
+
+
+def test_reactivate_of_unknown_or_non_ops_is_404(client: TestClient) -> None:
+    ops1, _ = _bootstrap_first_ops(client)
+    reg = client.post(
+        "/auth/register",
+        json={"email": "pat@example.com", "password": SYNTHETIC_PASSWORD, "display_name": "Pat"},
+    )
+    patient_id = client.get("/auth/me", headers=_auth(reg.json()["access_token"])).json()["user_id"]
+    assert client.post(f"/ops/accounts/{uuid.uuid4()}/reactivate", headers=ops1).status_code == 404
+    # A patient user id is not an ops account — 404, never a leak that it exists.
+    assert client.post(f"/ops/accounts/{patient_id}/reactivate", headers=ops1).status_code == 404
 
 
 # ---------------------------------------------------------------- denial audits (ADR-0017 posture)

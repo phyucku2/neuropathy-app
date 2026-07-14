@@ -35,12 +35,23 @@ from app.repositories.capability import DuplicateCapabilityKeyError
 from app.repositories.clinic_connection import DuplicateLiveConnectionError
 from app.repositories.emr_connection import ConnectionRecord
 from app.repositories.pending_auth import PendingAuth, pending_auth_ttl
-from app.repositories.user import DuplicateEmailError, UserRecord
+from app.repositories.user import (
+    DuplicateEmailError,
+    OpsAlreadyExistsError,
+    OpsDeactivateOutcome,
+    OpsDeactivateResult,
+    UserRecord,
+)
 from app.services.observation import counts_toward_analysis
 
 # The SQL twin of the unit-tested analyzable-status predicate: derived from it, so the
 # two can never drift apart.
 _ANALYZABLE_STATUSES = tuple(s for s in ObservationStatus if counts_toward_analysis(s))
+
+# One fixed bigint key for the first-ops bootstrap advisory lock (ADR-0019): with zero
+# ops rows to row-lock, this transaction-scoped lock is the serialization point that
+# keeps concurrent first-ops bootstraps from both inserting a "first" operator.
+_OPS_BOOTSTRAP_LOCK_KEY = 190_019
 
 
 class PostgresUserRepository:
@@ -103,6 +114,46 @@ class PostgresUserRepository:
         row.disabled_at = disabled_at
         await self._session.flush()
         return _user_to_record(row)
+
+    async def add_first_ops(self, user: UserRecord) -> None:
+        # Serialize concurrent first-ops bootstraps on a transaction-scoped advisory
+        # lock (there are no ops rows to row-lock yet): the loser waits here, then
+        # re-reads a now-nonzero ops count and is refused. The lock releases with the
+        # request transaction.
+        await self._session.execute(select(func.pg_advisory_xact_lock(_OPS_BOOTSTRAP_LOCK_KEY)))
+        existing = await self._session.scalar(
+            select(func.count()).select_from(User).where(User.role == UserRole.ops)
+        )
+        if existing:
+            raise OpsAlreadyExistsError(str(user.id))
+        await self.add(user)
+
+    async def deactivate_ops_guarded(
+        self, user_id: uuid.UUID, *, disabled_at: datetime
+    ) -> OpsDeactivateResult:
+        # Lock the active-ops set FOR UPDATE so concurrent deactivations serialize: the
+        # second waiter re-reads the just-committed flip (EvalPlanQual) and sees the
+        # reduced set, so it cannot also remove what is now the last active operator.
+        # Aggregates can't carry FOR UPDATE, so we lock the rows and count them here.
+        locked = (
+            await self._session.scalars(
+                select(User.id)
+                .where(User.role == UserRole.ops, User.active.is_(True))
+                .order_by(User.id)  # deterministic lock-acquisition order (no deadlock)
+                .with_for_update()
+            )
+        ).all()
+        row = await self._session.get(User, user_id)
+        if row is None or row.role is not UserRole.ops:
+            return OpsDeactivateResult(OpsDeactivateOutcome.not_found, None)
+        if not row.active:
+            return OpsDeactivateResult(OpsDeactivateOutcome.already_inactive, _user_to_record(row))
+        if len(locked) <= 1:
+            return OpsDeactivateResult(OpsDeactivateOutcome.refused_last_active, None)
+        row.active = False
+        row.disabled_at = disabled_at
+        await self._session.flush()
+        return OpsDeactivateResult(OpsDeactivateOutcome.deactivated, _user_to_record(row))
 
 
 class PostgresClinicRepository:

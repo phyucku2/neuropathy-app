@@ -29,7 +29,11 @@ from app.main import create_app
 from app.models.audit import AuditEvent
 from app.models.user import UserRole
 from app.repositories.postgres import PostgresUserRepository
-from app.repositories.user import UserRecord
+from app.repositories.user import (
+    OpsAlreadyExistsError,
+    OpsDeactivateOutcome,
+    UserRecord,
+)
 from tests.integration.test_app_db_wiring import (
     SYNTHETIC_PASSWORD,
     _auth_header,
@@ -114,6 +118,97 @@ async def test_postgres_user_repo_count_and_set_active(
         assert await repo.count_with_role(UserRole.ops) >= 2
         assert await repo.set_active(uuid.uuid4(), active=False, disabled_at=None) is None
         await session.rollback()
+
+
+def _make_ops(name: str) -> UserRecord:
+    return UserRecord(
+        id=uuid.uuid4(),
+        email=f"ops-{uuid.uuid4().hex[:10]}@example.com",
+        password_hash="synthetic-hash",
+        display_name=name,
+        role=UserRole.ops,
+        patient_id=None,
+    )
+
+
+async def _delete_all_ops_via(session_factory: async_sessionmaker[AsyncSession]) -> None:
+    async with session_factory() as session, session.begin():
+        await session.execute(text("DELETE FROM app_user WHERE role = 'ops'"))
+
+
+# -------------------------------------------------------------- concurrency guards (live Postgres)
+
+
+async def test_concurrent_deactivation_keeps_one_active_ops(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Fix #1 (ADR-0019): two concurrent deactivations with EXACTLY two active ops must
+    not both succeed — the FOR UPDATE lock on the active-ops set serializes them, so one
+    wins (deactivated) and the second re-reads the reduced count and is refused
+    (last active). Active ops stays >= 1; reactivate then restores the pair."""
+    await _delete_all_ops_via(session_factory)
+    a, b = _make_ops("Ops A"), _make_ops("Ops B")
+    async with session_factory() as session, session.begin():
+        repo = PostgresUserRepository(session)
+        await repo.add(a)
+        await repo.add(b)
+
+    now = datetime.now(UTC)
+
+    async def deactivate(target_id: uuid.UUID) -> OpsDeactivateOutcome:
+        async with session_factory() as session, session.begin():
+            result = await PostgresUserRepository(session).deactivate_ops_guarded(
+                target_id, disabled_at=now
+            )
+            return result.outcome
+
+    outcome_a, outcome_b = await asyncio.gather(deactivate(a.id), deactivate(b.id))
+    assert {outcome_a, outcome_b} == {
+        OpsDeactivateOutcome.deactivated,
+        OpsDeactivateOutcome.refused_last_active,
+    }
+    async with session_factory() as session:
+        # Exactly one survives active — never the zero-active lockout the TOCTOU allowed.
+        assert (
+            await PostgresUserRepository(session).count_with_role(UserRole.ops, active_only=True)
+            == 1
+        )
+
+    deactivated_id = a.id if outcome_a is OpsDeactivateOutcome.deactivated else b.id
+    async with session_factory() as session, session.begin():
+        restored = await PostgresUserRepository(session).set_active(
+            deactivated_id, active=True, disabled_at=None
+        )
+        assert restored is not None and restored.active is True
+    async with session_factory() as session:
+        assert (
+            await PostgresUserRepository(session).count_with_role(UserRole.ops, active_only=True)
+            == 2
+        )
+
+
+async def test_concurrent_first_ops_bootstrap_allows_exactly_one(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Fix #5 (ADR-0019): two concurrent first-ops bootstraps with zero ops -> exactly
+    one inserts and the other is refused by the advisory-lock guard, so the single
+    'first operator' invariant holds even though the two DISTINCT emails would each slip
+    past the unique index."""
+    await _delete_all_ops_via(session_factory)
+    a, b = _make_ops("Ops A"), _make_ops("Ops B")
+
+    async def bootstrap(user: UserRecord) -> str:
+        async with session_factory() as session, session.begin():
+            try:
+                await PostgresUserRepository(session).add_first_ops(user)
+                return "ok"
+            except OpsAlreadyExistsError:
+                return "refused"
+
+    result_a, result_b = await asyncio.gather(bootstrap(a), bootstrap(b))
+    assert {result_a, result_b} == {"ok", "refused"}
+    async with session_factory() as session:
+        assert await PostgresUserRepository(session).count_with_role(UserRole.ops) == 1
 
 
 # ---------------------------------------------------------------- end to end

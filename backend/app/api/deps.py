@@ -128,6 +128,13 @@ async def get_current_user(
     user = await auth.get_user(claims.user_id)
     if user is None:
         raise _unauthorized("Account no longer exists")
+    # Revocation is enforced centrally here, at authentication, for EVERY role (ADR-0019):
+    # a short-lived access token can outlive a deactivation by up to its TTL, so a
+    # deactivated principal of any role — patient, clinician, or ops — is refused before
+    # it reaches any endpoint or role gate. PHI-free reason, indistinguishable from a
+    # deleted account.
+    if not user.active:
+        raise _unauthorized("Account is not active")
     return CurrentUser(
         user_id=user.id,
         role=user.role,
@@ -163,9 +170,13 @@ ClinicianUserDep = Annotated[CurrentUser, Depends(require_clinician)]
 
 
 def require_ops(current: CurrentUserDep) -> CurrentUser:
-    """Ops-scoped endpoints (ADR-0019): the caller must be an ACTIVE ops operator.
-    An ops principal carries neither patient_id nor clinic_id; a deactivated one is
-    refused here even while its (short-lived) access token is still otherwise valid."""
+    """Ops-scoped endpoints (ADR-0019): the caller must be an ops operator.
+
+    An ops principal carries neither patient_id nor clinic_id. Revocation is enforced
+    centrally in get_current_user now (a deactivated principal of ANY role is refused at
+    authentication, before it reaches any gate), so the active re-check kept here is
+    pure defense-in-depth — it can only ever see an active principal through the request
+    path, and never produces a second, differing status for the deactivated case."""
     if current.role is not UserRole.ops or not current.active:
         raise HTTPException(status_code=403, detail="Ops account required")
     return current

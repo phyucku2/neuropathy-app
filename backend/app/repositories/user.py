@@ -9,6 +9,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from typing import Protocol
 
 from app.models.user import UserRole
@@ -16,6 +17,31 @@ from app.models.user import UserRole
 
 class DuplicateEmailError(Exception):
     """The email is already registered (unique-constraint violation)."""
+
+
+class OpsAlreadyExistsError(Exception):
+    """An ops account already exists when a first-ops bootstrap was attempted.
+
+    Raised by `add_first_ops` when the count-then-insert is lost to a concurrent
+    bootstrap: the single documented "first operator" invariant holds even under a
+    race, and the loser is refused (ADR-0019).
+    """
+
+
+class OpsDeactivateOutcome(Enum):
+    """The result of a guarded, atomic ops deactivation (ADR-0019)."""
+
+    not_found = "not_found"  # unknown id or a non-ops account
+    already_inactive = "already_inactive"  # idempotent no-op (carries the record)
+    refused_last_active = "refused_last_active"  # would remove the last active operator
+    deactivated = "deactivated"  # flipped active off (carries the updated record)
+
+
+@dataclass(frozen=True)
+class OpsDeactivateResult:
+    outcome: OpsDeactivateOutcome
+    # Present for already_inactive and deactivated; None for not_found/refused.
+    record: UserRecord | None
 
 
 @dataclass
@@ -78,6 +104,33 @@ class UserRepository(Protocol):
         Returns the updated record, or None when no such user exists."""
         ...
 
+    async def add_first_ops(self, user: UserRecord) -> None:
+        """Insert the FIRST ops account, atomically guarded against a concurrent
+        bootstrap (ADR-0019).
+
+        With zero ops rows there is nothing to row-lock, so Postgres serializes the
+        count-then-insert on a transaction-scoped advisory lock; the loser re-reads a
+        now-nonzero ops count and raises OpsAlreadyExistsError. Also raises
+        DuplicateEmailError like `add` when the email is taken. Callers use this only on
+        the first-ops path; steady-state creation uses `add`.
+        """
+        ...
+
+    async def deactivate_ops_guarded(
+        self, user_id: uuid.UUID, *, disabled_at: datetime
+    ) -> OpsDeactivateResult:
+        """Count active ops and flip the target off in ONE atomic step (ADR-0019).
+
+        Closes the last-active-ops TOCTOU: reading the count and then deactivating in
+        separate steps let two concurrent deactivations both pass the >1 guard and drive
+        active ops to zero — a permanent provisioning lockout. Postgres locks the
+        active-ops set FOR UPDATE so concurrent deactivations serialize; the second
+        waiter re-reads the just-committed flip, sees the reduced count, and is refused.
+        The in-memory twin never awaits between the count and the flip, so the single
+        event loop gives it the same atomicity.
+        """
+        ...
+
 
 class InMemoryUserRepository:
     """Dict-backed store for unit tests and DB-less development."""
@@ -120,3 +173,27 @@ class InMemoryUserRepository:
         user.active = active
         user.disabled_at = disabled_at
         return user
+
+    async def add_first_ops(self, user: UserRecord) -> None:
+        # Single-threaded event loop: the count check and the insert run with no await
+        # in between, so no concurrent bootstrap interleaves (the Postgres twin gets the
+        # same guarantee from an advisory lock).
+        if any(u.role is UserRole.ops for u in self._by_id.values()):
+            raise OpsAlreadyExistsError(str(user.id))
+        await self.add(user)
+
+    async def deactivate_ops_guarded(
+        self, user_id: uuid.UUID, *, disabled_at: datetime
+    ) -> OpsDeactivateResult:
+        # No await between the count and the flip -> atomic in the single event loop.
+        user = self._by_id.get(user_id)
+        if user is None or user.role is not UserRole.ops:
+            return OpsDeactivateResult(OpsDeactivateOutcome.not_found, None)
+        if not user.active:
+            return OpsDeactivateResult(OpsDeactivateOutcome.already_inactive, user)
+        active = sum(1 for u in self._by_id.values() if u.role is UserRole.ops and u.active)
+        if active <= 1:
+            return OpsDeactivateResult(OpsDeactivateOutcome.refused_last_active, None)
+        user.active = False
+        user.disabled_at = disabled_at
+        return OpsDeactivateResult(OpsDeactivateOutcome.deactivated, user)

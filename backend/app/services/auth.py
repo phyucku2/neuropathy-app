@@ -24,6 +24,8 @@ from app.models.user import UserRole
 from app.repositories.user import (
     DuplicateEmailError,
     InMemoryUserRepository,
+    OpsAlreadyExistsError,
+    OpsDeactivateResult,
     UserRecord,
     UserRepository,
 )
@@ -123,6 +125,34 @@ class AuthService:
             ) from exc
         return user
 
+    async def create_first_ops(self, *, email: str, password: str, display_name: str) -> UserRecord:
+        """Provision the FIRST ops operator on the bootstrap path (ADR-0019).
+
+        Same account shape as create_ops, but inserted through the atomically-guarded
+        `add_first_ops`: two concurrent first-ops bootstraps (distinct emails, so the
+        email unique index would not stop them) serialize, exactly one wins, and the
+        loser gets a 409 — the single documented "first operator" invariant holds even
+        under a race. Steady-state creation still uses create_ops."""
+        normalized = email.strip().lower()
+        user = UserRecord(
+            id=uuid.uuid4(),
+            email=normalized,
+            password_hash=hash_password(password),
+            display_name=display_name,
+            role=UserRole.ops,
+            patient_id=None,
+            clinic_id=None,
+        )
+        try:
+            await self.users.add_first_ops(user)
+        except DuplicateEmailError as exc:
+            raise AuthApiError(
+                "An account with this email already exists", status_code=409
+            ) from exc
+        except OpsAlreadyExistsError as exc:
+            raise AuthApiError("An ops account already exists", status_code=409) from exc
+        return user
+
     async def ops_account_exists(self) -> bool:
         """Whether ANY ops account exists (active or deactivated). Once true the
         first-ops bootstrap gate is closed for good (ADR-0019)."""
@@ -140,6 +170,20 @@ class AuthService:
         touches the others — the shared token could not do this."""
         return await self.users.set_active(user_id, active=False, disabled_at=datetime.now(UTC))
 
+    async def deactivate_ops_guarded(self, user_id: uuid.UUID) -> OpsDeactivateResult:
+        """Atomic, last-active-ops-safe deactivation (ADR-0019): the count and the flip
+        happen under one lock so two concurrent deactivations cannot both pass the >1
+        guard and drive active ops to zero (a permanent provisioning lockout). The
+        route maps the outcome to 404 / idempotent-200 / 409 / 200."""
+        return await self.users.deactivate_ops_guarded(user_id, disabled_at=datetime.now(UTC))
+
+    async def reactivate_ops(self, user_id: uuid.UUID) -> UserRecord | None:
+        """Restore a deactivated operator (ADR-0019 defense-in-depth): flip active on
+        and clear disabled_at so an accidental over-deactivation is recoverable without
+        DB surgery. Returns the updated record, or None when no such account exists.
+        Reactivation only ever ADDS an active operator, so it needs no lockout guard."""
+        return await self.users.set_active(user_id, active=True, disabled_at=None)
+
     async def login(self, *, email: str, password: str) -> tuple[UserRecord, TokenPair]:
         user = await self.users.get_by_email(email.strip().lower())
         # Same error for unknown email, deactivated account, and wrong password — a
@@ -152,7 +196,11 @@ class AuthService:
     async def refresh(self, *, refresh_token: str) -> str:
         claims = decode_token(refresh_token, secret=self.secret, expected_kind=TokenKind.refresh)
         user = await self.users.get_by_id(claims.user_id)
-        if user is None:
+        # Re-check active, mirroring login(): a deactivated account must not keep minting
+        # fresh access tokens for its refresh token's whole lifetime — that would defeat
+        # revocation-within-one-TTL (ADR-0019). A deactivated account is indistinguishable
+        # from a deleted one here, same 401, no enumeration.
+        if user is None or not user.active:
             raise AuthApiError("Account no longer exists", status_code=401)
         return create_token(
             user_id=user.id, role=user.role.value, kind=TokenKind.access, secret=self.secret
