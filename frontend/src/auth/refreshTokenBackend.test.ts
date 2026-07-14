@@ -6,7 +6,8 @@ import { NativeBackend, REFRESH_TOKEN_KEY, WebBackend, type SecureKv } from './r
 function makeFakeKv() {
   const store = new Map<string, string>();
   let failNextGet = false;
-  let failNextRemove = false;
+  let failRemoveTimes = 0; // number of upcoming remove() calls that should reject
+  let removeCalls = 0;
   const kv: SecureKv = {
     getItem: async (key) => {
       if (failNextGet) {
@@ -19,8 +20,9 @@ function makeFakeKv() {
       store.set(key, value);
     },
     remove: async (key) => {
-      if (failNextRemove) {
-        failNextRemove = false;
+      removeCalls += 1;
+      if (failRemoveTimes > 0) {
+        failRemoveTimes -= 1;
         throw new Error('remove failed');
       }
       return store.delete(key);
@@ -29,11 +31,12 @@ function makeFakeKv() {
   return {
     kv,
     store,
+    removeCalls: () => removeCalls,
     failGetOnce: () => {
       failNextGet = true;
     },
-    failRemoveOnce: () => {
-      failNextRemove = true;
+    failRemoveTimes: (n: number) => {
+      failRemoveTimes = n;
     },
   };
 }
@@ -102,12 +105,25 @@ describe('NativeBackend (Keystore-backed secure store)', () => {
     expect(backend.peek()).toBeNull();
   });
 
-  it('clear swallows a durable-removal failure (mirror already cleared)', async () => {
+  it('clear retries a transient removal failure and still purges the durable token', async () => {
     const fake = makeFakeKv();
-    fake.failRemoveOnce();
+    fake.failRemoveTimes(2); // first two remove() calls reject; the third succeeds
+    const backend = new NativeBackend(fake.kv);
+    await backend.save('fresh-token');
+    backend.clear();
+    expect(backend.peek()).toBeNull();
+    // The retry eventually removes the token — no resurrectable residue after a transient error.
+    await vi.waitFor(() => expect(fake.store.has(REFRESH_TOKEN_KEY)).toBe(false));
+  });
+
+  it('clear never throws and bounds its retries when every removal fails', async () => {
+    const fake = makeFakeKv();
+    fake.failRemoveTimes(Number.POSITIVE_INFINITY);
     const backend = new NativeBackend(fake.kv);
     await backend.save('fresh-token');
     expect(() => backend.clear()).not.toThrow();
-    expect(backend.peek()).toBeNull();
+    expect(backend.peek()).toBeNull(); // mirror cleared → no in-process use
+    // Retries are bounded (does not loop forever); the durable residue is the accepted rare case.
+    await vi.waitFor(() => expect(fake.removeCalls()).toBe(3));
   });
 });

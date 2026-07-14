@@ -1,6 +1,6 @@
 import { File as NodeFile } from 'node:buffer';
 import '@testing-library/jest-dom/vitest';
-import { cleanup, configure } from '@testing-library/react';
+import { cleanup } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, beforeEach, vi } from 'vitest';
 import { clearSession } from '../auth/tokenStore';
 import { server } from './server';
@@ -23,11 +23,6 @@ vi.mock('@aparajita/capacitor-biometric-auth', () => ({
     authenticate: async () => undefined,
   },
 }));
-
-// The default 1000ms async-util timeout is tight for `findBy*` when the full suite runs in
-// parallel under CI load (multi-fetch restore → page render). Give async queries more headroom
-// so a slow scheduler tick is not misread as a missing element (kills a class of flakes).
-configure({ asyncUtilTimeout: 5000 });
 
 // jsdom's File/FormData cannot be serialized by Node's fetch (undici): uploads
 // hang or stringify. Node's own File and undici's FormData (recovered from the

@@ -23,14 +23,20 @@ export async function requireBiometricUnlock(): Promise<boolean> {
     return true;
   }
 
-  let available = false;
+  let available: boolean;
   try {
     const info = await BiometricAuth.checkBiometry();
     available = info.isAvailable;
   } catch {
-    available = false;
+    // An ERROR inside the gate (native bridge failure, etc.) is NOT the same as a device with no
+    // enrolled biometry — an unenrolled device RESOLVES with { isAvailable: false }. When the gate
+    // itself is broken we fail CLOSED: deny the silent restore so PHI is never auto-revealed by a
+    // degraded/spoofed gate. This is not a lockout — the user falls back to password sign-in.
+    return false;
   }
   if (!available) {
+    // Genuinely no enrolled biometry: do not lock the user out of their own device-secured
+    // session — the Keystore already protects the token at rest.
     return true;
   }
 

@@ -87,9 +87,24 @@ export class NativeBackend implements RefreshTokenBackend {
 
   clear(): void {
     // Clear the mirror synchronously so the app cannot use the token even if the async durable
-    // delete is slow or fails; then fire-and-forget the durable removal.
+    // delete is slow or fails; then durably remove it with retries so a transient Keystore error
+    // does not leave a still-valid refresh token that resurrects the session on the next launch.
     this.mirror = null;
-    void this.kv.remove(REFRESH_TOKEN_KEY).catch(() => undefined);
+    void this.durableRemoveWithRetry();
+  }
+
+  private async durableRemoveWithRetry(attempts = 3): Promise<void> {
+    for (let i = 0; i < attempts; i += 1) {
+      try {
+        await this.kv.remove(REFRESH_TOKEN_KEY);
+        return;
+      } catch {
+        // Transient Keystore contention / OS error — retry. If every attempt fails the mirror is
+        // already cleared (no in-process use); the rare durable residue on a wedged Keystore is an
+        // accepted residual (ADR-0024). A process kill mid-delete is likewise out of the app's
+        // reach; the next launch still requires the biometric gate on any device that has one.
+      }
+    }
   }
 
   peek(): string | null {

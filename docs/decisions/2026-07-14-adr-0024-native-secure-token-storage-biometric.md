@@ -30,13 +30,19 @@ on native restore. The access token stays memory-only on every platform (unchang
     in-memory mirror that is `null` until `load()` primes it from the Keystore — the native
     restore flow starts in `restoring` and awaits the load, never trusting a native peek.
   - `NativeBackend` takes an injectable `SecureKv` so the Keystore path is unit-tested
-    off-device; `clear()` drops the mirror synchronously and fire-and-forgets the durable
-    delete (the app cannot use the token even if the async remove is slow/fails); a load
-    failure yields `null`, never a stale mirror.
+    off-device; `clear()` drops the mirror synchronously and then durably removes the token with
+    **bounded retries** (so a transient Keystore error on logout does not leave a still-valid
+    refresh token that could resurrect the session next launch); a load failure yields `null`,
+    never a stale mirror. Residual honestly noted: a process kill mid-delete, or a Keystore that
+    fails every retry, can leave durable residue — but the mirror is already cleared (no in-process
+    use) and any device with enrolled biometry still requires the unlock on the next launch.
 - **Biometric** (`biometric.ts`, `@aparajita/capacitor-biometric-auth`): `requireBiometricUnlock()`
-  is a no-op (allow) on web and when no biometry is enrolled (never lock a user out of their
-  own device-secured session — the Keystore already protects the token at rest). Only an
-  actual failed/cancelled prompt denies; device credential (PIN) is allowed as a fallback.
+  allows (no-op) on web and when no biometry is **enrolled** (a genuinely unenrolled device
+  RESOLVES `{isAvailable:false}` — never lock a user out of their own device-secured session; the
+  Keystore already protects the token at rest). It **fails CLOSED** when the gate itself errors
+  (`checkBiometry` throws) or the prompt is failed/cancelled — denying the silent restore so PHI is
+  never auto-revealed by a broken/spoofed gate; that is a fallback to password sign-in, not a
+  lockout. Device credential (PIN) is allowed as a fallback for a transient biometric miss.
 - **Wiring** (`nativeRestore.ts` → `AuthContext`): `resolveNativeRestore()` = prime the token,
   then (only if present) require unlock → `restore | anonymous`. A denied/cancelled unlock or
   a missing token → anonymous, and the token is **left in the Keystore** for a retry next

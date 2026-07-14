@@ -50,10 +50,11 @@ describe('requireBiometricUnlock', () => {
     await expect(requireBiometricUnlock()).resolves.toBe(false);
   });
 
-  it('native + checkBiometry throws: treated as unavailable, allowed', async () => {
+  it('native + checkBiometry throws (gate error): fails CLOSED — denied, no silent restore', async () => {
     isNativePlatform.mockReturnValue(true);
     checkBiometry.mockRejectedValue(new Error('no native bridge'));
-    await expect(requireBiometricUnlock()).resolves.toBe(true);
+    // A broken gate must not auto-reveal the session; the user falls back to password sign-in.
+    await expect(requireBiometricUnlock()).resolves.toBe(false);
     expect(authenticate).not.toHaveBeenCalled();
   });
 });
