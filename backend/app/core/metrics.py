@@ -16,10 +16,24 @@ App metrics carry only aggregate, subject-free facts: process/platform collector
 ``app_up`` gauge, the DB pool in-use count, and typed event counters (``event`` label is a
 fixed vocabulary such as ``requested`` — never a subject). No counter is ever keyed by who
 the request was about.
+
+**Multi-worker exposition (ADR-0021).** The production image runs several uvicorn workers
+behind one port, so a scrape hits one worker at random. A per-process registry would then
+expose only that worker's series — counters would appear to reset as Prometheus round-robins
+the workers, corrupting ``rate()`` and alerts. To fix this the default image sets
+``PROMETHEUS_MULTIPROC_DIR``: every worker writes its samples to that shared directory, and a
+scrape builds a fresh registry with a ``MultiProcessCollector`` that AGGREGATES all workers'
+files (see ``build_scrape_registry``). Counters/histograms sum automatically; the two gauges
+declare a ``multiprocess_mode`` (``livesum`` for the pool, ``livemax`` for ``app_up``) so
+they aggregate correctly and drop a worker's contribution once it dies (``mark_worker_dead``,
+wired to the server's worker-exit hook). When the var is unset (dev / single process) the
+in-process registry is rendered as before, including the ``process_*``/``python_info``
+collectors (which are per-process and therefore omitted from the aggregated scrape).
 """
 
 from __future__ import annotations
 
+import os
 import time
 from collections.abc import Awaitable, Callable
 from typing import Protocol
@@ -33,10 +47,16 @@ from prometheus_client import (
     PlatformCollector,
     ProcessCollector,
     generate_latest,
+    multiprocess,
 )
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
+
+# Env var (prometheus_client convention) selecting multiprocess exposition. Set by the
+# container entrypoint on a fresh start (which also wipes the dir so stale files from a
+# previous boot never corrupt the aggregated sums). Unset = single-process/dev mode.
+PROMETHEUS_MULTIPROC_DIR_ENV = "PROMETHEUS_MULTIPROC_DIR"
 
 # Recorded for a request that never matched a route (e.g. a 404, or an upload-guard
 # short-circuit before routing). Mirrors app/core/logging.UNMATCHED_ROUTE: the raw path is
@@ -72,12 +92,19 @@ HTTP_REQUEST_DURATION = Histogram(
 APP_UP = Gauge(
     "app_up",
     "Static 1 while the process serves; presence/absence signals process liveness.",
+    # `livemax` so a multi-worker scrape reports a single `app_up 1` while any worker is
+    # live, and a dead worker's file is dropped (via mark_worker_dead) — keeping the
+    # `absent(app_up) or app_up < 1` dead-man's-switch alert correct across workers.
+    multiprocess_mode="livemax",
     registry=METRICS_REGISTRY,
 )
 APP_UP.set(1)
 DB_POOL_IN_USE = Gauge(
     "db_connection_pool_in_use",
     "Connections currently checked out of the SQLAlchemy pool (0 in in-memory mode).",
+    # `livesum` so a scrape reports the total connections in use across all workers' pools
+    # (each worker has its own pool), with a dead worker's contribution dropped.
+    multiprocess_mode="livesum",
     registry=METRICS_REGISTRY,
 )
 # Typed, subject-free event counter. `event` is a fixed vocabulary (e.g. an ai_narrative
@@ -129,9 +156,45 @@ def update_db_pool_gauge(engine: _PoolEngine | None) -> None:
     DB_POOL_IN_USE.set(engine.pool.checkedout() if engine is not None else 0)
 
 
+def build_scrape_registry() -> CollectorRegistry:
+    """The registry a ``/metrics`` scrape should render.
+
+    In **multiprocess mode** (``PROMETHEUS_MULTIPROC_DIR`` set — the default multi-worker
+    image) a scrape must aggregate EVERY worker's samples, not just those of the one worker
+    Prometheus happened to reach. We build a fresh registry holding only a
+    ``MultiProcessCollector``, which reads all workers' shared files from the dir and sums
+    counters/histograms and aggregates the ``live*`` gauges across workers. The
+    ``process_*``/``python_info`` collectors are per-process and cannot be aggregated, so
+    they are deliberately absent from this path (they render only single-process).
+
+    In **single-process mode** (var unset — dev / one worker) the in-process
+    ``METRICS_REGISTRY`` is rendered exactly as before.
+    """
+    if not os.environ.get(PROMETHEUS_MULTIPROC_DIR_ENV):
+        return METRICS_REGISTRY
+    registry = CollectorRegistry()
+    # prometheus_client's multiprocess module ships no type annotations; the collector
+    # registers itself onto `registry` and reads the dir from PROMETHEUS_MULTIPROC_DIR.
+    multiprocess.MultiProcessCollector(registry)  # type: ignore[no-untyped-call]
+    return registry
+
+
 def render_metrics() -> bytes:
-    """Serialize the registry to Prometheus text (used by the /metrics endpoint)."""
-    return generate_latest(METRICS_REGISTRY)
+    """Serialize the scrape registry to Prometheus text (used by the /metrics endpoint)."""
+    return generate_latest(build_scrape_registry())
+
+
+def mark_worker_dead(pid: int) -> None:
+    """Drop a dead worker's multiprocess metric files so it stops skewing aggregated sums.
+
+    Wired to the server's worker-exit hook (Gunicorn's ``child_exit`` — see
+    ``backend/gunicorn.conf.py``), which fires in the master however a worker died (crash or
+    graceful shutdown), the reliable place to run this. A no-op outside multiprocess mode,
+    where there are no per-worker files to clean up.
+    """
+    if os.environ.get(PROMETHEUS_MULTIPROC_DIR_ENV):
+        # Untyped in prometheus_client; removes this pid's `gauge_live*` files from the dir.
+        multiprocess.mark_process_dead(pid)  # type: ignore[no-untyped-call]
 
 
 class MetricsMiddleware(BaseHTTPMiddleware):
@@ -160,6 +223,8 @@ class MetricsMiddleware(BaseHTTPMiddleware):
 __all__ = [
     "CONTENT_TYPE_LATEST",
     "MetricsMiddleware",
+    "build_scrape_registry",
+    "mark_worker_dead",
     "record_ai_narrative_event",
     "render_metrics",
     "update_db_pool_gauge",

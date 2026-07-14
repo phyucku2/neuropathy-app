@@ -12,7 +12,7 @@ Two images, both multi-stage, non-root, secret-free:
 
 | Image | Build context | Serves | Port |
 |---|---|---|---|
-| backend | `backend/` | FastAPI via uvicorn (`app.main:app`) | 8000 |
+| backend | `backend/` | FastAPI via Gunicorn + Uvicorn workers (`app.main:app`) | 8000 |
 | frontend | `frontend/` | Built SPA via non-root nginx (reverse-proxies the API) | 8080 |
 
 ```bash
@@ -36,7 +36,8 @@ the repo. Security-sensitive values **fail closed at startup** with an actionabl
 | `DATABASE_URL` | secret (embeds DB password) | for durable mode | `postgresql+asyncpg://USER:PASSWORD@HOST:5432/DB`. Unset = in-memory (non-durable; dev/test only). |
 | `APP_ENV` | no | no | Environment label (e.g. `staging`, `production`); appears in logs. |
 | `APP_DEBUG` | no | no | `true` raises log verbosity and enables SQL echo. Keep `false` in prod. |
-| `WEB_CONCURRENCY` | no | no | uvicorn worker count (default 2). Size by CPU. |
+| `WEB_CONCURRENCY` | no | no | Worker count (default 2). Size by CPU. Drives Gunicorn's Uvicorn workers (`gunicorn.conf.py`). |
+| `PROMETHEUS_MULTIPROC_DIR` | no | no | Shared dir for multi-worker Prometheus metrics (ADR-0021). **Set by the image** (default `/tmp/prometheus-multiproc`) so a `/metrics` scrape aggregates all workers; the entrypoint wipes it on start. Unset it only to run single-process (dev), where `/metrics` renders the in-process registry. |
 | `JWT_SECRET` | **SECRET** | yes for durable auth | Signs JWT access/refresh tokens (ADR-0010). Without it, tokens don't survive restarts/multiple workers. `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
 | `SECRET_STORE_KEY` | **SECRET** | if storing EMR tokens | Fernet key encrypting the DB OAuth token vault (ADR-0017). Fail-closed: without it, tokens stay in a per-process in-memory vault (never written to the DB in plaintext). **Back this up separately from the database** (see backup-restore.md). `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
 | `OPS_BOOTSTRAP_TOKEN` | **SECRET** | to provision clinicians | Ops gate for clinician provisioning (ADR-0012/0017). Min 32 chars — shorter is refused at startup. Unset = provisioning disabled (fails closed). `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
@@ -72,6 +73,10 @@ contains the migration files, so run migrations with the **same image**:
 docker run --rm -e DATABASE_URL="postgresql+asyncpg://USER:PASSWORD@HOST:5432/DB" \
   neuropathy-backend:<tag> alembic upgrade head
 ```
+
+The image `ENTRYPOINT` (`docker-entrypoint.sh`) `exec`s whatever command it is given, so this
+override runs `alembic upgrade head` unchanged; only the default `CMD` (the Gunicorn server)
+is replaced.
 
 In compose this is the one-shot `migrate` service; `backend` waits for it via
 `depends_on: { migrate: { condition: service_completed_successfully } }`.

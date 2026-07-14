@@ -46,9 +46,10 @@ class ErrorEvent:
     """A PHI-scrubbed error event — a fixed whitelist of safe fields, nothing else.
 
     Every field here is either a fixed vocabulary (method, status), software-derived
-    identifier (exception type name, route *template*), a correlation id echoed from the
-    request header, or a timestamp. NONE is derived from the exception message, request
-    body, query string, headers, or any patient datum."""
+    identifier (exception type name, route *template*), a correlation id shared with the
+    request log line (resolved by the logging middleware onto request.state), or a
+    timestamp. NONE is derived from the exception message, request body, query string,
+    headers, or any patient datum."""
 
     exception_type: str
     route: str
@@ -65,6 +66,20 @@ class ErrorReporter(Protocol):
     async def report(self, event: ErrorEvent) -> None: ...
 
 
+def _resolve_request_id(request: Request) -> str | None:
+    """The correlation id shared with the request log line.
+
+    The logging middleware (outermost) resolves an id for EVERY request — the inbound
+    ``X-Request-ID`` or a generated one — and stashes it on ``request.state.request_id``
+    before the exception is raised, so reading it here makes the error event and the 500 log
+    line carry ONE id. Fall back to the inbound header (for a bare deployment without the
+    logging middleware), then ``None`` — never invented from PHI."""
+    state_id = getattr(request.state, "request_id", None)
+    if isinstance(state_id, str):
+        return state_id
+    return request.headers.get(REQUEST_ID_HEADER)
+
+
 def build_error_event(request: Request, exc: BaseException, *, env: str) -> ErrorEvent:
     """Construct the scrubbed event from the request + exception TYPE only.
 
@@ -75,9 +90,9 @@ def build_error_event(request: Request, exc: BaseException, *, env: str) -> Erro
         route=route_template(request),
         method=request.method,
         status=_UNHANDLED_STATUS,
-        # Correlation id echoed from the inbound header (the same value the logging layer
-        # echoes when the client supplies one); absent → None, never invented from PHI.
-        request_id=request.headers.get(REQUEST_ID_HEADER),
+        # Shared with the request log line: resolved by the logging middleware onto
+        # request.state (see _resolve_request_id); absent → None, never invented from PHI.
+        request_id=_resolve_request_id(request),
         timestamp=datetime.now(UTC).isoformat(),
         env=env,
     )

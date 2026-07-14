@@ -27,13 +27,45 @@ series:
 | `app_up` | gauge | — | process liveness (presence + value `1`) |
 | `db_connection_pool_in_use` | gauge | — | pool saturation (0 in in-memory mode) |
 | `app_ai_narrative_events_total` | counter | `event` | AI-disclosure volume by type (subject-free) |
-| `process_*`, `python_info` | collectors | — | cpu/memory/open-fds/start-time, runtime version |
+| `process_*`, `python_info` | collectors | — | cpu/memory/open-fds/start-time, runtime version (single-process only — see multiprocess note below) |
 
 `route` is always the matched **route template** (`/clinic/patients/{patient_id}/trajectory`),
 never the raw path — a raw path carries patient ids. An unmatched request is recorded under
 the `__unmatched__` sentinel. **Auth-denials and rate-limits are read off the `status`
 label** (401/403/429) — they need no separate PHI-bearing counter; the request counter is
 the single source of truth.
+
+### Multi-worker exposition (multiprocess mode) — read this before scraping
+
+The production image runs **several workers behind one port** (`WEB_CONCURRENCY`, default 2).
+A scrape reaches one worker at random, so a naive per-process registry would expose only that
+worker's series — as Prometheus round-robins the workers, counters appear to reset, and
+`rate()`/alerts are corrupted. The image fixes this with `prometheus_client` **multiprocess
+mode**:
+
+- The container sets **`PROMETHEUS_MULTIPROC_DIR`** (default `/tmp/prometheus-multiproc`).
+  Every worker writes its samples to that shared directory, and a `/metrics` scrape builds a
+  fresh registry with a `MultiProcessCollector` that **aggregates all workers' files** — so
+  counters/histograms sum and the gauges aggregate across workers, regardless of which worker
+  the scrape hits. Counters aggregate automatically; `db_connection_pool_in_use` uses
+  `multiprocess_mode="livesum"` (total in-use across all live workers' pools) and `app_up`
+  uses `"livemax"` (a single `app_up 1` while any worker lives).
+- **`process_*` / `python_info` are per-process** and cannot be aggregated, so they are
+  **absent from the aggregated scrape** — they render only in single-process/dev mode (var
+  unset). Use `app_up` and the request/latency series for multi-worker liveness and load; if
+  you need per-process CPU/RSS, scrape the container's node/cAdvisor exporter instead.
+- **Server = Gunicorn + Uvicorn workers.** The image runs `gunicorn app.main:app --config
+  gunicorn.conf.py` (Uvicorn `worker_class`) rather than bare `uvicorn --workers` for one
+  reason: Gunicorn's master-side `child_exit` hook calls `mark_process_dead(pid)` whenever a
+  worker exits — crash or graceful — so a dead worker's `live*` gauge files stop skewing the
+  aggregated sums. `uvicorn --workers` exposes no equivalent per-worker-death hook.
+- **Fresh start = clean dir.** The container entrypoint (`docker-entrypoint.sh`) wipes and
+  recreates `PROMETHEUS_MULTIPROC_DIR` on every start, so stale files from a previous boot
+  can never be summed into the new process's metrics.
+
+If you deploy with a **single worker** (or run bare `uvicorn` in dev), leave
+`PROMETHEUS_MULTIPROC_DIR` unset: `/metrics` renders the in-process registry (including the
+`process_*`/`python_info` collectors) with no extra setup.
 
 ### Wiring a scraper (Prometheus)
 
@@ -146,8 +178,16 @@ changes the client-facing response:
 
 The exception **message**, query string, body, headers, and every patient datum are
 **never** included. A reporter failure is swallowed (fail-safe) — it can never break a
-request. Correlate an event with the request logs via `request_id` (echoed from the inbound
-`X-Request-ID`).
+request.
+
+**Correlation always works, including for 500s.** The request-logging middleware resolves a
+`request_id` for **every** request up front — the inbound `X-Request-ID` if present, else a
+generated one — and stashes it on the request before the handler runs. So an unhandled
+exception produces **both** a request-log line (status 500, that id) **and** an error event
+carrying the **same** id: `request_id` joins the two even when the client sent no header.
+(Because the 500 is rendered by the framework's error handler, the `X-Request-ID` response
+header is only echoed on non-500 responses; the log line and error event remain the durable
+correlation point for a 500.)
 
 ```bash
 # Point the app at your self-hosted collector (config env var; never a committed value).

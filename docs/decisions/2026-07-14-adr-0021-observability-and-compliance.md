@@ -46,6 +46,35 @@ is **unauthenticated** like them, and renders `text/plain; version=0.0.4`.
   `status` label (401/403/429). The request counter is the single source of truth; a
   separate per-subject counter would only add leakage surface.
 
+**Multi-worker exposition (multiprocess mode).** The production image runs several workers
+behind one port (`WEB_CONCURRENCY`), so a scrape reaches one worker at random. A per-process
+`CollectorRegistry` would then expose only that worker's series, and as Prometheus
+round-robins the workers, counters would appear to reset — corrupting `rate()` and every
+alert built on it (adversarial-review finding). We therefore run the default image in
+`prometheus_client` **multiprocess mode**:
+
+- The container sets **`PROMETHEUS_MULTIPROC_DIR`**; every worker writes its samples to that
+  shared dir, and `/metrics` builds a fresh registry with a `MultiProcessCollector` that
+  **aggregates all workers' files** (`build_scrape_registry`). Counters/histograms sum
+  automatically; the gauges declare a `multiprocess_mode` — `livesum` for
+  `db_connection_pool_in_use` (total in-use across workers) and `livemax` for `app_up` (a
+  single liveness series that drops dead workers). `process_*`/`python_info` are per-process
+  and cannot be aggregated, so they render only in single-process/dev mode (var unset) — not
+  in the aggregated scrape.
+- **Server = Gunicorn + Uvicorn workers**, not bare `uvicorn --workers`. The reason is
+  worker-death cleanup: a dead worker's `live*` gauge files must be cleared or they keep
+  skewing the aggregated sums, and the reliable place to do that is Gunicorn's master-side
+  `child_exit` hook (`gunicorn.conf.py` → `metrics.mark_worker_dead` →
+  `multiprocess.mark_process_dead`), which fires however a worker exits. `uvicorn --workers`
+  exposes no equivalent per-worker-death hook, so it cannot keep multiprocess sums correct on
+  worker churn. Uvicorn's ASGI/HTTP stack is unchanged (it is the Gunicorn `worker_class`).
+- **Fresh-start hygiene.** The container entrypoint (`docker-entrypoint.sh`) wipes and
+  recreates `PROMETHEUS_MULTIPROC_DIR` on every start, so stale files from a previous boot
+  are never summed into the new process's metrics. Single-worker/dev deployments simply leave
+  the var unset and get the in-process registry as before. (New runtime dependency:
+  `gunicorn`, MIT; its one dep `packaging` is already resolved in the tree — both license
+  strings are already on the CI allowlist.)
+
 **Endpoint exposure posture.** `/metrics` is unauthenticated for scraper simplicity, exactly
 like the health probes. Because it is **PHI-free by construction**, its exposure is not a PHI
 risk regardless of where it is bound. In a K8s deployment it is scraped on the internal
@@ -79,6 +108,15 @@ never altered by any of these middleware.
   exception on its way to the normal 500 handler, forwards a scrubbed event, and **re-raises
   unchanged** — the client still gets the app's normal error, and only truly-unhandled
   exceptions (not `HTTPException`s already handled inside the router) are reported.
+- **Correlation on 500s (review finding).** A 500 previously emitted no request-log line and
+  no correlation id (the error event's `request_id` came only from the inbound header, `None`
+  in the common case), so an error-seam event could not be tied to any log line. Fixed in the
+  logging layer: `RequestLoggingMiddleware` (outermost) now **resolves a `request_id` up
+  front** — inbound `X-Request-ID` or a generated one — stashes it on `request.state`, and
+  **logs one line for every request including 500s** (wrapping the downstream call so an
+  unhandled exception still logs status 500 with the route template or `__unmatched__`
+  sentinel, then re-raises). `build_error_event` reads that same `request.state` id, so the
+  500 log line and the error event **share one id** whether or not the client sent a header.
 - **Fail-safe.** A reporter that raises, times out, or is misconfigured is swallowed (logged
   PHI-free) and can never break the request. The transport (`HttpErrorReporter`) POSTs the
   event as JSON over the **existing** `httpx` dependency with a short timeout.
@@ -104,7 +142,15 @@ aggregation are covered-entity infra).
 
 `scripts/pg_backup_drill.sh` performs a `pg_dump` → `pg_restore`-to-scratch roundtrip with a
 read-back check and safe teardown; it never writes to the source DB and refuses to clobber an
-existing scratch database. `docs/ops/backup-restore.md` is extended with the scripted drill,
+existing scratch database. **Credentials stay out of argv (review finding):** DB passwords
+were being passed inside DSNs on the `pg_dump`/`psql`/`pg_restore` (and parser) command lines,
+visible via `ps`/`/proc/<pid>/cmdline`. The script now parses the DSN env vars and hands the
+tools their credentials only through libpq's environment — a **0600 `.pgpass` (PGPASSFILE)**
+inside the throwaway workdir plus `PGHOST/PGPORT/PGUSER` — so only plain, non-secret database
+*names* ever appear as `--dbname` arguments; the password reaches no process's argv, and the
+`.pgpass` is torn down with the workdir on exit. The header comment was corrected to describe
+this accurately (it previously overstated safety). `docs/ops/backup-restore.md` is extended
+with the scripted drill,
 a full end-to-end (app + key) drill, and a manual-verification checklist. It **reinforces the
 `SECRET_STORE_KEY`-separate-from-DB trap** (ADR-0018 §6): the script proves the DB half and
 prints the manual key-pairing step it cannot automate. The drill was executed here against a
@@ -134,8 +180,13 @@ marked **[CE]**; the pack is explicitly **not legal advice or an attestation**.
   `/clinic/patients/<uuid>/trajectory` is asserted to produce a metric labelled with the
   **template**, and the uuid appears **nowhere** in `/metrics`; an exception whose message
   carries a fake patient id/email is asserted **absent** from the emitted error event.
-- **New dependency:** `prometheus-client` (Apache-2.0 AND BSD-2-Clause; no transitive deps).
-  CI license allowlist updated with that exact SPDX string; all other CI jobs unchanged.
+- **New dependencies:** `prometheus-client` (Apache-2.0 AND BSD-2-Clause; no transitive deps)
+  and `gunicorn` (MIT; one dep `packaging`, Apache-2.0 OR BSD-2-Clause, already in the tree) —
+  the production server that supervises the Uvicorn workers and provides the `child_exit`
+  worker-death hook for multiprocess metrics. CI license allowlist already carries every one
+  of these strings (`MIT`, `Apache-2.0 AND BSD-2-Clause`, `Apache-2.0 OR BSD-2-Clause`); the
+  new `backend/gunicorn.conf.py` and `backend/docker-entrypoint.sh` wire the multiprocess dir
+  and cleanup. All other CI jobs unchanged.
 - **New docs:** `docs/ops/observability.md`, `docs/compliance/{hipaa-ops-checklist,
   baa-inventory,incident-response-runbook}.md`; `scripts/pg_backup_drill.sh`; extensions to
   `docs/ops/backup-restore.md` and `docs/ops/deployment.md`.

@@ -10,9 +10,18 @@ measure traffic — and nothing that could carry PHI or a secret:
   path segment; the template cannot.
 - ``status`` — the response status code.
 - ``duration_ms`` — server-side latency.
-- ``request_id`` — from an inbound ``X-Request-ID`` or freshly generated, and echoed
-  back on the response so a client/proxy trace can be correlated.
+- ``request_id`` — from an inbound ``X-Request-ID`` or freshly generated. Resolved BEFORE
+  the downstream call and stashed on ``request.state.request_id`` so the error seam
+  (app/core/errors.py) reads the SAME id, then echoed back on the response so a
+  client/proxy trace correlates to both the log line and any error event.
 - ``env`` — ``settings.app_env``.
+
+**Every request is logged, including 500s.** The downstream call is wrapped so an unhandled
+exception (which becomes a 500 after the normal error handling renders it) still emits its
+one log line — status 500, the resolved request id, method, and route template (or the
+``__unmatched__`` sentinel when the exception fired before routing) — then re-raises
+unchanged. A 500 is therefore never a logging blind spot, and it shares a request id with
+its error event.
 
 Deliberately **never** logged: query strings, request/response bodies, headers
 (``Authorization``/cookies/tokens), path parameter *values*, or anything derived from
@@ -84,16 +93,33 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
+        # Resolve the request id up front and stash it on request.state BEFORE calling
+        # downstream, so the error seam reads the SAME id even on a 500 that never reaches
+        # the success branch below (errors.build_error_event reads request.state.request_id).
         request_id = request.headers.get(REQUEST_ID_HEADER) or uuid.uuid4().hex
+        request.state.request_id = request_id
         started = time.perf_counter()
-        response = await call_next(request)
-        duration_ms = round((time.perf_counter() - started) * 1000, 3)
+        try:
+            response = await call_next(request)
+        except Exception:
+            # Unhandled exception -> the app renders its normal 500. Emit THIS request's one
+            # log line (status 500) so a 500 is never a logging blind spot, then re-raise
+            # unchanged; the client-facing error response is untouched.
+            self._log(request, status=500, request_id=request_id, started=started)
+            raise
+        self._log(request, status=response.status_code, request_id=request_id, started=started)
+        response.headers[REQUEST_ID_HEADER] = request_id
+        return response
 
-        # After routing, Starlette parks the matched Route on the (shared) scope. Its
-        # `.path` is the template; absent means nothing matched -> withhold the raw path.
+    @staticmethod
+    def _log(request: Request, *, status: int, request_id: str, started: float) -> None:
+        """Emit the one PHI-free JSON line for this request (whitelist fields only)."""
+        duration_ms = round((time.perf_counter() - started) * 1000, 3)
+        # After routing, Starlette parks the matched Route on the (shared) scope. Its `.path`
+        # is the template; absent (a hard 500 before routing, or an unmatched path) means
+        # withhold the raw path -> the sentinel, never a segment that could carry PHI.
         route = request.scope.get("route")
         path_template = getattr(route, "path", None) or UNMATCHED_ROUTE
-
         _request_logger.info(
             "http_request",
             extra={
@@ -101,12 +127,10 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                     "event": "http_request",
                     "method": request.method,
                     "path": path_template,
-                    "status": response.status_code,
+                    "status": status,
                     "duration_ms": duration_ms,
                     "request_id": request_id,
                     "env": settings.app_env,
                 }
             },
         )
-        response.headers[REQUEST_ID_HEADER] = request_id
-        return response

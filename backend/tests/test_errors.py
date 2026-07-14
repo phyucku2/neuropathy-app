@@ -10,9 +10,11 @@ an event, double-reports, or lets a reporter error escape must break a test here
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import asdict
 
 import httpx
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -23,7 +25,11 @@ from app.core.errors import (
     ErrorReportingMiddleware,
     HttpErrorReporter,
 )
-from app.core.logging import REQUEST_ID_HEADER
+from app.core.logging import (
+    REQUEST_ID_HEADER,
+    REQUEST_LOGGER_NAME,
+    RequestLoggingMiddleware,
+)
 
 # A synthetic patient id + email planted INSIDE an exception message; the scrub must keep
 # both out of every emitted event.
@@ -119,6 +125,72 @@ def test_reporter_failure_is_swallowed() -> None:
     )
     resp = client.get(f"/kaboom/{LEAK_PATIENT_ID}")
     assert resp.status_code == 500  # request still completes with the normal error
+
+
+# --- correlation: the 500 log line and the error event share one request id -----------
+
+
+def _correlated_app(reporter: object) -> FastAPI:
+    """The production onion for the seam: RequestLoggingMiddleware OUTERMOST (resolves the
+    request id onto request.state, logs every request incl. 500s) wrapping
+    ErrorReportingMiddleware (reads that id for the scrubbed event). Last-added is outermost
+    in Starlette, so logging is added last."""
+    application = FastAPI()
+    application.add_middleware(ErrorReportingMiddleware, reporter_factory=reporter, env="test-env")
+    application.add_middleware(RequestLoggingMiddleware)
+
+    @application.get("/kaboom/{patient_id}")
+    async def kaboom(patient_id: str) -> dict[str, str]:
+        raise ValueError(f"boom for {patient_id} contact {LEAK_EMAIL}")
+
+    return application
+
+
+def _only_request_field(caplog: pytest.LogCaptureFixture) -> dict[str, object]:
+    records = [r for r in caplog.records if r.name == REQUEST_LOGGER_NAME]
+    assert len(records) == 1  # exactly one request-log line, even for a 500
+    return dict(records[0].fields)  # type: ignore[attr-defined]
+
+
+def test_500_log_line_and_error_event_share_a_generated_request_id(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A 500 with NO inbound X-Request-ID produces one request-log line carrying a GENERATED
+    id AND an error event carrying the SAME id — correlation works without a client header.
+    Both are PHI-free."""
+    caplog.set_level(logging.INFO, logger=REQUEST_LOGGER_NAME)
+    reporter = _RecordingReporter()
+    client = TestClient(_correlated_app(lambda: reporter), raise_server_exceptions=False)
+
+    resp = client.get(f"/kaboom/{LEAK_PATIENT_ID}")
+    assert resp.status_code == 500  # client-facing response unchanged
+
+    fields = _only_request_field(caplog)
+    assert fields["status"] == 500
+    assert fields["path"] == "/kaboom/{patient_id}"  # template, not the raw id
+    logged_id = fields["request_id"]
+    assert isinstance(logged_id, str) and len(logged_id) == 32  # generated uuid4 hex
+
+    assert len(reporter.events) == 1
+    assert reporter.events[0].request_id == logged_id  # SAME id -> event correlates to log
+
+    # PHI-free on both sides: the planted id/email/message body appear nowhere.
+    serialized = json.dumps(fields) + json.dumps(asdict(reporter.events[0]))
+    assert LEAK_PATIENT_ID not in serialized
+    assert LEAK_EMAIL not in serialized
+    assert "boom for" not in serialized
+
+
+def test_inbound_request_id_is_honored_end_to_end(caplog: pytest.LogCaptureFixture) -> None:
+    """An inbound X-Request-ID flows to BOTH the log line and the error event unchanged."""
+    caplog.set_level(logging.INFO, logger=REQUEST_LOGGER_NAME)
+    reporter = _RecordingReporter()
+    client = TestClient(_correlated_app(lambda: reporter), raise_server_exceptions=False)
+
+    client.get(f"/kaboom/{LEAK_PATIENT_ID}", headers={REQUEST_ID_HEADER: "trace-corr-1"})
+
+    assert _only_request_field(caplog)["request_id"] == "trace-corr-1"
+    assert reporter.events[0].request_id == "trace-corr-1"
 
 
 # --- HttpErrorReporter transport ------------------------------------------------------
