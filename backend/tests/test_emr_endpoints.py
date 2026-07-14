@@ -396,6 +396,47 @@ def test_clinician_cannot_use_patient_endpoints(client: TestClient) -> None:
     assert client.post("/emr/connect", json={"fhir_base": FHIR_BASE}).status_code == 403
 
 
+async def test_connect_flow_is_gated_by_the_emr_connect_toggle(client: TestClient) -> None:
+    """emr_connect gates ESTABLISHING/REFRESHING a connection (ADR-0020): with it off,
+    POST /emr/connect and GET /emr/callback answer 409 — the patient turning it off
+    prevents NEW connections. Revoke stays ungated (revocation must never be toggle-
+    blockable), and the pull is governed by ingest_labs, not emr_connect (the connect-
+    vs-pull split): so with emr_connect off but a connection already active, the pull
+    still works."""
+    from datetime import UTC, datetime
+
+    from app.api.deps import get_capability_service
+    from app.services.capability import CapabilityService
+
+    # Establish an active connection FIRST, while emr_connect is on (default).
+    connection_id, state = _connect(client)
+    assert client.get("/emr/callback", params={"state": state, "code": "c"}).status_code == 200
+
+    capability_service = CapabilityService()
+    assert USER_A.patient_id is not None
+    await capability_service.set_for_patient(
+        patient_id=USER_A.patient_id,
+        actor_id=USER_A.user_id,
+        key="emr_connect",
+        active=False,
+        now=datetime.now(UTC),
+    )
+    app.dependency_overrides[get_capability_service] = lambda: capability_service
+
+    # New connections are blocked at connect and at callback.
+    assert client.post("/emr/connect", json={"fhir_base": FHIR_BASE}).status_code == 409
+    assert client.get("/emr/callback", params={"state": "x", "code": "c"}).status_code == 409
+    # The connect-vs-pull split: ingest_labs governs the data write, so the existing
+    # connection can still be pulled while emr_connect is off.
+    assert client.post(f"/emr/connections/{connection_id}/pull").status_code == 200
+    # Revoke is NEVER toggle-blockable — the existing connection can still be dropped.
+    assert client.delete(f"/emr/connections/{connection_id}").status_code == 200
+
+    # Re-enabled: a new connection can be established again.
+    del app.dependency_overrides[get_capability_service]
+    assert client.post("/emr/connect", json={"fhir_base": FHIR_BASE}).status_code == 200
+
+
 async def test_pull_is_gated_by_the_ingest_labs_toggle(client: TestClient) -> None:
     """EMR pull writes lab Observations — the same data class as POST /labs — so
     ingest_labs=off refuses it too; an ungated pull would defeat a clinician's

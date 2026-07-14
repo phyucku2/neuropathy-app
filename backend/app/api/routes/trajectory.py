@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, BackgroundTasks
 
 from app.ai.narrative import NARRATIVE_CACHE, narrate_into_cache, narrative_cache_key
-from app.api.deps import EmrServiceDep, NarratorDep, PatientUserDep
+from app.api.deps import CapabilityServiceDep, EmrServiceDep, NarratorDep, PatientUserDep
 from app.core.config import settings
 from app.models.audit import AuditEvent
 from app.schemas.trajectory import Trajectory
@@ -30,6 +30,7 @@ async def get_trajectory(
     current: PatientUserDep,
     service: EmrServiceDep,
     narrator: NarratorDep,
+    capabilities: CapabilityServiceDep,
     background: BackgroundTasks,
 ) -> Trajectory:
     """The patient's own health trajectory: direction, confidence, sourced signals,
@@ -56,7 +57,17 @@ async def get_trajectory(
     # accepted narrative is served immediately; otherwise this response ships the
     # template summary and narration runs as a background task AFTER the response —
     # outside the request's DB transaction (ADR-0011 rev. 2, review findings).
-    if narrator is not None:
+    #
+    # ai_narrative toggle ANDs with the BAA gate (ADR-0020): BOTH must be satisfied to
+    # narrate. This is an in-handler branch, NOT a require_capability 409 gate — the
+    # endpoint always returns 200 with the deterministic summary. With the toggle off
+    # the request stays fully deterministic: no cached AI narrative is served, no
+    # narration is scheduled, and (since scheduling never happens) no ai_narrative
+    # disclosure is audited. The toggle read only runs when a narrator is configured,
+    # so the deterministic path costs nothing extra.
+    if narrator is not None and await capabilities.is_active(
+        current.patient_id, "ai_narrative", now=now
+    ):
         key = narrative_cache_key(trajectory, settings.ai_model)
         known, cached = NARRATIVE_CACHE.lookup(key)
         if cached is not None:

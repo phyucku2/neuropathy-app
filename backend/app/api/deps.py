@@ -46,6 +46,8 @@ from app.emr.service import (
 )
 from app.emr.transport import HttpxTransport
 from app.models.user import UserRole
+from app.repositories.capability import InMemoryCapabilityRepository
+from app.repositories.patient_capability import InMemoryPatientCapabilityRepository
 from app.repositories.postgres import (
     PostgresAuditEventRepository,
     PostgresCapabilityRepository,
@@ -277,15 +279,34 @@ EmrServiceDep = Annotated[EmrService, Depends(get_emr_service)]
 
 
 @lru_cache(maxsize=1)
+def _process_capability_repo() -> InMemoryCapabilityRepository:
+    """Process-wide capability registry store for in-memory mode — shared by the
+    clinic and capability services so the `share_with_clinic` consent gate (ADR-0020)
+    reads exactly the rows the toggle endpoints wrote."""
+    return InMemoryCapabilityRepository()
+
+
+@lru_cache(maxsize=1)
+def _process_patient_capability_repo() -> InMemoryPatientCapabilityRepository:
+    """Process-wide per-patient toggle store for in-memory mode — shared like the
+    registry above so clinician reads and patient toggle writes never drift."""
+    return InMemoryPatientCapabilityRepository()
+
+
+@lru_cache(maxsize=1)
 def _default_clinic_service() -> ClinicService:
     """Process-wide ClinicService for in-memory mode. Users, observations, and audit
     are the SAME stores auth and EMR use (deps singletons), so a clinician reads
-    exactly the data the patient's own endpoints wrote."""
+    exactly the data the patient's own endpoints wrote. The capability stores are the
+    SAME ones the capability service uses, so the share_with_clinic read gate tracks
+    the patient's live consent (ADR-0020)."""
     emr = _default_emr_service()
     return ClinicService(
         users=_default_auth_service().users,
         observations=emr.observations,
         audit=emr.audit,
+        capabilities=_process_capability_repo(),
+        patient_capabilities=_process_patient_capability_repo(),
     )
 
 
@@ -298,6 +319,10 @@ def get_clinic_service(session: DbSessionDep = None) -> ClinicService:
         users=PostgresUserRepository(session),
         observations=PostgresObservationRepository(session),
         audit=PostgresAuditEventRepository(session),
+        # Same session-bound rows the capability service writes — the share_with_clinic
+        # read gate and the toggle writes stay consistent within the request (ADR-0020).
+        capabilities=PostgresCapabilityRepository(session),
+        patient_capabilities=PostgresPatientCapabilityRepository(session),
     )
 
 
@@ -308,9 +333,16 @@ ClinicServiceDep = Annotated[ClinicService, Depends(get_clinic_service)]
 def _default_capability_service() -> CapabilityService:
     """Process-wide CapabilityService for in-memory mode. Connections and audit are
     the SAME stores the clinic service uses (deps singletons), so toggle authority
-    tracks exactly the consent state the connection endpoints wrote."""
+    tracks exactly the consent state the connection endpoints wrote; the capability
+    stores are likewise shared so the clinic service's share_with_clinic gate sees
+    every toggle write (ADR-0020)."""
     clinic = _default_clinic_service()
-    return CapabilityService(connections=clinic.connections, audit=clinic.audit)
+    return CapabilityService(
+        capabilities=_process_capability_repo(),
+        patient_capabilities=_process_patient_capability_repo(),
+        connections=clinic.connections,
+        audit=clinic.audit,
+    )
 
 
 def get_capability_service(session: DbSessionDep = None) -> CapabilityService:

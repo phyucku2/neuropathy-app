@@ -70,7 +70,17 @@ async def _owned_connection(
     return record
 
 
-@router.post("/connect", response_model=ConnectStartOut)
+# emr_connect gates ESTABLISHING/REFRESHING an EMR connection (ADR-0020): a patient
+# turning it off prevents NEW connections and completing a handshake. It deliberately
+# does NOT gate the pull (ingest_labs governs the data write) or revoke (revocation must
+# never be toggle-blockable) — the connect-vs-pull split keeps "stop connecting" and
+# "stop importing" as independent controls. Both connect and callback are gated because
+# the callback is the connection-establishing step of the same flow.
+@router.post(
+    "/connect",
+    response_model=ConnectStartOut,
+    dependencies=[Depends(require_capability("emr_connect"))],
+)
 async def start_connect(
     body: ConnectStartIn, service: ServiceDep, current: PatientUserDep
 ) -> ConnectStartOut:
@@ -100,7 +110,11 @@ async def start_connect(
     return ConnectStartOut(connection_id=record.id, authorize_url=url, state=state)
 
 
-@router.get("/callback", response_model=ConnectionOut)
+@router.get(
+    "/callback",
+    response_model=ConnectionOut,
+    dependencies=[Depends(require_capability("emr_connect"))],
+)
 async def oauth_callback(
     state: str, code: str, service: ServiceDep, current: PatientUserDep
 ) -> ConnectionOut:

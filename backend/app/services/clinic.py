@@ -4,10 +4,12 @@ Storage lives behind the injected repositories (in-memory defaults for unit test
 DB-less development; Postgres in deployment). Two invariants are enforced here, not
 in routes:
 
-- **Consent gates every clinician read.** `connection_for_clinician` answers only via
-  `may_transmit_to_clinic` (app/services/connection.py) — the single, unit-locked
-  predicate from ADR-0005. No consented connection, no data; callers translate the
-  None to a 404 so non-consented records are indistinguishable from nonexistent ones.
+- **Consent gates every clinician read.** `_may_read_patient` is the single predicate
+  behind the panel, the per-patient views, and the capability writes: it ANDs the
+  connection consent (`may_transmit_to_clinic`, ADR-0005) with the patient's
+  `share_with_clinic` toggle (`share_with_clinic_effective`, ADR-0020). Either off
+  means None/skip, and callers translate the None to a 404 so a non-consented, a
+  share-revoked, and a nonexistent record are all indistinguishable.
 - **Invitations never enumerate accounts.** `invite_patient` returns nothing either
   way; a matching patient email creates a pending connection, a non-matching one only
   writes an audit event. The HTTP response is identical in both cases.
@@ -33,6 +35,7 @@ from app.models.clinic import Clinic
 from app.models.connection import ClinicConnection, ConnectionStatus, Initiator
 from app.models.user import UserRole
 from app.repositories.audit import AuditEventRepository, InMemoryAuditEventRepository
+from app.repositories.capability import CapabilityRepository, InMemoryCapabilityRepository
 from app.repositories.clinic import ClinicRepository, InMemoryClinicRepository
 from app.repositories.clinic_connection import (
     ClinicConnectionRepository,
@@ -40,7 +43,12 @@ from app.repositories.clinic_connection import (
     InMemoryClinicConnectionRepository,
 )
 from app.repositories.observation import InMemoryObservationRepository, ObservationRepository
+from app.repositories.patient_capability import (
+    InMemoryPatientCapabilityRepository,
+    PatientCapabilityRepository,
+)
 from app.repositories.user import InMemoryUserRepository, UserRecord, UserRepository
+from app.services.capability import share_with_clinic_effective
 from app.services.connection import may_transmit_to_clinic
 from app.services.rate_limit import RateLimitExceededError, SlidingWindowRateLimiter
 
@@ -101,6 +109,25 @@ class ClinicService:
     users: UserRepository = field(default_factory=InMemoryUserRepository)
     observations: ObservationRepository = field(default_factory=InMemoryObservationRepository)
     audit: AuditEventRepository = field(default_factory=InMemoryAuditEventRepository)
+    # The patient-held share_with_clinic consent gate reads these (ADR-0020). Shared
+    # with the CapabilityService in both storage modes (deps), so a patient turning
+    # share off is seen instantly by every clinician read — the two never drift.
+    capabilities: CapabilityRepository = field(default_factory=InMemoryCapabilityRepository)
+    patient_capabilities: PatientCapabilityRepository = field(
+        default_factory=InMemoryPatientCapabilityRepository
+    )
+
+    async def _may_read_patient(self, connection: ClinicConnection, *, now: datetime) -> bool:
+        """THE clinician-read predicate (ADR-0020): a clinic may read a patient's data
+        only when BOTH the connection consent (`may_transmit_to_clinic`) AND the
+        patient's `share_with_clinic` toggle are satisfied. One predicate feeds the
+        panel, the per-patient views, and the capability writes, so they can never
+        diverge — turning share off drops the patient from every clinician surface at
+        once. Consent is checked first (cheap, DB-free); the toggle read only runs when
+        it passes."""
+        return may_transmit_to_clinic(connection) and await share_with_clinic_effective(
+            self.capabilities, self.patient_capabilities, connection.patient_id, now=now
+        )
 
     async def create_clinic(self, *, name: str) -> Clinic:
         return await self.clinics.add(Clinic(name=name))
@@ -256,10 +283,13 @@ class ClinicService:
 
     async def panel(self, *, clinic_id: uuid.UUID) -> list[PanelEntry]:
         """The clinic's panel: ONLY patients on active, consented, non-revoked
-        connections — judged by `may_transmit_to_clinic`, never re-derived here."""
+        connections whose `share_with_clinic` consent is also on — judged by the one
+        `_may_read_patient` predicate, never re-derived here. A patient turning share
+        off drops off every clinician's panel (ADR-0020)."""
+        now = datetime.now(UTC)
         entries: list[PanelEntry] = []
         for connection in await self.connections.list_active_for_clinic(clinic_id):
-            if not may_transmit_to_clinic(connection):
+            if not await self._may_read_patient(connection, now=now):
                 continue
             user = await self.users.get_by_patient_id(connection.patient_id)
             if user is not None:
@@ -271,8 +301,13 @@ class ClinicService:
     ) -> ClinicConnection | None:
         """THE access gate for /clinic/patients/{id}/*: the consented connection that
         permits this clinic to read this patient, or None (routes answer 404 — a
-        non-consented record must be indistinguishable from a nonexistent one)."""
+        non-consented record must be indistinguishable from a nonexistent one). Now
+        ALSO gated by the patient's `share_with_clinic` consent (ADR-0020): share off
+        => None => a neutral 404, the same existence-privacy answer as cross-clinic."""
+        now = datetime.now(UTC)
         for connection in await self.connections.list_for_patient(patient_id):
-            if connection.clinic_id == clinic_id and may_transmit_to_clinic(connection):
+            if connection.clinic_id == clinic_id and await self._may_read_patient(
+                connection, now=now
+            ):
                 return connection
         return None

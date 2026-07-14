@@ -17,12 +17,19 @@ from app.models.capability import Actor, Capability, PatientCapability
 from app.models.connection import ClinicConnection, ConnectionStatus, Initiator
 from app.repositories.capability import DuplicateCapabilityKeyError, InMemoryCapabilityRepository
 from app.repositories.patient_capability import InMemoryPatientCapabilityRepository
+from app.services import capability as capability_module
 from app.services.capability import (
     CAPABILITIES,
+    SHARE_WITH_CLINIC_KEY,
+    CapabilityNotEnforcedError,
     CapabilityService,
+    CapabilitySpec,
     CapabilityUnavailableError,
+    PatientHeldCapabilityError,
     UnknownCapabilityError,
     is_effectively_active,
+    managed_by_for,
+    share_with_clinic_effective,
 )
 
 FIXED_NOW = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
@@ -242,6 +249,111 @@ async def test_clinician_set_respects_the_kill_switch() -> None:
             actor_id=uuid.uuid4(),
             key="ingest_adl",
             active=True,
+            expires_at=None,
+            now=FIXED_NOW,
+        )
+
+
+# ------------------------------------------------------ ADR-0020: enforced + carve-outs
+
+
+def test_every_shipped_key_is_enforced() -> None:
+    """After ADR-0020 wired the last three consumers, no shipped key is un-wired."""
+    assert all(spec.enforced for spec in CAPABILITIES)
+
+
+def test_managed_by_carves_out_share_with_clinic() -> None:
+    """The patient-held consent control always reads 'patient' (ADR-0020); every other
+    key follows the connection."""
+    assert managed_by_for("ingest_adl", clinically_managed=True) == "clinic"
+    assert managed_by_for("ingest_adl", clinically_managed=False) == "patient"
+    assert managed_by_for(SHARE_WITH_CLINIC_KEY, clinically_managed=True) == "patient"
+    assert managed_by_for(SHARE_WITH_CLINIC_KEY, clinically_managed=False) == "patient"
+
+
+async def test_share_with_clinic_effective_defaults_on_then_follows_the_row() -> None:
+    """The clinician-read gate's toggle half (ADR-0020): default-on with no registry
+    row (back-compat), then tracks the stored state once the patient sets it."""
+    caps = InMemoryCapabilityRepository()
+    patient_caps = InMemoryPatientCapabilityRepository()
+    patient_id = uuid.uuid4()
+    # No registry row yet -> the default (sharing on), so consented flows keep working.
+    assert await share_with_clinic_effective(caps, patient_caps, patient_id, now=FIXED_NOW) is True
+    capability = await caps.add(Capability(key=SHARE_WITH_CLINIC_KEY, name="Share"))
+    await patient_caps.upsert(
+        patient_id=patient_id,
+        capability_id=capability.id,
+        active=False,
+        set_by=Actor.patient,
+        expires_at=None,
+    )
+    assert await share_with_clinic_effective(caps, patient_caps, patient_id, now=FIXED_NOW) is False
+
+
+async def test_managed_patient_may_set_share_with_clinic_but_not_other_keys() -> None:
+    """The service-level carve-out (ADR-0020): while clinically managed the patient's
+    own write to any key 409s — EXCEPT share_with_clinic, their consent control."""
+    service = CapabilityService()
+    patient_id = uuid.uuid4()
+    await service.connections.add(_consented_connection(patient_id))  # makes them managed
+    from app.services.capability import ClinicallyManagedError
+
+    with pytest.raises(ClinicallyManagedError):
+        await service.set_for_patient(
+            patient_id=patient_id,
+            actor_id=uuid.uuid4(),
+            key="ingest_adl",
+            active=False,
+            now=FIXED_NOW,
+        )
+    state = await service.set_for_patient(
+        patient_id=patient_id,
+        actor_id=uuid.uuid4(),
+        key=SHARE_WITH_CLINIC_KEY,
+        active=False,
+        now=FIXED_NOW,
+    )
+    assert state.active is False
+    assert state.managed_by == "patient"
+
+
+async def test_clinician_cannot_set_the_patient_held_share_control() -> None:
+    """A clinic can never set share_with_clinic — it is patient-held (ADR-0020)."""
+    service = CapabilityService()
+    with pytest.raises(PatientHeldCapabilityError):
+        await service.set_for_clinician(
+            connection=_consented_connection(uuid.uuid4()),
+            actor_id=uuid.uuid4(),
+            key=SHARE_WITH_CLINIC_KEY,
+            active=False,
+            expires_at=None,
+            now=FIXED_NOW,
+        )
+
+
+async def test_unwired_future_key_refuses_writes_for_both_actors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The `enforced` guard still protects a FUTURE key introduced un-wired (ADR-0013):
+    a stored 'off' the feature would ignore is a false promise, so both the patient and
+    clinician write paths refuse it (409 'not changeable yet')."""
+    synthetic = CapabilitySpec(key="future_unwired", name="Future", default=True, enforced=False)
+    monkeypatch.setitem(capability_module._SPEC_BY_KEY, "future_unwired", synthetic)
+    service = CapabilityService()
+    with pytest.raises(CapabilityNotEnforcedError):
+        await service.set_for_patient(
+            patient_id=uuid.uuid4(),
+            actor_id=uuid.uuid4(),
+            key="future_unwired",
+            active=False,
+            now=FIXED_NOW,
+        )
+    with pytest.raises(CapabilityNotEnforcedError):
+        await service.set_for_clinician(
+            connection=_consented_connection(uuid.uuid4()),
+            actor_id=uuid.uuid4(),
+            key="future_unwired",
+            active=False,
             expires_at=None,
             now=FIXED_NOW,
         )
