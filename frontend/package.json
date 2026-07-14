@@ -20,6 +20,8 @@
     "cap:open:android": "cap open android"
   },
   "dependencies": {
+    "@aparajita/capacitor-biometric-auth": "~9.0.0",
+    "@aparajita/capacitor-secure-storage": "^6.0.1",
     "@capacitor/core": "^6.2.1",
     "@fontsource/inter": "^5.1.0",
     "@fontsource/poppins": "^5.1.0",
