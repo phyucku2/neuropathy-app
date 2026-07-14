@@ -7,7 +7,7 @@
 ## Context
 
 Wave 2 made the Android app real (installable, secure tokens, native shell). The owner decided
-to publish under **their LLC's Play Console organization account** (they own the IP; BioMech is
+to publish under **their organization's Play Console account (Advanced Health and Wellness Group)** (they own the IP; BioMech is
 licensee). This portion prepares everything account-independent for a Play release, without
 collecting any credential.
 

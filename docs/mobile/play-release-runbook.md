@@ -1,7 +1,7 @@
 # Google Play release runbook (Android)
 
 Operator guide for taking the Android app from a green build to the Play Store. Written for
-the app owner (the LLC's Play Console organization account). The repo never contains a
+the app owner (the **Advanced Health and Wellness Group** Play Console organization account). The repo never contains a
 keystore, password, or Play credential — every secret lives on your machine, in Play Console,
 or in GitHub Actions secrets. (ADR-0026; app id `com.biomech.neuropathy` — **permanent after
 the first upload**, confirm before Step 4.)
@@ -9,7 +9,7 @@ the first upload**, confirm before Step 4.)
 ## 0. One-time: Play Console organization account
 
 1. Create the account at <https://play.google.com/console/signup> → **Organization** →
-   your LLC. You will need: the LLC's **D-U-N-S number**, legal name/address, a website,
+   **Advanced Health and Wellness Group**. You will need: the organization's **D-U-N-S number**, legal name/address, a website,
    and a support email. $25 one-time fee. Identity + DUNS verification can take days —
    start it early.
 2. In **Users & permissions**, add any additional admins.

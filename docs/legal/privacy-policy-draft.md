@@ -6,7 +6,7 @@
 > `[…]` items are placeholders the owner fills in. Statements about practices that are not
 > yet live (e.g. the AI narrative vendor) must be re-verified at publication time.
 
-**[Your LLC]** ("we") operates the Neuropathy app (the "App"). This policy describes what
+**Advanced Health and Wellness Group** ("we") operates the Neuropathy app (the "App"). This policy describes what
 the App collects and how it is handled.
 
 ## What we collect
@@ -56,5 +56,5 @@ disease, and it is not a substitute for professional medical advice.
 - Data retention schedule
 - Breach notification commitments (align with docs/compliance/incident-response-runbook.md)
 - Children's privacy statement (the App is not directed at children under 18)
-- Contact details: **[Your LLC, address, support email]**
+- Contact details: **Advanced Health and Wellness Group, [address], [support email]**
 - Effective date and change-notification policy
