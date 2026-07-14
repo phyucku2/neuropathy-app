@@ -20,10 +20,10 @@ import type { Scenario } from './mock-api';
 /**
  * Console-error allowlist — narrow and documented.
  *
- * The ONLY allowed pattern is the browser's own automatic "Failed to load resource"
- * network log. Chromium emits this for EVERY HTTP response with a 4xx/5xx status,
- * regardless of whether the app handles it. In this app those statuses are all
- * DESIGNED, handled paths, not defects:
+ * The ONLY allowed lines are the browser's own automatic "Failed to load resource"
+ * network log for the SPECIFIC statuses this app issues by design — and no others.
+ * Chromium emits that line for EVERY 4xx/5xx response, so the allowlist is pinned to
+ * the exact designed status codes; anything else (notably a 500) still fails the gate:
  *   - 401 on the restore GET /auth/me — the access token is memory-only (ADR-0015),
  *     so a restored session always does exactly one 401 → refresh → retry.
  *   - 409 on PUT /capabilities and POST /adl — optimistic-rollback + feature-off
@@ -33,16 +33,22 @@ import type { Scenario } from './mock-api';
  *   - 422 on clinic capability writes — the expiry-without-enable validation message.
  * These are the API contract working as specified; the app renders the correct
  * outcome, which the positive assertions in each spec verify. A GENUINE app fault
- * (uncaught exception, failed module load, React render error, or any app-origin
- * console.error) is NOT a "Failed to load resource" line — it arrives as a
- * `pageerror` or a different `console.error` and still FAILS the gate. `/favicon.ico`
- * is fulfilled 204 by the mock, so it never appears here at all.
+ * (uncaught exception, failed module load, React render error, an app-origin
+ * console.error, or a 500 — including the mock's own "Unmocked path" 500) is NOT one
+ * of these lines: it arrives as a `pageerror`, a different `console.error`, or a
+ * non-allowlisted status and still FAILS the gate. `/favicon.ico` is fulfilled 204 by
+ * the mock, so it never appears here at all.
  */
 const ALLOWED_CONSOLE_PATTERNS: RegExp[] = [
-  /Failed to load resource: the server responded with a status of \d+/,
+  /Failed to load resource: the server responded with a status of (401|404|409|422)\b/,
 ];
 
-function isAllowed(message: string): boolean {
+/**
+ * True only for the documented, designed-and-handled network-status noise above.
+ * Exported so the self-check spec (support/self-check.spec.ts) can prove the gate
+ * both catches real faults and does not false-positive on the allowed statuses.
+ */
+export function isAllowed(message: string): boolean {
   return ALLOWED_CONSOLE_PATTERNS.some((pattern) => pattern.test(message));
 }
 

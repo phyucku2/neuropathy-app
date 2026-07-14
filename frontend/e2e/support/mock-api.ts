@@ -342,10 +342,17 @@ export async function installApiMocks(page: Page, scenario: Scenario = {}): Prom
           stairs: number;
           balance_confidence: number;
         };
-        if (scenario.adl?.status !== undefined) {
-          return fulfillJson(route, scenario.adl.status, scenario.adl.body ?? FEATURE_OFF_409);
+        // An error status (feature-off 409, etc.) returns the raw override body —
+        // that IS the real error shape. A success status instead MERGES the override
+        // onto the full AdlCheckInOut default, so a { status: 200, body: { superseded:
+        // true } } scenario flips one field without dropping the required check_in_date
+        // / daily_score — a partial 200 body would be a fiction the real API (Pydantic
+        // AdlCheckInOut, all fields required) could never return.
+        const adlStatus = scenario.adl?.status ?? 200;
+        if (adlStatus >= 400) {
+          return fulfillJson(route, adlStatus, scenario.adl?.body ?? FEATURE_OFF_409);
         }
-        return fulfillJson(route, 200, {
+        return fulfillJson(route, adlStatus, {
           check_in_date: '2026-07-13',
           daily_score: body.walking + body.stairs + body.balance_confidence,
           superseded: false,

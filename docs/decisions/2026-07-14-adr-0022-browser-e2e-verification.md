@@ -63,13 +63,19 @@ suite exists.
   restore `GET /auth/me` (the access token is memory-only, ADR-0015, so a restored session
   always does one 401 → refresh → retry), the 409 optimistic-rollback / feature-off
   handling (ADR-0013), the neutral 404-over-403 screen (ADR-0012), and the 422
-  expiry-without-enable validation. Each spec's positive assertions verify the app rendered
+  expiry-without-enable validation. The allowlist is pinned to **exactly those status
+  codes (401/404/409/422)** — a `500` (including the mock's own "Unmocked path" 500) or any
+  other status still fails the gate. Each spec's positive assertions verify the app rendered
   the correct outcome for these. A GENUINE fault (uncaught exception, failed module load,
-  React render error, or any app-origin `console.error`) is not a "Failed to load resource"
-  line — it arrives as a `pageerror` or a different `console.error` and still fails the
-  gate. `/favicon.ico` is fulfilled `204` by the mock so it never appears at all.
+  React render error, or any app-origin `console.error`) is not an allowlisted line — it
+  arrives as a `pageerror`, a different `console.error`, or a non-designed status and still
+  fails the gate. `/favicon.ico` is fulfilled `204` by the mock so it never appears at all.
+  A **self-check spec** (`e2e/support/self-check.spec.ts`) proves the gate in both
+  directions: `isAllowed` classifies the designed statuses as benign and a 500/403/pageerror
+  as a fault, and a real thrown error is shown to actually surface on the streams the gate
+  listens to — so a regression that weakened the gate would itself be caught.
 
-### 3. Coverage — 27 specs across both areas
+### 3. Coverage — 29 specs across both areas
 
 - **Patient:** register/login/invalid-login; Home hero (improving/declining/insufficient
   variants + the sourced-signal "not enough data" state); Trends chart (axis/units summary,
