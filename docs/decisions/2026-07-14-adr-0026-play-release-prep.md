@@ -19,7 +19,7 @@ collecting any credential.
    so the CI compile-proof job and fresh clones are unaffected. Play App Signing escrows the
    real app-signing key (upload-key loss is recoverable). `versionName` tracks `package.json`
    (0.1.0); `versionCode` bumps on every Play upload.
-2. **A manual `release-android.yml` workflow** (workflow_dispatch, SHA-pinned actions) builds
+2. **A manual `release-android.yml` workflow** (workflow_dispatch; third-party actions SHA-pinned, GitHub-first-party actions tag-pinned — the same posture as ci.yml) builds
    the web bundle → `cap sync` → `bundleRelease` (AAB — Play requires bundles, not APKs).
    Signing secrets (`ANDROID_KEYSTORE_BASE64` + passwords/alias) are optional: present →
    signed AAB artifact; absent → unsigned smoke AAB. Keystore material is written to the
