@@ -56,8 +56,11 @@ submission.**
 
 **Required pre-store portion (new, from ADR-0026):** patient-facing **account & data deletion flow** (in-app + API) — a hard Google Play requirement for apps collecting user data, and good HIPAA hygiene regardless. Not yet scheduled into a wave.
 
-**Wave 3 — EMR registrations**: Epic/Cerner sandbox enrollment (runbook + provider
-config surface), then production enrollment. **Includes the patient EMR-connect UI + the
+**Wave 3 — EMR registrations**: Epic/Cerner sandbox enrollment — operator runbook at
+[`docs/emr/sandbox-registration-runbook.md`](emr/sandbox-registration-runbook.md)
+(signup → app registration → redirect URIs → smoke test; also surfaces the code
+changes needed: per-provider client ids, browser-reachable callback, scope alignment) —
+plus the provider config surface, then production enrollment. **Includes the patient EMR-connect UI + the
 native SMART OAuth-callback handler deferred from Wave 2 Portion 3** (custom app scheme +
 `@capacitor/app` `appUrlOpen` + in-app browser), so the connect flow and its native handler
 ship and verify together against a registered sandbox.
