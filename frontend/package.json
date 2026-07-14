@@ -22,7 +22,10 @@
   "dependencies": {
     "@aparajita/capacitor-biometric-auth": "~9.0.0",
     "@aparajita/capacitor-secure-storage": "^6.0.1",
+    "@capacitor/app": "^6.0.3",
     "@capacitor/core": "^6.2.1",
+    "@capacitor/splash-screen": "^6.0.4",
+    "@capacitor/status-bar": "^6.0.3",
     "@fontsource/inter": "^5.1.0",
     "@fontsource/poppins": "^5.1.0",
     "react": "^18.3.1",

@@ -2,7 +2,9 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- viewport-fit=cover lets the app draw under the notch / status bar / home indicator
+         on native; the app then pads content back with env(safe-area-inset-*) (ADR-0025). -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="referrer" content="no-referrer" />
     <title>Neuropathy</title>
     <!-- Deploy-time runtime config (ADR-0018): sets window.__APP_CONFIG__ before the

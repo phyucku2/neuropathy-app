@@ -26,6 +26,13 @@ const config: CapacitorConfig = {
     // app only talks to the API over TLS (runtime /config.js supplies the base URL).
     allowMixedContent: false,
   },
+  plugins: {
+    // The app hides the splash itself once React has mounted (useNativeShell), so the user
+    // never sees a white flash between the native splash and the first paint (ADR-0025).
+    SplashScreen: {
+      launchAutoHide: false,
+    },
+  },
 };
 
 export default config;
