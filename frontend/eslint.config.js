@@ -7,7 +7,9 @@ import tseslint from 'typescript-eslint';
 export default tseslint.config(
   // `public/` holds static assets served verbatim (e.g. the runtime config.js shim,
   // ADR-0018), not part of the TypeScript program — excluded from linting.
-  { ignores: ['dist', 'coverage', 'node_modules', 'public'] },
+  {
+    ignores: ['dist', 'coverage', 'node_modules', 'public', 'playwright-report', 'test-results'],
+  },
   js.configs.recommended,
   ...tseslint.configs.strict,
   jsxA11y.flatConfigs.recommended,

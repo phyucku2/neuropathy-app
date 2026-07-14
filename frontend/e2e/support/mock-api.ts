@@ -1,0 +1,546 @@
+/**
+ * In-browser API mocks for the E2E suite.
+ *
+ * The built SPA talks to the API over `fetch`; there is no live backend here, so
+ * every API call is intercepted with Playwright's `page.route` and fulfilled from
+ * fixtures that MIRROR `src/test/fixtures.ts` + `src/test/server.ts` (the msw
+ * contract the unit suite already trusts). Keeping the shapes identical means the
+ * browser exercises the SAME response bodies the real API would return, so a render
+ * that passes here would pass against the backend.
+ *
+ * Synthetic data ONLY (CLAUDE.md §5). Credential-shaped values are uppercase
+ * SYNTHETIC_ constants, never real secrets (docs/lessons.md).
+ */
+
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import type { Page, Route } from '@playwright/test';
+import type {
+  CapabilityStateOut,
+  ConnectionOut,
+  MeOut,
+  ObservationItem,
+  PanelOut,
+  Trajectory,
+} from '../../src/api/types';
+
+// ---- synthetic credentials + tokens (mirror src/test/fixtures.ts) ----
+
+export const SYNTHETIC_EMAIL = 'pat.example@example.com';
+export const SYNTHETIC_PASSWORD = 'synthetic-test-passphrase';
+const SYNTHETIC_ACCESS_TOKEN = 'synthetic-access-token';
+const SYNTHETIC_REFRESHED_ACCESS_TOKEN = 'synthetic-access-token-2';
+export const SYNTHETIC_REFRESH_TOKEN = 'synthetic-refresh-token';
+
+/** sessionStorage key the token store uses (src/auth/tokenStore.ts). */
+export const REFRESH_TOKEN_KEY = 'neuropathy.refresh_token';
+
+function isAuthorized(route: Route): boolean {
+  const header = route.request().headers()['authorization'];
+  return (
+    header === `Bearer ${SYNTHETIC_ACCESS_TOKEN}` ||
+    header === `Bearer ${SYNTHETIC_REFRESHED_ACCESS_TOKEN}`
+  );
+}
+
+// ---- patient fixtures ----
+
+export const ME: MeOut = {
+  user_id: '11111111-1111-4111-8111-111111111111',
+  email: SYNTHETIC_EMAIL,
+  display_name: 'Pat Example',
+  role: 'patient',
+  patient_id: '22222222-2222-4222-8222-222222222222',
+};
+
+export const CLINICIAN_ME: MeOut = {
+  user_id: '99999999-9999-4999-8999-999999999999',
+  email: 'dr.rivera@example.com',
+  display_name: 'Dr. Rivera',
+  role: 'clinician',
+  patient_id: null,
+};
+
+export const TRAJECTORY_IMPROVING: Trajectory = {
+  direction: 'improving',
+  confidence: 0.72,
+  summary: 'Balance and daily function are up. One lab is worth a look.',
+  signals: [
+    {
+      code: 'biomech_balance_score',
+      source: 'biomech',
+      direction: 'improving',
+      detail: 'balance up 8 over 30 days',
+    },
+    {
+      code: 'adl_daily_score',
+      source: 'adl',
+      direction: 'stable',
+      detail: 'daily function steady this month',
+    },
+    {
+      code: '4548-4',
+      source: 'lab',
+      direction: 'declining',
+      detail: 'long-term blood sugar slightly up',
+    },
+  ],
+  data_gaps: ['No lab results in the last 90 days'],
+  narrative_source: 'deterministic',
+};
+
+export const TRAJECTORY_DECLINING: Trajectory = {
+  direction: 'declining',
+  confidence: 0.55,
+  summary: 'Balance has slipped this month. Worth a closer look with your care team.',
+  signals: [
+    {
+      code: 'biomech_balance_score',
+      source: 'biomech',
+      direction: 'declining',
+      detail: 'balance down 6 over 30 days',
+    },
+    {
+      // An insufficient_data signal MUST render the "not enough data" state,
+      // never a fabricated "stable" (ADR-0015 signal honesty).
+      code: 'adl_daily_score',
+      source: 'adl',
+      direction: 'insufficient_data',
+      detail: 'not enough check-ins yet to judge',
+    },
+  ],
+  data_gaps: ['Fewer than 3 check-ins this month'],
+  narrative_source: 'deterministic',
+};
+
+export const TRAJECTORY_INSUFFICIENT: Trajectory = {
+  direction: 'insufficient_data',
+  confidence: 0.1,
+  summary: 'There is not enough data yet to judge a trend.',
+  signals: [],
+  data_gaps: ['No BioMech reports yet', 'No daily check-ins yet'],
+  narrative_source: 'deterministic',
+};
+
+/** Default observations (mirror src/test/fixtures.ts): balance (3 numeric points,
+ *  higher-is-better) drives a "better" delta; HbA1c has a single reading, so
+ *  selecting it shows the <2-point empty state. */
+export const OBSERVATIONS: ObservationItem[] = [
+  obs('biomech_balance_score', 'Balance score', 65, '{score}', '2026-07-02T10:00:00Z', 'biomech'),
+  obs('biomech_balance_score', 'Balance score', 64, '{score}', '2026-06-04T10:00:00Z', 'biomech'),
+  obs('biomech_balance_score', 'Balance score', 57, '{score}', '2026-05-06T10:00:00Z', 'biomech'),
+  obs('biomech_sway_velocity', 'Sway velocity', 11.4, 'mm/s', '2026-07-02T10:00:00Z', 'biomech'),
+  obs('biomech_sway_velocity', 'Sway velocity', 12.9, 'mm/s', '2026-06-04T10:00:00Z', 'biomech'),
+  obs('4548-4', 'Hemoglobin A1c', 7.2, '%', '2026-06-20T09:00:00Z', 'lab'),
+];
+
+/** Trends showcase: exercises "better", "worse", "unit changed", and the
+ *  single-reading empty state in one payload. */
+export const OBSERVATIONS_TRENDS: ObservationItem[] = [
+  // higher-is-better, rising → "better"
+  obs('biomech_balance_score', 'Balance score', 60, '{score}', '2026-05-01T10:00:00Z', 'biomech'),
+  obs('biomech_balance_score', 'Balance score', 68, '{score}', '2026-06-01T10:00:00Z', 'biomech'),
+  // lower-is-better, rising → "worse"
+  obs('biomech_sway_velocity', 'Sway velocity', 9, 'mm/s', '2026-05-02T10:00:00Z', 'biomech'),
+  obs('biomech_sway_velocity', 'Sway velocity', 13, 'mm/s', '2026-06-02T10:00:00Z', 'biomech'),
+  // two readings with DIFFERENT unit strings → "unit changed", no delta
+  obs('hba1c', 'Hemoglobin A1c', 7, '%', '2026-05-03T09:00:00Z', 'lab'),
+  obs('hba1c', 'Hemoglobin A1c', 53, 'mmol/mol', '2026-06-03T09:00:00Z', 'lab'),
+  // single reading → chart empty state ("not enough readings")
+  obs('biomech_gait_speed', 'Gait speed', 1.1, 'm/s', '2026-06-04T10:00:00Z', 'biomech'),
+];
+
+export const CAPABILITIES: CapabilityStateOut[] = [
+  cap('ingest_biomech', 'BioMech report upload', true, 'patient', true),
+  cap('ingest_labs', 'Lab result upload', true, 'patient', true),
+  cap('ingest_adl', 'Daily function check-in', false, 'patient', true),
+  cap('emr_connect', 'Medical record connection', true, 'patient', true),
+];
+
+/** Adds one enforced=false ("coming soon") row to prove the read-only rendering. */
+export const CAPABILITIES_WITH_UNWIRED: CapabilityStateOut[] = [
+  ...CAPABILITIES,
+  cap('future_source', 'Wearable step count', false, 'patient', false),
+];
+
+export const CONNECTION_PENDING: ConnectionOut = {
+  id: '33333333-3333-4333-8333-333333333333',
+  clinic_id: '44444444-4444-4444-8444-444444444444',
+  clinic_name: 'Advanced Health & Wellness',
+  status: 'pending',
+  initiated_by: 'clinic',
+  consent_granted_at: null,
+  revoked_at: null,
+};
+
+export const CONNECTION_ACTIVE: ConnectionOut = {
+  ...CONNECTION_PENDING,
+  id: '55555555-5555-4555-8555-555555555555',
+  clinic_name: 'Regional Medical Center',
+  status: 'active',
+  consent_granted_at: '2026-06-01T12:00:00Z',
+};
+
+// ---- clinician fixtures ----
+
+export const PANEL_PATIENT_ID = '22222222-2222-4222-8222-222222222222';
+
+export const PANEL: PanelOut = {
+  patients: [
+    {
+      patient_id: PANEL_PATIENT_ID,
+      display_name: 'Pat Example',
+      connection_id: '55555555-5555-4555-8555-555555555555',
+      consent_granted_at: '2026-06-01T12:00:00Z',
+    },
+    {
+      patient_id: '77777777-7777-4777-8777-777777777777',
+      display_name: 'Jordan Marsh',
+      connection_id: '88888888-8888-4888-8888-888888888888',
+      consent_granted_at: '2026-05-20T09:00:00Z',
+    },
+  ],
+};
+
+export const PANEL_EMPTY: PanelOut = { patients: [] };
+
+export const CLINIC_CAPABILITIES: CapabilityStateOut[] = [
+  cap('ingest_biomech', 'BioMech report upload', true, 'clinic', true, '2026-08-06T23:59:59Z'),
+  cap('ingest_labs', 'Lab result upload', true, 'clinic', true),
+  cap('ingest_adl', 'Daily function check-in', false, 'clinic', true),
+  cap('ai_narrative', 'AI trajectory summary', true, 'clinic', true),
+  // Patient-held consent (ADR-0020 §3(b)): ALWAYS managed_by='patient', rendered
+  // read-only in the clinician console.
+  cap('share_with_clinic', 'Share data with my clinic', true, 'patient', true),
+];
+
+/** 25 synthetic clinic observations so the Observations tab pager spans pages,
+ *  while still leaving a single-reading code so the trend table shows "not judged". */
+export const CLINIC_OBSERVATIONS: ObservationItem[] = buildClinicObservations();
+
+// ---- scenario + install ----
+
+export interface Scenario {
+  me?: MeOut;
+  trajectory?: Trajectory;
+  observations?: ObservationItem[];
+  capabilities?: CapabilityStateOut[];
+  connections?: ConnectionOut[];
+  /** ADL POST result (defaults to a fresh, non-superseded check-in). */
+  adl?: { status?: number; body?: unknown };
+  /** BioMech import result. */
+  biomech?: { status?: number; body?: unknown };
+  /** Override the PUT /capabilities/:key outcome (e.g. a 409 clinically-managed). */
+  putCapability?: { status: number; body: unknown };
+  // clinician surface
+  panel?: PanelOut;
+  clinicTrajectory?: Trajectory;
+  clinicObservations?: ObservationItem[];
+  clinicCapabilities?: CapabilityStateOut[];
+}
+
+const CLINICALLY_MANAGED_409 = {
+  detail: 'Your clinic manages this source right now, so it can’t be changed here.',
+};
+
+const FEATURE_OFF_409 = {
+  detail: 'This check-in is turned off right now.',
+};
+
+const JSON_HEADERS = { 'content-type': 'application/json' };
+
+async function fulfillJson(route: Route, status: number, body: unknown): Promise<void> {
+  await route.fulfill({ status, headers: JSON_HEADERS, body: JSON.stringify(body) });
+}
+
+const unauthorized = (route: Route) => fulfillJson(route, 401, { detail: 'Not authenticated' });
+const patientNotFound = (route: Route) => fulfillJson(route, 404, { detail: 'Patient not found' });
+
+/**
+ * Install the full API mock on a page. Only the app's own API path prefixes are
+ * intercepted; the HTML/JS/CSS/font requests fall through to the real preview
+ * build (so we test the REAL production bundle). `/favicon.ico` is fulfilled 204
+ * so it never logs a benign 404 to the console.
+ */
+export async function installApiMocks(page: Page, scenario: Scenario = {}): Promise<void> {
+  const me = scenario.me ?? ME;
+  const trajectory = scenario.trajectory ?? TRAJECTORY_IMPROVING;
+  const observations = scenario.observations ?? OBSERVATIONS;
+  const capabilities = scenario.capabilities ?? CAPABILITIES;
+  const connections = scenario.connections ?? [CONNECTION_PENDING, CONNECTION_ACTIVE];
+  const panel = scenario.panel ?? PANEL;
+  const clinicTrajectory = scenario.clinicTrajectory ?? TRAJECTORY_IMPROVING;
+  const clinicObservations = scenario.clinicObservations ?? OBSERVATIONS;
+  const clinicCapabilities = scenario.clinicCapabilities ?? CLINIC_CAPABILITIES;
+
+  await page.route('**/favicon.ico', (route) => route.fulfill({ status: 204, body: '' }));
+
+  await page.route(
+    /\/(auth|observations|adl|biomech|trajectory|capabilities|connections|clinic)(\/|$|\?)/,
+    async (route) => {
+      const req = route.request();
+      // Only intercept the app's fetch/XHR API calls. The client routes /clinic and
+      // /clinic/patients/{id} share a prefix with the API path space, so a document
+      // navigation to them must render the SPA, not be answered as an API call. The
+      // preview server proxies these prefixes to the (absent) dev backend, so we
+      // serve the REAL built dist/index.html here; its /assets/*.js + /config.js
+      // still load from the real preview build.
+      const resourceType = req.resourceType();
+      if (resourceType === 'document') {
+        return route.fulfill({
+          status: 200,
+          headers: { 'content-type': 'text/html; charset=utf-8' },
+          body: indexHtml(),
+        });
+      }
+      if (resourceType !== 'fetch' && resourceType !== 'xhr') {
+        return route.continue();
+      }
+      const method = req.method();
+      const path = new URL(req.url()).pathname;
+
+      // ---- auth (anonymous endpoints) ----
+      if (method === 'POST' && path === '/auth/login') {
+        const body = req.postDataJSON() as { email: string; password: string };
+        if (body.email === SYNTHETIC_EMAIL && body.password === SYNTHETIC_PASSWORD) {
+          return fulfillJson(route, 200, tokenBody());
+        }
+        return fulfillJson(route, 401, { detail: 'Invalid email or password' });
+      }
+      if (method === 'POST' && path === '/auth/register') {
+        return fulfillJson(route, 201, tokenBody());
+      }
+      if (method === 'POST' && path === '/auth/refresh') {
+        const body = req.postDataJSON() as { refresh_token: string };
+        if (body.refresh_token === SYNTHETIC_REFRESH_TOKEN) {
+          return fulfillJson(route, 200, {
+            access_token: SYNTHETIC_REFRESHED_ACCESS_TOKEN,
+            token_type: 'bearer',
+          });
+        }
+        return fulfillJson(route, 401, { detail: 'Invalid token' });
+      }
+
+      // ---- everything below requires a valid bearer ----
+      if (!isAuthorized(route)) {
+        return unauthorized(route);
+      }
+
+      if (method === 'GET' && path === '/auth/me') {
+        return fulfillJson(route, 200, me);
+      }
+      if (method === 'GET' && path === '/trajectory') {
+        return fulfillJson(route, 200, trajectory);
+      }
+      if (method === 'GET' && path === '/observations') {
+        return fulfillJson(route, 200, page_(observations, req.url()));
+      }
+      if (method === 'POST' && path === '/adl') {
+        const body = req.postDataJSON() as {
+          walking: number;
+          stairs: number;
+          balance_confidence: number;
+        };
+        if (scenario.adl?.status !== undefined) {
+          return fulfillJson(route, scenario.adl.status, scenario.adl.body ?? FEATURE_OFF_409);
+        }
+        return fulfillJson(route, 200, {
+          check_in_date: '2026-07-13',
+          daily_score: body.walking + body.stairs + body.balance_confidence,
+          superseded: false,
+          ...(typeof scenario.adl?.body === 'object' ? scenario.adl.body : {}),
+        });
+      }
+      if (method === 'POST' && path === '/biomech/reports') {
+        if (scenario.biomech?.status !== undefined) {
+          return fulfillJson(route, scenario.biomech.status, scenario.biomech.body);
+        }
+        return fulfillJson(route, 200, {
+          report_kind: 'balance',
+          assessment_at: '2026-07-02T10:00:00Z',
+          imported: 3,
+          skipped: 0,
+          warnings: [],
+          ...(typeof scenario.biomech?.body === 'object' ? scenario.biomech.body : {}),
+        });
+      }
+      if (method === 'GET' && path === '/capabilities') {
+        return fulfillJson(route, 200, { capabilities });
+      }
+      if (method === 'PUT' && /^\/capabilities\/[^/]+$/.test(path)) {
+        if (scenario.putCapability !== undefined) {
+          return fulfillJson(route, scenario.putCapability.status, scenario.putCapability.body);
+        }
+        const key = decodeURIComponent(path.split('/')[2] ?? '');
+        const body = req.postDataJSON() as { active: boolean };
+        const existing = capabilities.find((row) => row.key === key);
+        if (existing === undefined) {
+          return fulfillJson(route, 404, { detail: 'Unknown capability' });
+        }
+        return fulfillJson(route, 200, { ...existing, active: body.active });
+      }
+      if (method === 'GET' && path === '/connections') {
+        return fulfillJson(route, 200, connections);
+      }
+      if (method === 'POST' && /^\/connections\/[^/]+\/consent$/.test(path)) {
+        return fulfillJson(route, 200, {
+          ...CONNECTION_PENDING,
+          status: 'active',
+          consent_granted_at: '2026-07-13T12:00:00Z',
+        });
+      }
+      if (method === 'DELETE' && /^\/connections\/[^/]+$/.test(path)) {
+        return route.fulfill({ status: 204, body: '' });
+      }
+
+      // ---- clinician surface ----
+      if (method === 'POST' && path === '/clinic/invitations') {
+        return fulfillJson(route, 202, {
+          detail: 'If this email belongs to a patient account, an invitation is now pending.',
+        });
+      }
+      if (method === 'GET' && path === '/clinic/patients') {
+        return fulfillJson(route, 200, panel);
+      }
+      const patientMatch =
+        /^\/clinic\/patients\/([^/]+)\/(trajectory|observations|capabilities)$/.exec(path);
+      if (method === 'GET' && patientMatch) {
+        const id = decodeURIComponent(patientMatch[1] ?? '');
+        const kind = patientMatch[2];
+        if (id !== PANEL_PATIENT_ID) {
+          return patientNotFound(route);
+        }
+        if (kind === 'trajectory') {
+          return fulfillJson(route, 200, clinicTrajectory);
+        }
+        if (kind === 'observations') {
+          return fulfillJson(route, 200, page_(clinicObservations, req.url()));
+        }
+        return fulfillJson(route, 200, { capabilities: clinicCapabilities });
+      }
+      const putCapMatch = /^\/clinic\/patients\/([^/]+)\/capabilities\/([^/]+)$/.exec(path);
+      if (method === 'PUT' && putCapMatch) {
+        const id = decodeURIComponent(putCapMatch[1] ?? '');
+        const key = decodeURIComponent(putCapMatch[2] ?? '');
+        const body = req.postDataJSON() as { active: boolean; expires_at?: string | null };
+        if (!body.active && body.expires_at != null) {
+          return fulfillJson(route, 422, {
+            detail: [
+              {
+                type: 'value_error',
+                loc: ['body'],
+                msg: 'Value error, expires_at only applies when active=true; omit it when disabling',
+              },
+            ],
+          });
+        }
+        if (id !== PANEL_PATIENT_ID) {
+          return patientNotFound(route);
+        }
+        const existing = clinicCapabilities.find((row) => row.key === key);
+        if (existing === undefined) {
+          return fulfillJson(route, 404, { detail: 'Unknown capability' });
+        }
+        return fulfillJson(route, 200, {
+          ...existing,
+          active: body.active,
+          expires_at: body.expires_at ?? null,
+        });
+      }
+
+      // Any unmocked API path is a test bug — fail loudly rather than hang.
+      return fulfillJson(route, 500, { detail: `Unmocked ${method} ${path}` });
+    },
+  );
+}
+
+export { CLINICALLY_MANAGED_409, FEATURE_OFF_409 };
+
+// ---- helpers ----
+
+/** The real built index.html, read once (the preview build produces it). */
+let cachedIndexHtml: string | null = null;
+function indexHtml(): string {
+  if (cachedIndexHtml === null) {
+    const here = dirname(fileURLToPath(import.meta.url));
+    cachedIndexHtml = readFileSync(join(here, '..', '..', 'dist', 'index.html'), 'utf8');
+  }
+  return cachedIndexHtml;
+}
+
+function tokenBody() {
+  return {
+    access_token: SYNTHETIC_ACCESS_TOKEN,
+    refresh_token: SYNTHETIC_REFRESH_TOKEN,
+    token_type: 'bearer',
+  };
+}
+
+/** Slice an observation array into an ObservationPage honoring limit/offset. */
+function page_(items: ObservationItem[], url: string) {
+  const params = new URL(url).searchParams;
+  const limit = Number(params.get('limit') ?? '100');
+  const offset = Number(params.get('offset') ?? '0');
+  return {
+    items: items.slice(offset, offset + limit),
+    total: items.length,
+    limit,
+    offset,
+  };
+}
+
+function obs(
+  code: string,
+  display: string,
+  value: number,
+  unit: string,
+  effective_at: string,
+  source: string,
+): ObservationItem {
+  return { code, display, value, value_text: null, unit, effective_at, source, status: 'final' };
+}
+
+function cap(
+  key: string,
+  name: string,
+  active: boolean,
+  managed_by: 'patient' | 'clinic',
+  enforced: boolean,
+  expires_at: string | null = null,
+): CapabilityStateOut {
+  return { key, name, active, managed_by, expires_at, enforced };
+}
+
+function buildClinicObservations(): ObservationItem[] {
+  const items: ObservationItem[] = [];
+  for (let i = 0; i < 12; i += 1) {
+    const day = String(28 - i).padStart(2, '0');
+    items.push(
+      obs(
+        'biomech_balance_score',
+        'Balance score',
+        60 + i,
+        '{score}',
+        `2026-06-${day}T10:00:00Z`,
+        'biomech',
+      ),
+    );
+  }
+  for (let i = 0; i < 12; i += 1) {
+    const day = String(28 - i).padStart(2, '0');
+    items.push(
+      obs(
+        'biomech_sway_velocity',
+        'Sway velocity',
+        10 + i * 0.2,
+        'mm/s',
+        `2026-05-${day}T10:00:00Z`,
+        'biomech',
+      ),
+    );
+  }
+  // A single-reading lab so the trend table shows "not judged".
+  items.push(obs('4548-4', 'Hemoglobin A1c', 7.1, '%', '2026-04-10T09:00:00Z', 'lab'));
+  return items;
+}
