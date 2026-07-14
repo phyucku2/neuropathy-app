@@ -1,5 +1,16 @@
 apply plugin: 'com.android.application'
 
+// Release signing (ADR-0026): the UPLOAD key lives in a git-ignored android/keystore.properties
+// (storeFile/storePassword/keyAlias/keyPassword), generated per docs/mobile/play-release-runbook.md.
+// Play App Signing holds the real app-signing key, so this key only authenticates uploads.
+// When the file is absent (CI compile-proof job, fresh clones) the release build falls back to
+// UNSIGNED — assembleDebug and the existing CI mobile job are unaffected.
+def keystoreProps = new Properties()
+def keystorePropsFile = rootProject.file('keystore.properties')
+if (keystorePropsFile.exists()) {
+    keystorePropsFile.withInputStream { keystoreProps.load(it) }
+}
+
 android {
     namespace "com.biomech.neuropathy"
     compileSdk rootProject.ext.compileSdkVersion
@@ -7,8 +18,10 @@ android {
         applicationId "com.biomech.neuropathy"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
+        // versionCode must strictly increase on EVERY Play upload (internal testing included) —
+        // bump it in the same commit that changes versionName. versionName tracks package.json.
         versionCode 1
-        versionName "1.0"
+        versionName "0.1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,10 +29,25 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (keystorePropsFile.exists()) {
+                storeFile rootProject.file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+            }
+        }
+    }
     buildTypes {
         release {
+            // Left unminified deliberately: the app's logic lives in the (already-minified) web
+            // bundle; R8 on the thin native shell buys little and risks plugin reflection breaks.
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (keystorePropsFile.exists()) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }
