@@ -47,11 +47,15 @@ class Settings(BaseSettings):
 
     jwt_secret: str | None = None
 
-    # Ops bootstrap for provisioning clinician accounts (ADR-0012): clinicians are
-    # never self-registered (ADR-0010). Unset (the default) means the endpoint fails
-    # closed — no token, no provisioning. A configured token must be at least
-    # OPS_BOOTSTRAP_TOKEN_MIN_LENGTH chars (validated below); generate one with e.g.
-    # `python -c "import secrets; print(secrets.token_urlsafe(48))"` (ADR-0017).
+    # FIRST-OPS bootstrap token (ADR-0019 narrows ADR-0012/0017's role). It no longer
+    # gates clinician provisioning — that now requires a real ops bearer (require_ops).
+    # Its ONLY remaining power is creating the FIRST ops account via POST /ops/accounts
+    # while zero ops accounts exist; the moment any ops account exists this token opens
+    # nothing (the gate self-closes and further operators are created by an
+    # authenticated ops). Unset (the default) means no ops can be bootstrapped and — with
+    # no ops accounts — no provisioning is possible either: fail closed. A configured
+    # token must be at least OPS_BOOTSTRAP_TOKEN_MIN_LENGTH chars (validated below);
+    # generate one with `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
     ops_bootstrap_token: str | None = None
 
     # Encryption key for the DB-backed OAuth token vault (ADR-0017): a base64 Fernet

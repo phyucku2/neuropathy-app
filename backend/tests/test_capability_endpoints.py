@@ -91,6 +91,21 @@ def _register_patient(
     return headers, uuid.UUID(me.json()["patient_id"])
 
 
+def _ops_headers(client: TestClient) -> dict[str, str]:
+    """Provision + log in the first ops operator (ADR-0019), idempotently. The first
+    call bootstraps it with the token; later calls find it already present and just log
+    in — clinician provisioning now runs under this ops bearer, not the shared token."""
+    client.post(
+        "/ops/accounts",
+        headers=BOOTSTRAP,
+        json={"email": "ops@example.com", "password": "a-strong-password", "display_name": "Ops"},
+    )
+    login = client.post(
+        "/auth/login", json={"email": "ops@example.com", "password": "a-strong-password"}
+    )
+    return _auth(login.json()["access_token"])
+
+
 def _create_clinician(
     client: TestClient,
     email: str = "dr@example.com",
@@ -98,7 +113,7 @@ def _create_clinician(
 ) -> tuple[dict[str, str], uuid.UUID, uuid.UUID]:
     resp = client.post(
         "/clinic/clinicians",
-        headers=BOOTSTRAP,
+        headers=_ops_headers(client),
         json={
             "email": email,
             "password": "a-strong-password",

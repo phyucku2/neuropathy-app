@@ -104,6 +104,9 @@ class CurrentUser:
     # Set for clinician users (ADR-0012); defaulted last so existing constructions
     # keep working unchanged.
     clinic_id: uuid.UUID | None = None
+    # Whether the account is active (ADR-0019). A live JWT can outlast a deactivation
+    # by up to the access-token TTL, so the role gates re-check this, not just login.
+    active: bool = True
 
 
 def _unauthorized(reason: str) -> HTTPException:
@@ -125,6 +128,13 @@ async def get_current_user(
     user = await auth.get_user(claims.user_id)
     if user is None:
         raise _unauthorized("Account no longer exists")
+    # Revocation is enforced centrally here, at authentication, for EVERY role (ADR-0019):
+    # a short-lived access token can outlive a deactivation by up to its TTL, so a
+    # deactivated principal of any role — patient, clinician, or ops — is refused before
+    # it reaches any endpoint or role gate. PHI-free reason, indistinguishable from a
+    # deleted account.
+    if not user.active:
+        raise _unauthorized("Account is not active")
     return CurrentUser(
         user_id=user.id,
         role=user.role,
@@ -132,6 +142,7 @@ async def get_current_user(
         email=user.email,
         display_name=user.display_name,
         clinic_id=user.clinic_id,
+        active=user.active,
     )
 
 
@@ -156,6 +167,22 @@ def require_clinician(current: CurrentUserDep) -> CurrentUser:
 
 
 ClinicianUserDep = Annotated[CurrentUser, Depends(require_clinician)]
+
+
+def require_ops(current: CurrentUserDep) -> CurrentUser:
+    """Ops-scoped endpoints (ADR-0019): the caller must be an ops operator.
+
+    An ops principal carries neither patient_id nor clinic_id. Revocation is enforced
+    centrally in get_current_user now (a deactivated principal of ANY role is refused at
+    authentication, before it reaches any gate), so the active re-check kept here is
+    pure defense-in-depth — it can only ever see an active principal through the request
+    path, and never produces a second, differing status for the deactivated case."""
+    if current.role is not UserRole.ops or not current.active:
+        raise HTTPException(status_code=403, detail="Ops account required")
+    return current
+
+
+OpsUserDep = Annotated[CurrentUser, Depends(require_ops)]
 
 
 @lru_cache(maxsize=1)
