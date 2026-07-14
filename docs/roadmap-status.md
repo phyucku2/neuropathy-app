@@ -22,12 +22,11 @@ review findings fixed), **Merged** (on `main`).
 | BioMech PDF ingest module (V1) — balance/gait report PDFs into research-grade Observations (ADR-0014) | ✅ | ✅ | ✅ PR #5 |
 | Patient graphing/trends UI — from mockups/patient-app.html against the existing API (ADR-0015) | ✅ | ✅ | ✅ PR #6 |
 | Clinician UI — from mockups/clinician-app.html (panel, cross-source trend table, non-diagnostic) (ADR-0016) | ✅ | ✅ | ✅ PR #7 |
+| Hardening pass — invitation rate limiting, durable pending-auth store, encrypted token vault with deletion-on-revoke, hardened ops gate, blocking Python security/license scans (ADR-0017) | ✅ | ✅ 100% cov | ✅ PR #8 |
 
 ## Remaining (build order)
 
-| # | Portion | Built | Tested | Merged | Notes |
-|---|---|---|---|---|---|
-| 1 | Hardening pass — invitation rate limiting (ADR-0012 deferral), encrypted-at-rest DB token vault, DB-backed single-use pending-auth store, bootstrap-token hardening (min length + denied-attempt audit; a dedicated ops-auth surface still replaces it at production readiness), CI's Python pip-audit/pip-licenses steps now blocking | ✅ | ✅ 100% cov | ◻️ | ADR-0017; frontend untouched |
+*Empty — every planned portion has shipped. New work starts a new row here.*
 
 ## Deferred (not scheduled)
 
