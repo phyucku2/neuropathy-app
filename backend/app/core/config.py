@@ -81,6 +81,18 @@ class Settings(BaseSettings):
     bootstrap_denied_audit_max: int = 20
     bootstrap_denied_audit_window_seconds: int = 3600
 
+    # Error reporting seam (ADR-0021). OFF by default: unset means unhandled exceptions
+    # are never forwarded anywhere. When set to a self-hosted, permissive collector URL
+    # (e.g. a GlitchTip/Sentry-compatible or plain HTTP intake you run under a BAA), the
+    # app POSTs a PHI-SCRUBBED error event (exception type, route template, request id,
+    # status, timestamp — never the exception message, query, body, headers, or patient
+    # data). A reporter error never breaks the request (fail-safe). NEVER a SaaS DSN with
+    # an embedded token committed here — this is a config env var, resolved at runtime.
+    error_reporting_dsn: str | None = None
+    # Upper bound on the fire-and-forget POST to the collector; kept short so a slow or
+    # wedged collector can never drag an already-failed request.
+    error_reporting_timeout_seconds: float = 3.0
+
     # SMART on FHIR / EMR pull (ADR-0008). Client secret (if any) and OAuth tokens live
     # in a secret manager, never here.
     smart_client_id: str | None = None
@@ -97,10 +109,15 @@ class Settings(BaseSettings):
     # gigabytes of text (decompression bomb — ADR-0014 review finding).
     biomech_max_pdf_text_chars: int = 5_000_000
 
-    @field_validator("ops_bootstrap_token", "secret_store_key", mode="before")
+    @field_validator(
+        "ops_bootstrap_token", "secret_store_key", "error_reporting_dsn", mode="before"
+    )
     @classmethod
     def _empty_env_is_unset(cls, value: object) -> object:
-        """An empty env var means "not configured", never a zero-length credential."""
+        """An empty env var means "not configured", never a zero-length credential.
+
+        For ``error_reporting_dsn`` this keeps the seam fail-safe OFF when the env var is
+        present-but-blank, exactly as an absent var does."""
         return None if value == "" else value
 
     @field_validator("ops_bootstrap_token")

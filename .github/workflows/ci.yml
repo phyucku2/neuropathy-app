@@ -131,7 +131,7 @@ jobs:
           pip install pip-licenses
           pip-licenses --python /tmp/scan-env/bin/python \
             --ignore-packages neuropathy-app-backend certifi \
-            --allow-only "MIT;MIT License;MIT-0;MIT AND PSF-2.0;BSD License;BSD-2-Clause;BSD-3-Clause;Apache Software License;Apache-2.0;Apache-2.0 OR BSD-2-Clause;Apache-2.0 OR BSD-3-Clause;ISC License (ISCL);PSF-2.0;The Unlicense (Unlicense)"
+            --allow-only "MIT;MIT License;MIT-0;MIT AND PSF-2.0;BSD License;BSD-2-Clause;BSD-3-Clause;Apache Software License;Apache-2.0;Apache-2.0 AND BSD-2-Clause;Apache-2.0 OR BSD-2-Clause;Apache-2.0 OR BSD-3-Clause;ISC License (ISCL);PSF-2.0;The Unlicense (Unlicense)"
 
       # pip-audit mirrors the pip-licenses approach: installed OUTSIDE the scan env
       # and pointed at a fully pinned freeze snapshot of it, so pip-audit's own ~26

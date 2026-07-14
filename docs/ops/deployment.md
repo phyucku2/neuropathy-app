@@ -42,6 +42,8 @@ the repo. Security-sensitive values **fail closed at startup** with an actionabl
 | `OPS_BOOTSTRAP_TOKEN` | **SECRET** | to provision clinicians | Ops gate for clinician provisioning (ADR-0012/0017). Min 32 chars — shorter is refused at startup. Unset = provisioning disabled (fails closed). `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
 | `SMART_CLIENT_ID` / `SMART_REDIRECT_URI` | client id no / secret lives in the vault | for EMR pull | SMART on FHIR config (ADR-0008/0009). |
 | `AI_API_KEY` + `AI_BAA_CONFIRMED` | **SECRET** (key) | for AI narrative | The narrative layer stays OFF without both a key AND the explicit BAA attestation (ADR-0011). |
+| `ERROR_REPORTING_DSN` | no (a URL you host) | no | Self-hosted, permissive error collector URL (ADR-0021). Unset = error reporting OFF. Payload is PHI-scrubbed; must be self-hosted or BAA-covered. Never a committed SaaS DSN. |
+| `ERROR_REPORTING_TIMEOUT_SECONDS` | no | no | Upper bound on the fire-and-forget error POST (default 3.0s); a slow collector never drags an already-failed request. |
 
 Frontend (set at container start):
 
@@ -92,10 +94,14 @@ The SPA is published on `http://localhost:${FRONTEND_PORT}` (default 8080).
   the database is unreachable. Use for load-balancer rotation / readiness probes so an
   instance that can't reach its DB is pulled without being killed.
 - **Frontend liveness** — `GET /healthz` on the frontend serves nginx's own `200`.
+- **Metrics** — `GET /metrics` → Prometheus text (PHI-free by construction; ADR-0021).
+  Unauthenticated like the probes; scrape on the internal network. See
+  `docs/ops/observability.md` for scrape config and alert rules.
 
 ```bash
 curl -fsS http://BACKEND:8000/healthz
 curl -fsS http://BACKEND:8000/readyz
+curl -fsS http://BACKEND:8000/metrics
 ```
 
 ## Roll back
@@ -112,7 +118,8 @@ is a redeploy of the previous tag:
 
 ## Not covered here (production hardening)
 
-TLS termination, a real API gateway, managed/replicated Postgres, secret rotation,
-centralized logging/metrics/alerting, and autoscaling are production concerns owned by
-the ops/observability portions — deliberately out of scope for this staging topology
-(ADR-0018).
+TLS termination, a real API gateway, managed/replicated Postgres, secret rotation, and
+autoscaling remain production concerns not covered by this staging topology (ADR-0018).
+Metrics, error tracking, alerting hooks, and the backup drill are now provided (ADR-0021,
+`docs/ops/observability.md`); wiring the scraper, Alertmanager, and a self-hosted error
+collector into a specific environment is still deployment-owned.

@@ -25,6 +25,9 @@ dependencies = [
                                  # dep via pyjwt[crypto], now a direct import)
     "argon2-cffi>=23.1",             # password hashing, Argon2id (MIT)
     "email-validator>=2.1",          # pydantic EmailStr (CC0/Unlicense)
+    "prometheus-client>=0.20",       # PHI-free Prometheus /metrics exposition, ADR-0021
+                                 # (Apache-2.0 AND BSD-2-Clause — both permissive; no
+                                 # transitive deps). Allowlist string added in ci.yml.
 ]
 
 [project.optional-dependencies]
