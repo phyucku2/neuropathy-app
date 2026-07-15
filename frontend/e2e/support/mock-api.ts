@@ -22,6 +22,8 @@ import type {
   EmrConnectionOut,
   EmrProviderOut,
   EmrPullOut,
+  ExportObservation,
+  ExportOut,
   MeOut,
   ObservationItem,
   PanelOut,
@@ -284,7 +286,55 @@ export interface MockApiState {
   /** Every POST /adl body the mock served (any status) — the offline-queue spec
    *  asserts the flushed entry REACHED the API with its true check_in_date. */
   adlPosts: unknown[];
+  /** How many GET /me/export requests were served (ADR-0031). */
+  dataExports: number;
 }
+
+/** The full ExportOut shape (ADR-0031) — mirrors backend/app/schemas/export.py, reusing
+ *  the other fixtures so it stays in lockstep with what the real API would return. */
+const EXPORT_OBSERVATIONS_OUT: ExportObservation[] = [
+  {
+    id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    source: 'lab',
+    origin: 'ehr_imported',
+    code: '4548-4',
+    code_system: 'LOINC',
+    value_num: 7.2,
+    value_text: null,
+    unit: '%',
+    unit_system: 'UCUM',
+    effective_at: '2026-06-20T09:00:00Z',
+    recorded_at: '2026-06-20T09:05:00Z',
+    status: 'final',
+    revises_id: null,
+    recorded_by_role: 'patient',
+    quality: { human_confirmed: true },
+    payload: { panel: 'metabolic' },
+  },
+];
+
+export const EXPORT_OUT: ExportOut = {
+  exported_at: '2026-07-15T10:00:00Z',
+  schema_version: '1.0',
+  subject_id: '22222222-2222-4222-8222-222222222222',
+  account: {
+    display_name: 'Pat Example',
+    email: SYNTHETIC_EMAIL,
+    role: 'patient',
+    created_at: '2026-05-01T08:00:00Z',
+  },
+  patient: {
+    patient_id: '22222222-2222-4222-8222-222222222222',
+    display_name: 'Pat Example',
+    connection_mode: 'self_connected',
+    created_at: '2026-05-01T08:00:00Z',
+  },
+  observations: EXPORT_OBSERVATIONS_OUT,
+  trajectory: TRAJECTORY_IMPROVING,
+  capabilities: CAPABILITIES,
+  clinic_connections: [CONNECTION_ACTIVE],
+  emr_connections: [EMR_CONNECTION_ACTIVE],
+};
 
 export interface Scenario {
   me?: MeOut;
@@ -334,6 +384,7 @@ export async function installApiMocks(page: Page, scenario: Scenario = {}): Prom
     emrPulls: 0,
     emrRevocations: 0,
     adlPosts: [],
+    dataExports: 0,
   };
   const me = scenario.me ?? ME;
   const trajectory = scenario.trajectory ?? TRAJECTORY_IMPROVING;
@@ -350,7 +401,7 @@ export async function installApiMocks(page: Page, scenario: Scenario = {}): Prom
   await page.route(
     // /emr shares its prefix between API paths and the SPA's /emr/callback relay
     // route, exactly like /clinic (see the document-navigation note below).
-    /\/(auth|observations|adl|biomech|trajectory|capabilities|connections|clinic|emr)(\/|$|\?)/,
+    /\/(auth|me|observations|adl|biomech|trajectory|capabilities|connections|clinic|emr)(\/|$|\?)/,
     async (route) => {
       const req = route.request();
       // Only intercept the app's fetch/XHR API calls. The client routes /clinic and
@@ -412,6 +463,12 @@ export async function installApiMocks(page: Page, scenario: Scenario = {}): Prom
           return route.fulfill({ status: 204, body: '' });
         }
         return fulfillJson(route, 403, { detail: DELETE_WRONG_PASSWORD_DETAIL });
+      }
+      // Data export (ADR-0031): the complete record for the signed-in patient. The
+      // full ExportOut shape, so the browser exercises exactly what the real API sends.
+      if (method === 'GET' && path === '/me/export') {
+        state.dataExports += 1;
+        return fulfillJson(route, 200, EXPORT_OUT);
       }
       if (method === 'GET' && path === '/trajectory') {
         return fulfillJson(route, 200, trajectory);

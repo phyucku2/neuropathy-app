@@ -32,6 +32,7 @@ from app.repositories.postgres import (
     PostgresCapabilityRepository,
     PostgresClinicConnectionRepository,
     PostgresClinicRepository,
+    PostgresEmrConnectionRepository,
     PostgresObservationRepository,
     PostgresPatientCapabilityRepository,
     PostgresPendingAuthStore,
@@ -53,6 +54,7 @@ def _reset_process_singletons() -> None:
     deps._default_clinic_service.cache_clear()
     deps._default_capability_service.cache_clear()
     deps._default_account_deletion_service.cache_clear()
+    deps._default_patient_data_export_service.cache_clear()
     deps._process_jwt_secret.cache_clear()
     deps._process_secret_store.cache_clear()
     deps._process_pending_auth.cache_clear()
@@ -310,6 +312,21 @@ def test_db_mode_services_are_request_scoped_but_share_process_state() -> None:
     # No SECRET_STORE_KEY here: deletion purges tokens from the SAME fail-closed
     # process vault EMR requests use — wherever the tokens live is where they die.
     assert deletion_a.secret_store is deps.get_emr_service(session).secret_store
+
+    # Data export (ADR-0031): request-scoped over the same Postgres repositories, with
+    # the clinic/capability services composed on the SAME session so their reads join
+    # the request transaction.
+    export_a = deps.get_patient_data_export_service(session)
+    export_b = deps.get_patient_data_export_service(session)
+    assert export_a is not export_b  # request-scoped construction
+    assert isinstance(export_a.users, PostgresUserRepository)
+    assert isinstance(export_a.observations, PostgresObservationRepository)
+    assert isinstance(export_a.emr_connections, PostgresEmrConnectionRepository)
+    assert isinstance(export_a.audit, PostgresAuditEventRepository)
+    assert isinstance(export_a.clinic.connections, PostgresClinicConnectionRepository)
+    assert isinstance(export_a.capabilities.capabilities, PostgresCapabilityRepository)
+    # In-memory mode (no session) hands back the shared process-wide singleton.
+    assert deps.get_patient_data_export_service() is deps.get_patient_data_export_service()
 
 
 def test_db_mode_uses_the_configured_jwt_secret(monkeypatch: pytest.MonkeyPatch) -> None:

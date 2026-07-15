@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Protocol
 
+from app.models.patient import ConnectionMode
 from app.models.user import UserRole
 
 
@@ -61,6 +62,27 @@ class UserRecord:
     # is active until explicitly deactivated (disabled_at then stamps when).
     active: bool = True
     disabled_at: datetime | None = None
+    # When the account row was created (models.User Timestamps). Defaulted last and
+    # populated by the store (server_default in Postgres, stamped on add in-memory), so
+    # the data-export account profile (ADR-0031) can report it without a hand-rolled read.
+    created_at: datetime | None = None
+
+
+@dataclass
+class PatientRecord:
+    """Storage-agnostic twin of the non-secret fields of models.Patient.
+
+    The Patient clinical record is created alongside its patient User (both stores'
+    `add`), so the user repository — the single owner of that creation — is also where
+    it is read back for the data export (ADR-0031). Carries only non-secret fields;
+    the reserved `clinic_id` column (models.Patient — not maintained) is deliberately
+    omitted so the export never reports a value nothing populates.
+    """
+
+    id: uuid.UUID
+    display_name: str
+    connection_mode: ConnectionMode
+    created_at: datetime | None = None
 
 
 class UserRepository(Protocol):
@@ -84,6 +106,12 @@ class UserRepository(Protocol):
 
     async def get_by_patient_id(self, patient_id: uuid.UUID) -> UserRecord | None:
         """Look up the patient user owning a Patient record (clinician panel display)."""
+        ...
+
+    async def get_patient(self, patient_id: uuid.UUID) -> PatientRecord | None:
+        """Read the linked Patient clinical record's non-secret fields (ADR-0031 data
+        export). The mirror of `add`, which creates the Patient row with the user; None
+        when no such patient exists."""
         ...
 
     async def count_with_role(self, role: UserRole, *, active_only: bool = False) -> int:
@@ -149,15 +177,26 @@ class InMemoryUserRepository:
         self._by_email: dict[str, UserRecord] = {}
         self._by_id: dict[uuid.UUID, UserRecord] = {}
         # Patient records created alongside patient users (parity with Postgres).
-        self.patients: dict[uuid.UUID, str] = {}
+        self.patients: dict[uuid.UUID, PatientRecord] = {}
 
     async def add(self, user: UserRecord) -> None:
         if user.email in self._by_email:
             raise DuplicateEmailError(user.email)
+        # Server default (created_at) only applies on DB flush; mirror it here so the
+        # in-memory account profile reports a timestamp too (ADR-0031).
+        if user.created_at is None:
+            user.created_at = datetime.now(UTC)
         self._by_email[user.email] = user
         self._by_id[user.id] = user
         if user.patient_id is not None:
-            self.patients[user.patient_id] = user.display_name
+            # Registration always creates a self_connected patient (models.Patient
+            # default) — the Postgres `add` constructs it the same way.
+            self.patients[user.patient_id] = PatientRecord(
+                id=user.patient_id,
+                display_name=user.display_name,
+                connection_mode=ConnectionMode.self_connected,
+                created_at=user.created_at,
+            )
 
     async def get_by_email(self, email: str) -> UserRecord | None:
         return self._by_email.get(email)
@@ -167,6 +206,9 @@ class InMemoryUserRepository:
 
     async def get_by_patient_id(self, patient_id: uuid.UUID) -> UserRecord | None:
         return next((u for u in self._by_id.values() if u.patient_id == patient_id), None)
+
+    async def get_patient(self, patient_id: uuid.UUID) -> PatientRecord | None:
+        return self.patients.get(patient_id)
 
     async def count_with_role(self, role: UserRole, *, active_only: bool = False) -> int:
         return sum(

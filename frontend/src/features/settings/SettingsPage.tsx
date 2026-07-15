@@ -15,6 +15,7 @@ import { formatDayYear } from '../../lib/format';
 import { useApi } from '../../lib/useApi';
 import { ConnectionRow } from './ConnectionRow';
 import { DeleteAccountCard } from './DeleteAccountCard';
+import { DownloadDataCard } from './DownloadDataCard';
 import { EmrConnectCard } from './EmrConnectCard';
 import { ReminderCard } from './ReminderCard';
 
@@ -192,6 +193,9 @@ export function SettingsPage() {
       {/* EMR connect (ADR-0028) sits with the clinic connections — a data-source
           concern, deliberately outside the danger zone below. */}
       <EmrConnectCard />
+      {/* Right-of-access export (ADR-0031): the safe counterpart to deletion, placed
+          ABOVE the danger zone and clearly separated from it. */}
+      <DownloadDataCard />
       <DeleteAccountCard />
     </div>
   );

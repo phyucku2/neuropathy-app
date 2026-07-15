@@ -277,6 +277,50 @@ async def test_duplicate_email_raises_domain_error_at_the_repository() -> None:
         await repo.add(user)
 
 
+async def test_get_patient_reads_the_linked_record_and_stamps_created_at() -> None:
+    """The data-export read path (ADR-0031): the user repo owns the Patient record it
+    creates on add, so get_patient reads it back; created_at is stamped on add (server
+    default mirror) and a caller-provided value is preserved untouched."""
+    from datetime import UTC, datetime
+
+    from app.models.patient import ConnectionMode
+    from app.models.user import UserRole
+    from app.repositories.user import InMemoryUserRepository, UserRecord
+
+    repo = InMemoryUserRepository()
+    patient_id = uuid.uuid4()
+    await repo.add(
+        UserRecord(
+            id=uuid.uuid4(),
+            email="pat@example.com",
+            password_hash="x",
+            display_name="Pat",
+            role=UserRole.patient,
+            patient_id=patient_id,
+        )
+    )
+    record = await repo.get_patient(patient_id)
+    assert record is not None
+    assert record.display_name == "Pat"
+    assert record.connection_mode is ConnectionMode.self_connected
+    assert record.created_at is not None  # stamped on add
+    assert await repo.get_patient(uuid.uuid4()) is None  # unknown -> None
+
+    # A UserRecord that already carries created_at keeps it (the stamp only fills a gap).
+    preset = datetime(2020, 1, 1, tzinfo=UTC)
+    preset_user = UserRecord(
+        id=uuid.uuid4(),
+        email="early@example.com",
+        password_hash="x",
+        display_name="Early",
+        role=UserRole.patient,
+        patient_id=uuid.uuid4(),
+        created_at=preset,
+    )
+    await repo.add(preset_user)
+    assert preset_user.created_at == preset
+
+
 async def test_callback_for_vanished_connection_is_404() -> None:
     """Defensive: a pending state whose connection was removed fails cleanly."""
     from app.emr.service import EmrError, PendingAuth

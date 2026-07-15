@@ -40,6 +40,7 @@ from app.repositories.user import (
     OpsAlreadyExistsError,
     OpsDeactivateOutcome,
     OpsDeactivateResult,
+    PatientRecord,
     UserRecord,
 )
 from app.services.observation import counts_toward_analysis
@@ -97,6 +98,17 @@ class PostgresUserRepository:
     async def get_by_patient_id(self, patient_id: uuid.UUID) -> UserRecord | None:
         row = await self._session.scalar(select(User).where(User.patient_id == patient_id))
         return None if row is None else _user_to_record(row)
+
+    async def get_patient(self, patient_id: uuid.UUID) -> PatientRecord | None:
+        row = await self._session.get(Patient, patient_id)
+        if row is None:
+            return None
+        return PatientRecord(
+            id=row.id,
+            display_name=row.display_name,
+            connection_mode=row.connection_mode,
+            created_at=row.created_at,
+        )
 
     async def count_with_role(self, role: UserRole, *, active_only: bool = False) -> int:
         stmt = select(func.count()).select_from(User).where(User.role == role)
@@ -653,6 +665,7 @@ def _user_to_record(row: User) -> UserRecord:
         clinic_id=row.clinic_id,
         active=row.active,
         disabled_at=row.disabled_at,
+        created_at=row.created_at,
     )
 
 
