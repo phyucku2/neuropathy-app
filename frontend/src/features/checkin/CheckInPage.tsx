@@ -14,6 +14,7 @@ import { Link } from 'react-router-dom';
 import { ApiError, messageFor } from '../../api/client';
 import { postAdlCheckIn } from '../../api/endpoints';
 import type { AdlCheckInOut } from '../../api/types';
+import { useAuth } from '../../auth/AuthContext';
 import { ErrorNotice, SuccessNotice } from '../../components/StatusMessages';
 import {
   enqueueCheckIn,
@@ -25,6 +26,7 @@ import {
   consumeDroppedNotices,
   flushQueuedCheckIns,
   subscribeFlushOutcomes,
+  type DroppedCheckIn,
   type SyncedCheckIn,
 } from './offlineSync';
 
@@ -142,6 +144,11 @@ function SegmentedAnswer({
 }
 
 export function CheckInPage() {
+  // The queue is bound to the signed-in account (ADR-0030 per-user binding). This
+  // page renders inside PatientArea, which guarantees a loaded user; the null
+  // fallback only satisfies the type and skips queue access when it cannot apply.
+  const { user } = useAuth();
+  const ownerId = user?.user_id ?? null;
   const [answers, setAnswers] = useState<Record<Question['key'], number | null>>({
     walking: null,
     stairs: null,
@@ -156,31 +163,41 @@ export function CheckInPage() {
   // for entries the server refused (409/422) during a background flush.
   const [offlineSaved, setOfflineSaved] = useState<QueuedCheckIn | null>(null);
   const [queuedToday, setQueuedToday] = useState<QueuedCheckIn | null>(() =>
-    getQueuedCheckIn(localCheckInDate()),
+    ownerId === null ? null : getQueuedCheckIn(ownerId, localCheckInDate()),
   );
-  const [syncNotices, setSyncNotices] = useState<string[]>([]);
+  const [syncNotices, setSyncNotices] = useState<{ id: number; text: string }[]>([]);
+  const noticeId = useRef(0);
   const [lastSynced, setLastSynced] = useState<SyncedCheckIn[]>([]);
+  const [lastDropped, setLastDropped] = useState<DroppedCheckIn[]>([]);
 
   useEffect(() => {
     const pullNotices = () => {
       const dropped = consumeDroppedNotices();
       if (dropped.length > 0) {
-        setSyncNotices((current) => [
-          ...current,
-          ...dropped.map(
-            ({ entry, detail }) =>
-              `An offline check-in from ${displayDay(entry.check_in_date)} couldn't be sent: ${detail}`,
-          ),
-        ]);
+        setSyncNotices((current) => {
+          const next = [...current];
+          for (const { entry, detail } of dropped) {
+            const text = `An offline check-in from ${displayDay(entry.check_in_date)} couldn't be sent: ${detail}`;
+            // Identical consecutive notices collapse into one — repeating the
+            // same refusal adds noise, not information.
+            if (next[next.length - 1]?.text === text) {
+              continue;
+            }
+            noticeId.current += 1;
+            next.push({ id: noticeId.current, text });
+          }
+          return next;
+        });
       }
     };
     pullNotices();
     return subscribeFlushOutcomes((outcome) => {
       pullNotices();
       setLastSynced(outcome.synced);
-      setQueuedToday(getQueuedCheckIn(localCheckInDate()));
+      setLastDropped(outcome.dropped);
+      setQueuedToday(ownerId === null ? null : getQueuedCheckIn(ownerId, localCheckInDate()));
     });
-  }, []);
+  }, [ownerId]);
 
   // A background flush delivered THIS page's offline capture: show the normal
   // saved view with the server's real response (score + superseded flag).
@@ -194,6 +211,23 @@ export function CheckInPage() {
       setResult(match.result);
     }
   }, [lastSynced, offlineSaved]);
+
+  // A background flush DROPPED this page's offline capture (409/422): the "will
+  // send automatically" promise no longer holds, so leave the saved-on-device
+  // state — the refusal notice (syncNotices) becomes the primary message.
+  useEffect(() => {
+    if (offlineSaved === null) {
+      return;
+    }
+    const droppedHere = lastDropped.some(
+      (d) =>
+        d.entry.check_in_date === offlineSaved.check_in_date &&
+        d.entry.queued_at === offlineSaved.queued_at,
+    );
+    if (droppedHere) {
+      setOfflineSaved(null);
+    }
+  }, [lastDropped, offlineSaved]);
 
   const complete =
     answers.walking !== null && answers.stairs !== null && answers.balance_confidence !== null;
@@ -222,11 +256,16 @@ export function CheckInPage() {
       const saved = await postAdlCheckIn(body);
       // These newer answers supersede any same-day entry still queued on-device
       // (ADR-0006 semantics: only the newest same-day check-in counts) — and the
-      // network clearly works, so flush any older queued days now.
-      removeQueuedCheckIn(day);
+      // network clearly works, so flush any older queued days now. If a flush
+      // pass is already mid-flight it iterates a stale snapshot, so this call
+      // queues a FRESH pass (offlineSync's rerun) — the removal above is seen
+      // and no older day is skipped.
+      if (ownerId !== null) {
+        removeQueuedCheckIn(ownerId, day);
+        void flushQueuedCheckIns(ownerId);
+      }
       setQueuedToday(null);
       setResult(saved);
-      void flushQueuedCheckIns();
     } catch (cause) {
       if (cause instanceof ApiError) {
         // API errors (4xx/5xx) keep their existing verbatim handling — only a
@@ -239,8 +278,8 @@ export function CheckInPage() {
         }
       } else if (cause instanceof TypeError) {
         // fetch rejects with a TypeError when the network is unreachable — the
-        // offline case (ADR-0030). Capture on-device instead of losing the entry.
-        const queued = enqueueCheckIn(body);
+        // offline case (ADR-0030). Capture on-device, bound to this account.
+        const queued = ownerId === null ? null : enqueueCheckIn(ownerId, body);
         if (queued !== null) {
           setOfflineSaved(queued);
           setQueuedToday(queued);
@@ -255,7 +294,9 @@ export function CheckInPage() {
     }
   };
 
-  const notices = syncNotices.map((notice) => <ErrorNotice key={notice}>{notice}</ErrorNotice>);
+  const notices = syncNotices.map((notice) => (
+    <ErrorNotice key={notice.id}>{notice.text}</ErrorNotice>
+  ));
 
   if (offlineSaved !== null) {
     return (

@@ -36,9 +36,22 @@ base('isAllowed treats only the designed statuses as benign', () => {
     false,
   );
   // The deliberate offline severing in the offline check-in spec (ADR-0030) is
-  // benign-by-design — but ONLY that exact net-error code; any other network
-  // fault (a refused connection = a broken mock/server) still fails the gate.
-  expect(isAllowed('Failed to load resource: net::ERR_INTERNET_DISCONNECTED')).toBe(true);
+  // benign-by-design ONLY for the spec that opts in via
+  // test.use({ allowOfflineNetworkErrors: true }) — a spec WITHOUT the opt-in
+  // still fails on that line (the allowance is per-spec, never suite-global)...
+  expect(isAllowed('Failed to load resource: net::ERR_INTERNET_DISCONNECTED')).toBe(false);
+  expect(
+    isAllowed('Failed to load resource: net::ERR_INTERNET_DISCONNECTED', {
+      allowOfflineNetworkErrors: true,
+    }),
+  ).toBe(true);
+  // ...and even the opted-in spec is pinned to that exact net-error code; any
+  // other network fault (a refused connection = a broken mock/server) fails.
+  expect(
+    isAllowed('Failed to load resource: net::ERR_CONNECTION_REFUSED', {
+      allowOfflineNetworkErrors: true,
+    }),
+  ).toBe(false);
   expect(isAllowed('Failed to load resource: net::ERR_CONNECTION_REFUSED')).toBe(false);
   expect(isAllowed('Failed to load resource: net::ERR_NAME_NOT_RESOLVED')).toBe(false);
   // Genuine app faults are never allowlisted.

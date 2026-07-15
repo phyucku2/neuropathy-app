@@ -41,41 +41,61 @@ import type { MockApiState, Scenario } from './mock-api';
  */
 const ALLOWED_CONSOLE_PATTERNS: RegExp[] = [
   /Failed to load resource: the server responded with a status of (401|404|409|422)\b/,
-  // The offline check-in spec (patient/checkin-offline.spec.ts, ADR-0030) drives a
-  // DESIGNED offline submission: the POST /adl is deliberately severed
-  // (context.setOffline + route.abort('internetdisconnected')), Chromium logs this
-  // exact network line for the failed resource, and the app HANDLES the failure —
-  // the fetch TypeError is caught and the check-in is queued on-device (the spec's
-  // positive assertions prove the saved-on-device state, then the successful sync).
-  // Pinned to this one net-error code — a different network fault (e.g.
-  // net::ERR_CONNECTION_REFUSED, a genuinely broken mock) still fails the gate.
-  /Failed to load resource: net::ERR_INTERNET_DISCONNECTED\b/,
 ];
 
 /**
- * True only for the documented, designed-and-handled network-status noise above.
- * Exported so the self-check spec (support/self-check.spec.ts) can prove the gate
- * both catches real faults and does not false-positive on the allowed statuses.
+ * PER-SPEC opt-in (never suite-global): the offline check-in spec
+ * (patient/checkin-offline.spec.ts, ADR-0030) drives a DESIGNED offline
+ * submission — the POST /adl is deliberately severed (context.setOffline +
+ * route.abort('internetdisconnected')), Chromium logs this exact network line for
+ * the failed resource, and the app HANDLES the failure (the fetch TypeError is
+ * caught and the check-in is queued on-device; the spec's positive assertions
+ * prove it). That spec opts in with `test.use({ allowOfflineNetworkErrors: true })`;
+ * every other spec keeps failing on this line, and even the opted-in spec is
+ * pinned to this one net-error code — a different network fault (e.g.
+ * net::ERR_CONNECTION_REFUSED, a genuinely broken mock) still fails the gate.
  */
-export function isAllowed(message: string): boolean {
+const OFFLINE_NETWORK_ERROR_PATTERN = /Failed to load resource: net::ERR_INTERNET_DISCONNECTED\b/;
+
+/**
+ * True only for the documented, designed-and-handled network noise: the allowed
+ * statuses everywhere, plus the offline net-error line ONLY when the calling
+ * spec opted in (see OFFLINE_NETWORK_ERROR_PATTERN). Exported so the self-check
+ * spec (support/self-check.spec.ts) can prove the gate catches real faults, does
+ * not false-positive on the allowed statuses, and keeps the offline line failing
+ * for specs WITHOUT the opt-in.
+ */
+export function isAllowed(
+  message: string,
+  options: { allowOfflineNetworkErrors?: boolean } = {},
+): boolean {
+  if (options.allowOfflineNetworkErrors === true && OFFLINE_NETWORK_ERROR_PATTERN.test(message)) {
+    return true;
+  }
   return ALLOWED_CONSOLE_PATTERNS.some((pattern) => pattern.test(message));
 }
 
 interface Fixtures {
   consoleErrors: string[];
+  /** Spec-scoped opt-in (test.use) for the deliberate-offline scenario only. */
+  allowOfflineNetworkErrors: boolean;
 }
 
 export const test = base.extend<Fixtures>({
+  allowOfflineNetworkErrors: [false, { option: true }],
   consoleErrors: [
-    async ({ page }, use) => {
+    async ({ page, allowOfflineNetworkErrors }, use) => {
       const errors: string[] = [];
       page.on('console', (message) => {
-        if (message.type() === 'error' && !isAllowed(message.text())) {
+        if (
+          message.type() === 'error' &&
+          !isAllowed(message.text(), { allowOfflineNetworkErrors })
+        ) {
           errors.push(`console.error: ${message.text()}`);
         }
       });
       page.on('pageerror', (error) => {
-        if (!isAllowed(error.message)) {
+        if (!isAllowed(error.message, { allowOfflineNetworkErrors })) {
           errors.push(`pageerror: ${error.message}`);
         }
       });

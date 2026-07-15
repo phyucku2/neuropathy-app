@@ -8,6 +8,11 @@ import {
   storeSession,
 } from '../auth/tokenStore';
 import {
+  clearQueuedCheckIns,
+  enqueueCheckIn,
+  listQueuedCheckIns,
+} from '../features/checkin/offlineQueue';
+import {
   TEST_ACCESS_TOKEN,
   TEST_REFRESH_TOKEN,
   TEST_REFRESHED_ACCESS_TOKEN,
@@ -39,6 +44,31 @@ describe('request', () => {
     expect(expired).toHaveBeenCalledTimes(1);
     expect(getRefreshToken()).toBeNull();
     expect(getAccessToken()).toBeNull();
+    unsubscribe();
+  });
+
+  it('does NOT expire the session when the refresh itself NETWORK-fails (offline is not a session end)', async () => {
+    // Restore-shaped state: refresh token stored, no access token yet.
+    sessionStorage.setItem('neuropathy.refresh_token', TEST_REFRESH_TOKEN);
+    enqueueCheckIn('owner-1', {
+      walking: 1,
+      stairs: 2,
+      balance_confidence: 3,
+      check_in_date: '2026-07-01',
+    });
+    // The 401 → refresh dance starts, but the refresh POST never reaches the
+    // server (offline): the fetch TypeError must propagate to the caller WITHOUT
+    // notifySessionExpired — storage (token + queue) stays intact for a retry.
+    server.use(http.post('/auth/refresh', () => HttpResponse.error()));
+    const expired = vi.fn();
+    const unsubscribe = onSessionExpired(expired);
+
+    await expect(getMe()).rejects.toThrow(TypeError);
+
+    expect(expired).not.toHaveBeenCalled();
+    expect(getRefreshToken()).toBe(TEST_REFRESH_TOKEN);
+    expect(listQueuedCheckIns('owner-1')).toHaveLength(1);
+    clearQueuedCheckIns();
     unsubscribe();
   });
 

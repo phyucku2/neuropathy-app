@@ -5,6 +5,9 @@
  *  - flushes on every window 'online' event while the session lasts.
  * The third trigger — after a successful new submission — lives in CheckInPage.
  *
+ * Every flush is scoped to the signed-in account's user id: only that owner's
+ * queued entries are read and posted (ADR-0030 per-user binding).
+ *
  * Renders nothing; anonymous/restoring sessions never register the listener, so no
  * unauthenticated POST is ever attempted.
  */
@@ -14,21 +17,22 @@ import { useAuth } from '../../auth/AuthContext';
 import { flushQueuedCheckIns } from './offlineSync';
 
 export function OfflineCheckInSync() {
-  const { status } = useAuth();
+  const { status, user } = useAuth();
+  const ownerId = status === 'authenticated' && user !== null ? user.user_id : null;
 
   useEffect(() => {
-    if (status !== 'authenticated') {
+    if (ownerId === null) {
       return;
     }
-    void flushQueuedCheckIns();
+    void flushQueuedCheckIns(ownerId);
     const onOnline = () => {
-      void flushQueuedCheckIns();
+      void flushQueuedCheckIns(ownerId);
     };
     window.addEventListener('online', onOnline);
     return () => {
       window.removeEventListener('online', onOnline);
     };
-  }, [status]);
+  }, [ownerId]);
 
   return null;
 }

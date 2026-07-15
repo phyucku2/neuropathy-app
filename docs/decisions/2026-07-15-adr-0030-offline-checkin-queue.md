@@ -18,35 +18,58 @@ turn into a fabricated-data path.
 
 ## Decision
 
-### 1. Queue store: localStorage, one entry per calendar day
+### 1. Queue store: localStorage, per-user bound, one entry per calendar day
 
 `frontend/src/features/checkin/offlineQueue.ts` — a pure leaf module (no React/API
-imports, injectable clock). Entries carry `{walking, stairs, balance_confidence,
-check_in_date, queued_at}`, where `check_in_date` is the patient's **local** calendar
-day at capture time (same rule as the online path — never UTC). At most **one entry
-per date**: a newer same-day capture REPLACES the queued one, mirroring the server's
+imports, injectable clock). The store is keyed by the **owning account's user id**
+(`MeOut.user_id`): every read and write is scoped to the current owner, so on a
+shared browser one account can never see, flush, or overwrite another account's
+entries. Entries carry `{walking, stairs, balance_confidence, check_in_date,
+queued_at}`, where `check_in_date` is the patient's **local** calendar day at capture
+time (same rule as the online path — never UTC). At most **one entry per date per
+owner**: a newer same-day capture REPLACES the queued one, mirroring the server's
 supersede rule (ADR-0006: only the newest same-day check-in counts) on-device.
 Corrupt/unavailable storage reads as an empty queue; failed writes return null and the
 page falls back to its normal error path.
 
-**Privacy review point — health answers persisted until sync (accepted):**
+**Privacy review point — health answers persisted until sync (accepted, honestly
+stated):** on **web**, `localStorage` survives a tab that closes WITHOUT a logout —
+there is no "dies with the session" guarantee from the browser, and pretending
+otherwise would be false. The retention is instead bounded by four explicit rules:
+
+- **Per-user binding.** Entries are stored under the capturing account's user id and
+  are invisible to every other account (reads, the queued-today notice, and the flush
+  all take the current owner). A patient B on the same browser never sees or submits
+  patient A's answers.
+- **Foreign purge on sign-in.** The moment an authenticated profile is confirmed
+  (login, register, or session restore), every OTHER owner's entries are purged
+  (`purgeQueuedCheckInsForOtherOwners`): once we know a different user is active,
+  foreign health answers do not persist.
+- **TTL.** A sweep at module load (every app boot) drops entries older than 14 days
+  (`QUEUED_CHECKIN_MAX_AGE_DAYS`) — a flush that stale would be clinically useless
+  and pollute the trend.
+- **Clearance on REAL session ends.** `tokenStore.clearSession()` calls
+  `clearQueuedCheckIns()` on the SHARED path — logout, **account deletion**
+  (DeleteAccountCard → `logout()` → `clearSession`, ADR-0027), failed sign-in
+  cleanup, and a genuine auth rejection (`notifySessionExpired`) all clear it without
+  each flow having to remember to. (Unit-tested through the real deletion flow.)
+  Deliberately NOT a session end: a transient network failure. Reopening the app
+  while still offline (the restore `GET /auth/me` fetch TypeError) or a
+  network-failed token refresh leaves both the stored refresh token and the queue
+  intact — destroying the captured data on an offline boot would defeat the queue's
+  entire purpose. Only the server actively answering and refusing the session clears.
+
+Additional posture points:
 
 - The data is three low-sensitivity ordinal self-ratings plus a date — no free text,
   no identifiers, no tokens.
 - The device is the patient's own: on Android the manifest sets `allowBackup=false`
   (ADR-0023), so the value never reaches cloud backup; on web, localStorage is
   browser-profile-local to the origin.
-- Retention is bounded: entries are deleted the moment they sync, and the whole queue
-  is cleared on **every session clear**. The clear is wired into the SHARED path —
-  `tokenStore.clearSession()` calls `clearQueuedCheckIns()` — not into any UI flow, so
-  logout, **account deletion** (DeleteAccountCard → `logout()` → `clearSession`,
-  ADR-0027), failed sign-in cleanup, and session expiry (`notifySessionExpired`) all
-  clear it without each flow having to remember to. (Unit-tested through the real
-  deletion flow.)
 - `sessionStorage` (the ADR-0015 refresh-token choice) was rejected here because it
   dies with the tab: an offline patient closing the app is the expected case, and the
   entry must survive to sync later. The larger persistence window is exactly the
-  feature, bounded by the clearance rules above.
+  feature, bounded by the four rules above.
 
 ### 2. Submission flow: network failures queue; API errors keep their handling
 
@@ -82,8 +105,14 @@ authenticated patient area only — no anonymous POSTs):
 | `window 'online'` | every event while the session lasts |
 | After a successful new submission | CheckInPage flushes remaining (older) days |
 
-Flush semantics: entries post oldest day first; **single-flight** (repeated 'online'
-events / overlapping triggers share one pass); per-entry outcomes:
+Flush semantics: every pass is scoped to the signed-in owner's entries and posts
+oldest day first; **single-flight with a rerun** — only one pass runs at a time, and
+a trigger that arrives mid-pass queues exactly ONE fresh pass after it (shared by all
+mid-pass callers), so a new trigger's reason is honored even for days the in-flight
+snapshot already walked past. Immediately before EACH entry's POST the queue is
+re-read and the entry is skipped if it was removed or replaced — a fresh online
+submission that recalled its day's queued entry is never superseded by the stale
+in-flight copy. Per-entry outcomes:
 
 - **success** → removed from the queue; the page shows the server's real response.
 - **409/422** → the server refused the content; a retry can never succeed, so the
@@ -102,21 +131,27 @@ clock skew surfaces as the 422 drop-with-notice, never silent data loss.
 
 ## Verification boundary
 
-- **jsdom units (20 new):** queue replace-same-day/clock-injection/corruption/storage
-  failure; clear-on-clearSession incl. driving the real deletion flow; the
-  network-vs-API split (TypeError queues; 500 does not); flush matrix (dates honest +
-  oldest-first, single-flight, 409/422 drop + one-shot notice, network stop, 401 stop);
-  boot/online/anonymous triggers; the offline→online page flip.
+- **jsdom units:** queue replace-same-day/clock-injection/corruption/storage
+  failure; per-user binding (owner-scoped reads/writes, the shared-browser scenario:
+  B sees no notice, flushes nothing of A's, A's entries purged on B's sign-in); the
+  14-day TTL sweep; clear-on-clearSession incl. driving the real deletion flow; the
+  offline-boot repro (queue + refresh token survive a network-failed restore, then a
+  later online boot restores and flushes) vs. a genuine auth rejection (still
+  clears); the network-vs-API split (TypeError queues; 500 does not); flush matrix
+  (dates honest + oldest-first, single-flight + mid-pass rerun, the stale-entry skip
+  when a fresh submission recalled it, 409/422 drop + one-shot notice + the page
+  leaving its saved-on-device state when its own entry is dropped, network stop,
+  401 stop); boot/online/anonymous triggers; the offline→online page flip.
 - **Real browser (Playwright, built bundle):** `e2e/patient/checkin-offline.spec.ts`
   submits with the network severed (`context.setOffline(true)` for `navigator.onLine`
   + the real 'online' event, PLUS `route.abort('internetdisconnected')` because route
   interception can still fulfill under emulated offline), asserts the saved-on-device
   state, restores connectivity, and asserts the mock **recorded** the POST with the
   true local date and the UI flipped to the synced result — zero console errors. The
-  ADR-0022 allowlist gains exactly one status-specific line,
-  `net::ERR_INTERNET_DISCONNECTED` (benign-by-design for this spec: the failure IS the
-  scenario and the app handles it); any other net error still fails the gate, proven
-  in the self-check spec.
+  `net::ERR_INTERNET_DISCONNECTED` console line is allowed ONLY for this spec, via a
+  per-spec fixture opt-in (`test.use({ allowOfflineNetworkErrors: true })`) — never
+  suite-global; any other net error, and this line in any other spec, still fails the
+  gate, both proven in the self-check spec.
 - **Not covered here:** true airplane-mode behavior on a physical device (the 'online'
   event source is the OS); the web/Chromium emulation is the proxy, per ADR-0023's
   device-verification boundary.

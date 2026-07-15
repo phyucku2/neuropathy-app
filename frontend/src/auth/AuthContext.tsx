@@ -17,8 +17,10 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { ApiError } from '../api/client';
 import { getMe, login as apiLogin, register as apiRegister } from '../api/endpoints';
 import type { MeOut, TokenOut } from '../api/types';
+import { purgeQueuedCheckInsForOtherOwners } from '../features/checkin/offlineQueue';
 import { resolveNativeRestore } from './nativeRestore';
 import { isNativePlatform } from './platform';
 import { clearSession, getRefreshToken, onSessionExpired, storeSession } from './tokenStore';
@@ -83,13 +85,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     getMe()
       .then((me) => {
         if (!cancelled) {
+          // The active account is confirmed: purge any OTHER account's offline
+          // check-ins left on this browser — foreign health answers must not
+          // persist once a different user is known to be active (ADR-0030).
+          purgeQueuedCheckInsForOtherOwners(me.user_id);
           setUser(me);
           setStatus('authenticated');
         }
       })
-      .catch(() => {
+      .catch((cause: unknown) => {
         if (!cancelled) {
-          clearSession();
+          // Only a REAL auth rejection (ApiError — the server saw and refused the
+          // session; a genuine 401 expiry has already funneled through
+          // notifySessionExpired) ends the session and clears storage. A NETWORK
+          // failure (fetch TypeError — e.g. the app was reopened while still
+          // offline) is transient: keep the stored refresh token AND the offline
+          // check-in queue intact, so a later online launch restores the session
+          // and flushes the captured entries instead of destroying them. Either
+          // way the UI lands on /login — nothing renders as authenticated
+          // without a confirmed profile.
+          if (cause instanceof ApiError) {
+            clearSession();
+          }
           setStatus('anonymous');
         }
       });
@@ -111,6 +128,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearSession();
       throw cause;
     }
+    // Same rule as the restore path: signing in binds this browser to `me`, so any
+    // other account's queued offline check-ins are purged now (ADR-0030).
+    purgeQueuedCheckInsForOtherOwners(me.user_id);
     setUser(me);
     setStatus('authenticated');
   }, []);

@@ -15,10 +15,11 @@ import type { Page } from '@playwright/test';
  *   emulated offline (interception sits in front of the network stack); the abort
  *   guarantees the same fetch TypeError a genuinely offline browser produces.
  * The resulting "Failed to load resource: net::ERR_INTERNET_DISCONNECTED" console
- * line is benign-by-design FOR THIS SPEC (the failure is the scenario, and the app
- * handles it — proven by the assertions below); it is allowlisted in
- * support/fixtures.ts pinned to that exact net-error code (ADR-0022 discipline —
- * never a broad pattern).
+ * line is benign-by-design FOR THIS SPEC ONLY (the failure is the scenario, and the
+ * app handles it — proven by the assertions below): this spec opts in via
+ * `test.use({ allowOfflineNetworkErrors: true })`, the allowance stays pinned to
+ * that exact net-error code, and every other spec keeps failing on the line
+ * (ADR-0022 discipline — never a broad or suite-global pattern).
  */
 
 async function answerByKeyboard(page: Page, groupName: string, value: number): Promise<void> {
@@ -37,6 +38,9 @@ function localDay(): string {
   const day = String(now.getDate()).padStart(2, '0');
   return `${String(now.getFullYear())}-${month}-${day}`;
 }
+
+// The ONLY spec allowed to log the deliberate offline net-error (see fixtures.ts).
+test.use({ allowOfflineNetworkErrors: true });
 
 test.describe('Patient Check-in — offline queue', () => {
   test('captures an offline submission on-device and syncs it when back online', async ({
