@@ -9,6 +9,7 @@ import { App as CapApp } from '@capacitor/app';
 import { SplashScreen } from '@capacitor/splash-screen';
 import { Style, StatusBar } from '@capacitor/status-bar';
 import { isNativePlatform } from '../auth/platform';
+import { reassertReminder } from './reminders';
 
 /**
  * What the Android hardware back button should do. The WebView reports whether it can go back
@@ -98,6 +99,13 @@ export async function initNativeShell(
   } catch {
     // splash already gone — ignore
   }
+
+  // Re-assert the daily check-in reminder (ADR-0029): some OEMs drop scheduled
+  // alarms on reboot/app-update, and re-scheduling the same fixed id is idempotent.
+  // Fire-and-forget AFTER the splash is hidden — it must never delay or break the
+  // reveal (the splash-before-listeners lesson), so the promise is not awaited and
+  // a rejection is swallowed.
+  void reassertReminder().catch(() => undefined);
 
   const cleanups: (() => void)[] = [];
 

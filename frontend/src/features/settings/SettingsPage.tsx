@@ -16,6 +16,7 @@ import { useApi } from '../../lib/useApi';
 import { ConnectionRow } from './ConnectionRow';
 import { DeleteAccountCard } from './DeleteAccountCard';
 import { EmrConnectCard } from './EmrConnectCard';
+import { ReminderCard } from './ReminderCard';
 
 const CAPABILITY_ICONS: Record<string, { glyph: string; color: string }> = {
   ingest_biomech: { glyph: '◔', color: 'var(--color-brand-blue)' },
@@ -183,6 +184,10 @@ export function SettingsPage() {
         Turn on what fits you. Everything is optional — your app, your way.
       </p>
       <CapabilitiesCard />
+      {/* Daily check-in reminder (ADR-0029) sits with the source toggles — a
+          preference, deliberately outside the danger zone below. Native-only;
+          web renders the honest fallback. */}
+      <ReminderCard />
       <ConnectionsCard />
       {/* EMR connect (ADR-0028) sits with the clinic connections — a data-source
           concern, deliberately outside the danger zone below. */}

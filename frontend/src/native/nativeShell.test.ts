@@ -24,6 +24,11 @@ vi.mock('@capacitor/app', () => ({
     exitApp: () => exitApp(),
   },
 }));
+// The reminder re-assert (ADR-0029) is its own seam with its own suite
+// (reminders.test.ts); here we only lock HOW the shell calls it: fire-and-forget,
+// after the splash hide, failure swallowed.
+const { reassert } = vi.hoisted(() => ({ reassert: vi.fn() }));
+vi.mock('./reminders', () => ({ reassertReminder: () => reassert() }));
 
 import { isNativePlatform } from '../auth/platform';
 import { appUrlPath, backAction, initNativeShell } from './nativeShell';
@@ -90,6 +95,7 @@ describe('initNativeShell', () => {
     exitApp.mockReset().mockResolvedValue(undefined);
     addListener.mockReset().mockResolvedValue({ remove: () => removeListener() });
     removeListener.mockReset();
+    reassert.mockReset().mockResolvedValue(undefined);
   });
 
   it('is a no-op on web and returns a no-op cleanup (never invokes goBack or native plugins)', async () => {
@@ -100,6 +106,7 @@ describe('initNativeShell', () => {
     expect(setStyle).not.toHaveBeenCalled();
     expect(hide).not.toHaveBeenCalled();
     expect(addListener).not.toHaveBeenCalled();
+    expect(reassert).not.toHaveBeenCalled();
     expect(() => cleanup()).not.toThrow();
   });
 
@@ -161,5 +168,24 @@ describe('initNativeShell', () => {
     await initNativeShell(vi.fn(), vi.fn());
     expect(hide).toHaveBeenCalledOnce();
     expect(addListener).toHaveBeenCalledWith('backButton', expect.any(Function));
+  });
+
+  it('native: the reminder re-assert fires AFTER the splash hide (never delays the reveal — ADR-0029)', async () => {
+    nativeMock.mockReturnValue(true);
+    await initNativeShell(vi.fn(), vi.fn());
+    expect(reassert).toHaveBeenCalledOnce();
+    // Ordering pinned: hide() first, then the fire-and-forget re-assert.
+    const hideOrder = hide.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY;
+    const reassertOrder = reassert.mock.invocationCallOrder[0] ?? Number.NEGATIVE_INFINITY;
+    expect(hideOrder).toBeLessThan(reassertOrder);
+  });
+
+  it('native: a rejected re-assert is swallowed — init completes and listeners still wire', async () => {
+    nativeMock.mockReturnValue(true);
+    reassert.mockRejectedValue(new Error('alarm bridge fault'));
+    const cleanup = await initNativeShell(vi.fn(), vi.fn());
+    expect(hide).toHaveBeenCalledOnce();
+    expect(addListener).toHaveBeenCalledWith('backButton', expect.any(Function));
+    expect(() => cleanup()).not.toThrow();
   });
 });

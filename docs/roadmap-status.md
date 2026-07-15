@@ -85,6 +85,13 @@ that sign-off is
 the sign-off sheet); market context on products already billing these codes is in
 [`docs/product/reimbursed-apps-comparison.md`](product/reimbursed-apps-comparison.md).
 
+**Wave 5 — Patient experience** — small patient-facing quality-of-life portions that
+need no new backend surface.
+
+| # | Portion | Built | Tested | Merged | Notes |
+|---|---|---|---|---|---|
+| 1 | Daily check-in reminder (ADR-0029) — patient-configurable daily local notification (native-only; honest web fallback), `@capacitor/local-notifications` pinned to the Cap-6 line, injectable reminders seam (`src/native/reminders.ts`), "Daily reminder" card in Sources (toggle + time, permission-denied guidance), device-local preference (localStorage — no server state), fixed PHI-free content, launch re-assert against OEM alarm drops (fire-and-forget after splash hide) | ✅ | ✅ | ⏳ | Seam + card fully unit-tested off-device (exact Cap-6 `schedule.on {hour, minute}` repeating shape pinned); 212 unit tests ≥90% all four; 32 Playwright specs (new: the card's web fallback in the built bundle) zero console errors; `cap sync` warning-free; prod audit + license + secret scans clean. Real delivery is on-device only: `npx cap run android`, enable, let it fire. |
+
 ## Deferred (not scheduled)
 
 - BioMech API/SDK live ingestion (decision 2026-07-14: PDF stays primary; revisit

@@ -50,6 +50,24 @@ test.describe('Patient Sources (capabilities)', () => {
     await expect(adlSwitch).toHaveAttribute('aria-checked', 'false');
   });
 
+  test('renders the daily reminder card with the web fallback (native-only feature)', async ({
+    page,
+  }) => {
+    // The E2E suite runs in Chromium — the WEB platform — so the card must render
+    // its honest fallback: a disabled toggle and the mobile-app note, no time input
+    // (ADR-0029). The zero-console-errors gate proves the reminders seam imports
+    // cleanly in the built browser bundle.
+    await signedInApp(page);
+    await page.goto('/settings');
+
+    await expect(page.getByRole('heading', { name: 'Daily reminder' })).toBeVisible();
+    await expect(page.getByText('Reminders are available in the mobile app')).toBeVisible();
+    const reminderSwitch = page.getByRole('switch', { name: 'Daily check-in reminder' });
+    await expect(reminderSwitch).toBeVisible();
+    await expect(reminderSwitch).toBeDisabled();
+    await expect(page.getByLabel('Reminder time')).toHaveCount(0);
+  });
+
   test('renders clinic connections with consent controls', async ({ page }) => {
     await signedInApp(page);
     await page.goto('/settings');
