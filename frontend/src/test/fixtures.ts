@@ -10,6 +10,8 @@ import type {
   EmrConnectStartOut,
   EmrProviderOut,
   EmrPullOut,
+  ExportObservation,
+  ExportOut,
   MeOut,
   ObservationItem,
   PanelOut,
@@ -354,4 +356,70 @@ export const CONNECTION_ACTIVE: ConnectionOut = {
   clinic_name: 'Regional Medical Center',
   status: 'active',
   consent_granted_at: '2026-06-01T12:00:00Z',
+};
+
+// ---- data export (ADR-0031) — mirrors backend/app/schemas/export.py ----
+
+/** Two observations with a comma + quote in text/unit, so the CSV flattener's escaping
+ *  is exercised by real fixture data. */
+export const EXPORT_OBSERVATIONS: ExportObservation[] = [
+  {
+    id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    source: 'lab',
+    origin: 'ehr_imported',
+    code: '4548-4',
+    code_system: 'LOINC',
+    value_num: 7.2,
+    value_text: null,
+    unit: '%',
+    unit_system: 'UCUM',
+    effective_at: '2026-06-20T09:00:00Z',
+    recorded_at: '2026-06-20T09:05:00Z',
+    status: 'final',
+    revises_id: null,
+    recorded_by_role: 'patient',
+    quality: { human_confirmed: true },
+    payload: { panel: 'metabolic' },
+  },
+  {
+    id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    source: 'adl',
+    origin: 'patient_reported',
+    code: 'adl_daily_score',
+    code_system: null,
+    value_num: 9,
+    value_text: 'steady, "good" day',
+    unit: '{score}, per day',
+    unit_system: null,
+    effective_at: '2026-07-01T12:00:00Z',
+    recorded_at: '2026-07-01T12:00:00Z',
+    status: 'final',
+    revises_id: null,
+    recorded_by_role: 'patient',
+    quality: {},
+    payload: {},
+  },
+];
+
+export const EXPORT: ExportOut = {
+  exported_at: '2026-07-15T10:00:00Z',
+  schema_version: '1.0',
+  subject_id: ME.patient_id ?? '22222222-2222-4222-8222-222222222222',
+  account: {
+    display_name: ME.display_name,
+    email: ME.email,
+    role: 'patient',
+    created_at: '2026-05-01T08:00:00Z',
+  },
+  patient: {
+    patient_id: ME.patient_id ?? '22222222-2222-4222-8222-222222222222',
+    display_name: ME.display_name,
+    connection_mode: 'self_connected',
+    created_at: '2026-05-01T08:00:00Z',
+  },
+  observations: EXPORT_OBSERVATIONS,
+  trajectory: TRAJECTORY_IMPROVING,
+  capabilities: CAPABILITIES,
+  clinic_connections: [CONNECTION_ACTIVE],
+  emr_connections: [EMR_CONNECTION_ACTIVE],
 };

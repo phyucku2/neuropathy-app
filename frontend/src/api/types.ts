@@ -203,6 +203,59 @@ export interface EmrPullOut {
   results: EmrLabResult[];
 }
 
+// ---- export.py (ADR-0031 — "Download my data") ----
+
+/** ExportAccountProfile — the auth identity, NEVER the password hash. */
+export interface ExportAccountProfile {
+  display_name: string;
+  email: string;
+  role: string;
+  created_at: string | null;
+}
+
+/** ExportPatient — the linked clinical record's non-secret fields. */
+export interface ExportPatient {
+  patient_id: string;
+  display_name: string;
+  connection_mode: string;
+  created_at: string | null;
+}
+
+/** ExportObservation — one research-grade observation with full provenance. */
+export interface ExportObservation {
+  id: string;
+  source: string;
+  origin: string;
+  code: string;
+  code_system: string | null;
+  value_num: number | null;
+  value_text: string | null;
+  unit: string | null;
+  unit_system: string | null;
+  effective_at: string;
+  recorded_at: string;
+  status: string;
+  revises_id: string | null;
+  recorded_by_role: string | null;
+  quality: Record<string, unknown>;
+  payload: Record<string, unknown>;
+}
+
+/** ExportOut — the complete "Download my data" envelope. NEVER carries tokens,
+ *  secrets, or the password hash (the shapes above have no field for them). */
+export interface ExportOut {
+  exported_at: string;
+  schema_version: string;
+  subject_id: string;
+  account: ExportAccountProfile;
+  patient: ExportPatient;
+  observations: ExportObservation[];
+  trajectory: Trajectory;
+  capabilities: CapabilityStateOut[];
+  clinic_connections: ConnectionOut[];
+  emr_connections: EmrConnectionOut[];
+}
+
 // ---- clinic.py ----
 
 /** ConnectionOut (patient-side clinic connection) */

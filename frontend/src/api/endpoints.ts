@@ -18,6 +18,7 @@ import type {
   EmrConnectStartOut,
   EmrProviderOut,
   EmrPullOut,
+  ExportOut,
   InvitationOut,
   LoginIn,
   MeOut,
@@ -50,6 +51,15 @@ export function getMe(): Promise<MeOut> {
  */
 export async function deleteAccount(password: string): Promise<void> {
   await request<unknown>('/auth/me', { method: 'DELETE', body: { password } });
+}
+
+/**
+ * Download the signed-in patient's COMPLETE record (ADR-0031) — the right-of-access
+ * companion to account deletion. The backend audits every export and NEVER includes a
+ * token, secret, or password hash in the payload. Patient role only (403 otherwise).
+ */
+export function exportMyData(): Promise<ExportOut> {
+  return request<ExportOut>('/me/export');
 }
 
 // ---- trajectory ----

@@ -17,6 +17,7 @@ import {
   EMR_PROVIDERS,
   EMR_PULL,
   EMR_STATE,
+  EXPORT,
   ME,
   OBSERVATIONS,
   PANEL,
@@ -107,6 +108,11 @@ export const handlers = [
     }
     return HttpResponse.json({ detail: DELETE_WRONG_PASSWORD_DETAIL }, { status: 403 });
   }),
+
+  // Data export (ADR-0031): the complete record for the signed-in patient.
+  http.get('/me/export', ({ request }) =>
+    isAuthorized(request) ? HttpResponse.json(EXPORT) : unauthorized(),
+  ),
 
   http.get('/trajectory', ({ request }) =>
     isAuthorized(request) ? HttpResponse.json(TRAJECTORY_IMPROVING) : unauthorized(),

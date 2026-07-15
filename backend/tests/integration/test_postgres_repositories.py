@@ -83,7 +83,12 @@ async def test_user_repository_round_trip(
 
     async with session_factory() as session:
         repo = PostgresUserRepository(session)
-        assert await repo.get_by_email(record.email) == record
+        loaded = await repo.get_by_email(record.email)
+        # The read path now surfaces the server-stamped created_at (ADR-0031); adopt it
+        # onto the expected record so the rest of the round-trip compares field-for-field.
+        assert loaded is not None and loaded.created_at is not None
+        record.created_at = loaded.created_at
+        assert loaded == record
         assert await repo.get_by_id(record.id) == record
         assert await repo.get_by_email("nobody@example.com") is None
         assert await repo.get_by_id(uuid.uuid4()) is None
@@ -329,9 +334,15 @@ async def test_user_repository_clinician_fields_round_trip(
     async with session_factory() as session:
         repo = PostgresUserRepository(session)
         assert patient_record.patient_id is not None
-        assert await repo.get_by_patient_id(patient_record.patient_id) == patient_record
+        loaded_patient = await repo.get_by_patient_id(patient_record.patient_id)
+        # Adopt the server-stamped created_at the read path now surfaces (ADR-0031).
+        assert loaded_patient is not None and loaded_patient.created_at is not None
+        patient_record.created_at = loaded_patient.created_at
+        assert loaded_patient == patient_record
         assert await repo.get_by_patient_id(uuid.uuid4()) is None
         loaded = await repo.get_by_id(clinician_record.id)
+        assert loaded is not None and loaded.created_at is not None
+        clinician_record.created_at = loaded.created_at
         assert loaded == clinician_record and loaded.clinic_id == clinic.id
 
 

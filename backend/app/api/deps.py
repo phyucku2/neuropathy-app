@@ -67,6 +67,7 @@ from app.services.account_deletion import AccountDeletionService
 from app.services.auth import AuthService
 from app.services.capability import CapabilityService
 from app.services.clinic import ClinicService
+from app.services.export import PatientDataExportService
 
 _bearer = HTTPBearer(auto_error=False)
 _log = logging.getLogger(__name__)
@@ -423,6 +424,41 @@ def get_account_deletion_service(session: DbSessionDep = None) -> AccountDeletio
 
 
 AccountDeletionDep = Annotated[AccountDeletionService, Depends(get_account_deletion_service)]
+
+
+@lru_cache(maxsize=1)
+def _default_patient_data_export_service() -> PatientDataExportService:
+    """Process-wide PatientDataExportService for in-memory mode (ADR-0031). Every store
+    and service is the SAME singleton the auth/EMR/clinic/capability features use, so
+    the export reflects exactly the data those features wrote — read-only, plus the one
+    audit event, through the shared audit store."""
+    emr = _default_emr_service()
+    return PatientDataExportService(
+        users=_default_auth_service().users,
+        observations=emr.observations,
+        emr_connections=emr.connections,
+        clinic=_default_clinic_service(),
+        capabilities=_default_capability_service(),
+        audit=emr.audit,
+    )
+
+
+def get_patient_data_export_service(session: DbSessionDep = None) -> PatientDataExportService:
+    if session is None:
+        return _default_patient_data_export_service()
+    return PatientDataExportService(
+        users=PostgresUserRepository(session),
+        observations=PostgresObservationRepository(session),
+        emr_connections=PostgresEmrConnectionRepository(session),
+        # Compose the clinic/capability services on the SAME session so their reads
+        # (clinic names, effective toggle states) join the request transaction.
+        clinic=get_clinic_service(session),
+        capabilities=get_capability_service(session),
+        audit=PostgresAuditEventRepository(session),
+    )
+
+
+PatientDataExportDep = Annotated[PatientDataExportService, Depends(get_patient_data_export_service)]
 
 
 def require_capability(key: str) -> Callable[[CurrentUser, CapabilityService], Awaitable[None]]:

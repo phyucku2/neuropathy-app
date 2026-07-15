@@ -83,6 +83,15 @@ class Settings(BaseSettings):
     delete_account_rate_limit_max: int = 5
     delete_account_rate_limit_window_seconds: int = 900
 
+    # Data-export throttle (ADR-0031): GET /me/export runs an unbounded O(n) full-account
+    # assembly, so it is capped per actor exactly like deletion. Each successful export
+    # writes one 'export_account' audit event, so the sliding window counts those events
+    # (the invite-limiter pattern) — at most export_rate_limit_max exports per window.
+    # Over the budget the endpoint answers 429 BEFORE assembling anything, bounding both
+    # the work and the disclosure/audit volume per patient.
+    export_rate_limit_max: int = 10
+    export_rate_limit_window_seconds: int = 3600
+
     # Bootstrap-denial audit cap (ADR-0017): failed attempts on the UNAUTHENTICATED
     # provisioning gate are audited, but at most bootstrap_denied_audit_max rows per
     # sliding window — beyond the cap the 403 is unchanged and only the audit write is
