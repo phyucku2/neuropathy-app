@@ -2,16 +2,33 @@
  * Danger zone (ADR-0027): the delete-account flow — acknowledgment gating, the
  * two-tap confirm, pending-disable, the verbatim wrong-password alert, and the
  * happy path landing on the login screen with the transient deleted notice.
+ * Deletion also silences the device's daily reminder (ADR-0029 lifecycle) — the
+ * reminders seam is partially mocked so the flow runs through the real card while
+ * the cleanup call is observable; plain sign-out must NOT trigger it.
  */
 
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { delay, http, HttpResponse } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('../../native/reminders', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../native/reminders')>()),
+  disableReminderSilently: vi.fn(async () => undefined),
+}));
+
 import { getRefreshToken } from '../../auth/tokenStore';
+import { disableReminderSilently, REMINDER_PREF_KEY } from '../../native/reminders';
 import { DELETE_WRONG_PASSWORD_DETAIL, TEST_PASSWORD } from '../../test/fixtures';
 import { renderApp } from '../../test/renderApp';
 import { server } from '../../test/server';
+
+const reminderCleanupMock = vi.mocked(disableReminderSilently);
+
+beforeEach(() => {
+  reminderCleanupMock.mockClear();
+  localStorage.removeItem(REMINDER_PREF_KEY);
+});
 
 async function openDangerZone() {
   const user = userEvent.setup();
@@ -52,6 +69,33 @@ describe('SettingsPage — danger zone (delete account)', () => {
     expect(await screen.findByRole('heading', { name: 'Welcome back' })).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('Your account and data were deleted.');
     expect(getRefreshToken()).toBeNull();
+    // The device's daily reminder was silenced (cancel + preference cleared —
+    // ADR-0029 lifecycle); the seam's own cancel/clear behavior is locked in
+    // src/native/reminders.test.ts.
+    expect(reminderCleanupMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('wrong password does NOT silence the reminder — nothing was deleted', async () => {
+    const user = await openDangerZone();
+    await user.type(screen.getByLabelText('Confirm your password'), 'not-the-password');
+    await user.click(screen.getByRole('checkbox'));
+    await user.click(screen.getByRole('button', { name: 'Delete my account and data' }));
+    await user.click(screen.getByRole('button', { name: 'Tap again to permanently delete' }));
+    await screen.findByRole('alert');
+    expect(reminderCleanupMock).not.toHaveBeenCalled();
+  });
+
+  it('plain sign-out KEEPS the device reminder preference — cleanup is deletion-only (ADR-0029)', async () => {
+    const storedPref = JSON.stringify({ enabled: true, hour: 20, minute: 15 });
+    localStorage.setItem(REMINDER_PREF_KEY, storedPref);
+    const user = userEvent.setup();
+    renderApp('/settings');
+    await user.click(await screen.findByRole('button', { name: /^Sign out/ }));
+    expect(await screen.findByRole('heading', { name: 'Welcome back' })).toBeInTheDocument();
+    // The reminder is a per-device, PHI-free preference: signing out neither
+    // cancels it nor clears it.
+    expect(reminderCleanupMock).not.toHaveBeenCalled();
+    expect(localStorage.getItem(REMINDER_PREF_KEY)).toBe(storedPref);
   });
 
   it('shows the wrong-password detail verbatim in an alert and stays on settings', async () => {
