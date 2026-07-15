@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { AdlCheckInIn, CapabilityStateOut } from '../../api/types';
 import { CAPABILITIES, ME } from '../../test/fixtures';
@@ -479,6 +479,27 @@ describe('CheckInPage', () => {
     expect(groups).toHaveLength(3);
     expect(screen.queryByText('Symptoms today')).not.toBeInTheDocument();
     expect(screen.queryByRole('radiogroup', { name: /worst pain/i })).not.toBeInTheDocument();
+  });
+
+  it('waits for the capabilities read to resolve before rendering the form (never silently function-only)', async () => {
+    // A SLOW capabilities read with symptoms ON. The form must not render (and be
+    // submittable function-only) while the read is in flight — the Loading state holds
+    // until it resolves, then the symptom section appears (ADR-0034 finding #3).
+    server.use(
+      http.get('/capabilities', async () => {
+        await delay(60);
+        return HttpResponse.json({ capabilities: withSymptomsOn() });
+      }),
+    );
+    renderApp('/check-in');
+    // While the read is in flight: Loading, and no check-in form / submit button yet.
+    expect(await screen.findByText('Loading your check-in…')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save my check-in' })).not.toBeInTheDocument();
+    // Once resolved, the symptom section is present — it was never skipped.
+    await waitFor(() => {
+      expect(screen.getAllByRole('radiogroup')).toHaveLength(5);
+    });
+    expect(screen.getByText('Symptoms today')).toBeInTheDocument();
   });
 
   it('shows pain + numbness when the toggle is on and includes them in the POST', async () => {

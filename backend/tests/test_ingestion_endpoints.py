@@ -373,21 +373,47 @@ async def test_symptoms_on_stores_pain_and_numbness_with_polarity_and_provenance
         assert row.quality["instrument"] == "symptom-check-in"
 
 
-async def test_symptoms_partial_answer_stores_only_the_answered_item(
+async def test_symptoms_partial_answer_is_rejected_atomically(
     symptom_client: TestClient, service: EmrService
 ) -> None:
-    """An unanswered item yields no row — pain only, numbness omitted."""
-    resp = symptom_client.post("/adl", json=_adl(pain=3))
-    assert resp.status_code == 200
+    """With the toggle on, symptoms are both-or-neither: a partial submission (only one
+    of pain/numbness) is rejected 422 and NOTHING is persisted — not even the function
+    rows — so the day never lands a half-answered symptom pair (ADR-0034)."""
+    for partial in (_adl(pain=3), _adl(numbness=5)):
+        resp = symptom_client.post("/adl", json=partial)
+        assert resp.status_code == 422
+        assert "both pain and numbness" in resp.json()["detail"]
     rows = await service.observations.list_for_patient(PATIENT.patient_id)
-    codes = {row.code for row in rows}
-    assert "symptom_pain" in codes
-    assert "symptom_numbness" not in codes
+    assert rows == []
 
 
-async def test_symptoms_same_day_resubmission_supersedes_via_revises(
+async def test_symptoms_partial_resubmission_cannot_desync_the_pair(
     symptom_client: TestClient, service: EmrService
 ) -> None:
+    """The reviewer's empirical repro: a full symptom check-in, then a same-day re-POST
+    answering only ONE symptom. The partial is rejected (422), so the earlier pair stays
+    intact and current — the code can no longer leave a morning numbness paired with an
+    evening pain in the day's 'current' record (which Phase 2 reads per code)."""
+    assert symptom_client.post("/adl", json=_adl(pain=2, numbness=2)).status_code == 200
+    # POST {pain:8} with numbness omitted — previously this superseded only pain and
+    # left numbness=2 current (the mixed-day defect). Now it is refused.
+    resp = symptom_client.post("/adl", json=_adl(pain=8))
+    assert resp.status_code == 422
+
+    current = await service.observations.list_for_patient(PATIENT.patient_id)
+    by_code = {row.code: row for row in current}
+    # Both symptoms remain at their original, coherent pair — neither superseded.
+    assert by_code["symptom_pain"].value_num == 2.0
+    assert by_code["symptom_numbness"].value_num == 2.0
+    assert by_code["symptom_pain"].status is ObservationStatus.final
+    assert by_code["symptom_numbness"].status is ObservationStatus.final
+
+
+async def test_symptoms_full_resubmission_supersedes_both_codes_together(
+    symptom_client: TestClient, service: EmrService
+) -> None:
+    """A full re-submit supersedes BOTH symptom codes together, so the current pair
+    always comes from one check-in (never a mix of two)."""
     symptom_client.post("/adl", json=_adl(pain=2, numbness=2))
     second = symptom_client.post("/adl", json=_adl(pain=8, numbness=6)).json()
     assert second["superseded"] is True
@@ -397,8 +423,11 @@ async def test_symptoms_same_day_resubmission_supersedes_via_revises(
     # Only the current rows analyze; the first pain/numbness are superseded, not lost.
     assert by_code["symptom_pain"].value_num == 8.0
     assert by_code["symptom_numbness"].value_num == 6.0
+    # Both moved together — each new row chains onto its own earlier same-day record.
     assert by_code["symptom_pain"].status is ObservationStatus.amended
+    assert by_code["symptom_numbness"].status is ObservationStatus.amended
     assert by_code["symptom_pain"].revises_id is not None
+    assert by_code["symptom_numbness"].revises_id is not None
 
 
 def test_symptom_values_must_be_in_the_0_10_scale(symptom_client: TestClient) -> None:

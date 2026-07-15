@@ -164,10 +164,15 @@ async def record_adl_check_in(
     supersedes the first via revises_id chains (ADR-0006), never an overwrite.
 
     When the `ingest_symptoms` capability is on for this patient (ADR-0034 Phase 1),
-    the optional 0-10 pain + numbness items are ALSO persisted as their own higher-is-
-    worse observations. When it is off, those answers are ignored entirely — a stored
-    "off" the code actually respects (enforced-flag honesty, ADR-0013), so nothing is
-    captured regardless of what the client sends."""
+    the 0-10 pain + numbness items are ALSO persisted as their own higher-is-worse
+    observations. They are captured ATOMICALLY: with the toggle on, a check-in that
+    answers ANY symptom must answer BOTH — a partial submission is rejected (422). This
+    stops a same-day re-POST of one symptom from superseding only that code and leaving
+    the other symptom's earlier row current, which would let the day's "current" record
+    mix a morning numbness with an evening pain (Phase 2 reads current-per-code). When
+    the toggle is off, those answers are ignored entirely — a stored "off" the code
+    actually respects (enforced-flag honesty, ADR-0013), so nothing is captured
+    regardless of what the client sends."""
     assert current.patient_id is not None  # guaranteed by require_patient
     now = datetime.now(UTC)
     day = body.check_in_date or now.date()
@@ -180,6 +185,18 @@ async def record_adl_check_in(
     # The symptom sub-feature is a SEPARATE, opt-in toggle from the base check-in
     # (which the endpoint's require_capability("ingest_adl") gate already enforced).
     symptoms_on = await capabilities.is_active(current.patient_id, "ingest_symptoms", now=now)
+
+    # Atomic symptom capture (ADR-0034): with the toggle on, symptoms are both-or-neither.
+    # Answering only one would supersede only that code and leave the other symptom's
+    # earlier same-day row current — a mixed "current" record Phase 2 would composite
+    # wrongly. Reject the partial so the day's symptom pair always moves together. (When
+    # the toggle is off, pain/numbness are ignored below regardless of what is sent.)
+    # Reject when exactly ONE symptom is answered (XOR): both together, or neither.
+    if symptoms_on and (body.pain is None) != (body.numbness is None):
+        raise HTTPException(
+            status_code=422,
+            detail="Symptom check-in needs both pain and numbness together, or neither.",
+        )
 
     start, end = day_bounds_utc(day)
     # Only resolve symptom supersessions when the feature is on AND an item was answered.

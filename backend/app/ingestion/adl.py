@@ -172,7 +172,9 @@ def symptom_check_in_to_observations(
 
     The caller (route) only invokes this when the `ingest_symptoms` capability is on for
     the patient (ADR-0013 enforced-flag honesty); when off, symptom answers are never
-    persisted regardless of what the client sends.
+    persisted regardless of what the client sends. The route also enforces atomic capture
+    (ADR-0034): with the toggle on, symptoms are both-or-neither, so in practice both rows
+    are written together — the per-item None guard here stays as defense in depth.
     """
     recorded = recorded_at or datetime.now(UTC)
     values: dict[str, int | None] = {

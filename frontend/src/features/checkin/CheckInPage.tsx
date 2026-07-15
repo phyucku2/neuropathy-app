@@ -15,7 +15,7 @@ import { ApiError, messageFor } from '../../api/client';
 import { getCapabilities, postAdlCheckIn } from '../../api/endpoints';
 import type { AdlCheckInOut } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
-import { ErrorNotice, SuccessNotice } from '../../components/StatusMessages';
+import { ErrorNotice, Loading, SuccessNotice } from '../../components/StatusMessages';
 import { useApi } from '../../lib/useApi';
 import {
   enqueueCheckIn,
@@ -212,10 +212,12 @@ export function CheckInPage() {
     pain: null,
     numbness: null,
   });
-  // The symptom capture toggle (ingest_symptoms, ADR-0013). A failed/pending read
-  // reads as OFF — the check-in then behaves exactly as before the symptom items
-  // existed (safe default; also keeps the page usable offline).
-  const { data: capabilityData } = useApi(getCapabilities);
+  // The symptom capture toggle (ingest_symptoms, ADR-0013). We gate the whole page on
+  // this read RESOLVING (below): a patient whose toggle is on but whose capabilities
+  // read is merely slow must not be shown a function-only form they could submit before
+  // the symptom section ever appears. A genuinely FAILED read still reads as OFF (safe
+  // default; keeps the page usable offline) — only an in-flight read blocks.
+  const { data: capabilityData, loading: capabilityLoading } = useApi(getCapabilities);
   const symptomsOn =
     capabilityData?.capabilities.some((c) => c.key === SYMPTOMS_CAPABILITY && c.active) ?? false;
   const [result, setResult] = useState<AdlCheckInOut | null>(null);
@@ -372,6 +374,16 @@ export function CheckInPage() {
   const notices = syncNotices.map((notice) => (
     <ErrorNotice key={notice.id}>{notice.text}</ErrorNotice>
   ));
+
+  // Wait for the capability read to resolve before rendering the form (like other
+  // screens await their first read). Without this, a slow read would default the
+  // symptom items OFF and a symptoms-on patient could submit a function-only check-in
+  // without ever seeing the symptom section (ADR-0034). A failed read leaves
+  // `capabilityLoading` false, so offline/error still proceeds function-only — only an
+  // in-flight read blocks here.
+  if (capabilityLoading && capabilityData === null) {
+    return <Loading label="Loading your check-in…" />;
+  }
 
   if (offlineSaved !== null) {
     return (

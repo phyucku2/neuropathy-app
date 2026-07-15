@@ -153,7 +153,19 @@ frontend UI). What was actually built, and the honesty caveats to relay:
   when the toggle is on for the patient; when off it ignores `pain`/`numbness` entirely regardless of
   what the client sends. The frontend reads the effective toggle and shows the two questions only when
   it is on; when off the check-in behaves exactly as before. Observability stays PHI-free (audit detail
-  carries symptom *counts*, never values).
+  carries symptom *counts*, never values). **Accepted behavior (enforced-flag honesty):** a symptom
+  answer captured offline while the toggle was on is dropped server-side if the capability is disabled
+  before the queued check-in syncs — the enforced "off" is the authority, so late-arriving symptoms for a
+  now-disabled capability are honestly discarded rather than back-filled, and we deliberately add no
+  notification for it.
+- **Atomic symptom capture (both-or-neither).** With `ingest_symptoms` on, a check-in that answers ANY
+  symptom must answer BOTH pain and numbness; a partial submission is rejected (422). This aligns the
+  backend contract with the UI (which already requires both when the section shows) and closes a Phase-2
+  data-integrity defect: a same-day re-POST of a single symptom would otherwise supersede only that code
+  and leave the other symptom's earlier row current, mixing (e.g.) a morning numbness with an evening pain
+  in the day's "current" record that Phase 2 reads per code. When the toggle is off both are ignored as
+  before; when on and neither is provided the check-in stays function-only (symptoms optional in aggregate,
+  atomic when present).
 - **No DB migration.** The new observations reuse existing columns and existing enum values
   (`source_type='adl'`, `data_origin='patient_reported'`); the capability is a lazily-seeded registry
   key. `Base.metadata` is unchanged, so the autogenerate-parity integration test stays green and per

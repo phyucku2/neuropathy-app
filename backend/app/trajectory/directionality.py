@@ -52,7 +52,9 @@ _STAIRS = SignalInfo(Polarity.higher_is_better, "stairs")
 _BALANCE_CONFIDENCE = SignalInfo(Polarity.higher_is_better, "balance confidence")
 # Symptom check-in (POST /adl, ADR-0034 Phase 1): pain + numbness/paresthesia, higher =
 # WORSE, so lower_is_better here inverts them into the shared better/worse judgment.
-_SYMPTOM_PAIN = SignalInfo(Polarity.lower_is_better, "pain")
+# Distinct label from the latent lab-side `_PAIN` ("pain") so the self-reported symptom
+# trend ("nerve pain") never renders as a second, indistinguishable "pain" line.
+_SYMPTOM_PAIN = SignalInfo(Polarity.lower_is_better, "nerve pain")
 _SYMPTOM_NUMBNESS = SignalInfo(Polarity.lower_is_better, "numbness or tingling")
 # BioMech balance/gait report metrics (ADR-0014). Polarities mirror the parser's
 # METRICS registry (app/biomech/parser.py); a parity test keeps the two in agreement.
