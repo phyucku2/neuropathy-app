@@ -6,6 +6,7 @@ import { AddDataPage } from './features/add/AddDataPage';
 import { LoginPage } from './features/auth/LoginPage';
 import { RegisterPage } from './features/auth/RegisterPage';
 import { CheckInPage } from './features/checkin/CheckInPage';
+import { OfflineCheckInSync } from './features/checkin/OfflineCheckInSync';
 import { EmrCallbackPage } from './features/emr/EmrCallbackPage';
 import { PanelPage } from './features/clinic/PanelPage';
 import { PatientDetailPage } from './features/clinic/PatientDetailPage';
@@ -36,7 +37,17 @@ function PatientArea() {
   if (user === null) {
     return <Loading label="Loading your account…" />;
   }
-  return user.role === 'clinician' ? <Navigate to="/clinic" replace /> : <Outlet />;
+  if (user.role === 'clinician') {
+    return <Navigate to="/clinic" replace />;
+  }
+  return (
+    <>
+      {/* Offline check-in sync triggers (ADR-0030): boot flush + 'online' events,
+          patient sessions only. Renders nothing. */}
+      <OfflineCheckInSync />
+      <Outlet />
+    </>
+  );
 }
 
 function ClinicianArea() {

@@ -14,6 +14,7 @@
  * without the API client importing React.
  */
 
+import { clearQueuedCheckIns } from '../features/checkin/offlineQueue';
 import { refreshTokenBackend } from './refreshTokenBackend';
 
 let accessToken: string | null = null;
@@ -53,6 +54,13 @@ export async function storeSession(tokens: {
 export function clearSession(): void {
   accessToken = null;
   refreshTokenBackend.clear();
+  // Queued offline check-ins are health answers persisted only until sync
+  // (ADR-0030): they must never outlive the session that captured them. This is
+  // the SHARED clear path — logout, account deletion (DeleteAccountCard →
+  // logout()), and session expiry all funnel through here, so the queue-clear
+  // lives here rather than in any UI flow. (offlineQueue is a leaf module — no
+  // import cycle.)
+  clearQueuedCheckIns();
 }
 
 export function onSessionExpired(listener: SessionExpiredListener): () => void {

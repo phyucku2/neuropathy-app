@@ -41,6 +41,15 @@ import type { MockApiState, Scenario } from './mock-api';
  */
 const ALLOWED_CONSOLE_PATTERNS: RegExp[] = [
   /Failed to load resource: the server responded with a status of (401|404|409|422)\b/,
+  // The offline check-in spec (patient/checkin-offline.spec.ts, ADR-0030) drives a
+  // DESIGNED offline submission: the POST /adl is deliberately severed
+  // (context.setOffline + route.abort('internetdisconnected')), Chromium logs this
+  // exact network line for the failed resource, and the app HANDLES the failure —
+  // the fetch TypeError is caught and the check-in is queued on-device (the spec's
+  // positive assertions prove the saved-on-device state, then the successful sync).
+  // Pinned to this one net-error code — a different network fault (e.g.
+  // net::ERR_CONNECTION_REFUSED, a genuinely broken mock) still fails the gate.
+  /Failed to load resource: net::ERR_INTERNET_DISCONNECTED\b/,
 ];
 
 /**

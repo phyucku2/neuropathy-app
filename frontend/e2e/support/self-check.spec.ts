@@ -35,6 +35,12 @@ base('isAllowed treats only the designed statuses as benign', () => {
   expect(isAllowed('Failed to load resource: the server responded with a status of 403 ()')).toBe(
     false,
   );
+  // The deliberate offline severing in the offline check-in spec (ADR-0030) is
+  // benign-by-design — but ONLY that exact net-error code; any other network
+  // fault (a refused connection = a broken mock/server) still fails the gate.
+  expect(isAllowed('Failed to load resource: net::ERR_INTERNET_DISCONNECTED')).toBe(true);
+  expect(isAllowed('Failed to load resource: net::ERR_CONNECTION_REFUSED')).toBe(false);
+  expect(isAllowed('Failed to load resource: net::ERR_NAME_NOT_RESOLVED')).toBe(false);
   // Genuine app faults are never allowlisted.
   expect(isAllowed('pageerror: TypeError: foo is not a function')).toBe(false);
   expect(isAllowed('Warning: React does not recognize the `foo` prop on a DOM element')).toBe(

@@ -2,14 +2,31 @@
  * Daily check-in — the three 0-4 ADL questions as the mockup's segmented
  * buttons. POST /adl; a same-day re-submission shows the superseded notice;
  * a 409 means the feature is turned off (server-enforced toggle, ADR-0013).
+ *
+ * Offline (ADR-0030): a NETWORK failure (fetch TypeError — never an API 4xx/5xx,
+ * which keep their verbatim handling) queues the answers on-device and shows a
+ * saved-on-this-device state; the queue syncs via offlineSync when connectivity
+ * returns, and this page flips to the normal saved view when its entry lands.
  */
 
-import { useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { ApiError, messageFor } from '../../api/client';
 import { postAdlCheckIn } from '../../api/endpoints';
 import type { AdlCheckInOut } from '../../api/types';
 import { ErrorNotice, SuccessNotice } from '../../components/StatusMessages';
+import {
+  enqueueCheckIn,
+  getQueuedCheckIn,
+  removeQueuedCheckIn,
+  type QueuedCheckIn,
+} from './offlineQueue';
+import {
+  consumeDroppedNotices,
+  flushQueuedCheckIns,
+  subscribeFlushOutcomes,
+  type SyncedCheckIn,
+} from './offlineSync';
 
 const ANSWER_VALUES = [0, 1, 2, 3, 4] as const;
 
@@ -22,6 +39,15 @@ export function localCheckInDate(now = new Date()): string {
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const day = String(now.getDate()).padStart(2, '0');
   return `${String(now.getFullYear())}-${month}-${day}`;
+}
+
+/** "Jul 14" from a stored YYYY-MM-DD — local date parts, never a UTC re-parse. */
+function displayDay(isoDate: string): string {
+  const [year, month, day] = isoDate.split('-').map(Number);
+  return new Date(year ?? 0, (month ?? 1) - 1, day ?? 1).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+  });
 }
 
 interface Question {
@@ -125,6 +151,49 @@ export function CheckInPage() {
   const [error, setError] = useState<string | null>(null);
   const [featureOff, setFeatureOff] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // Offline queue state (ADR-0030): this submission captured offline; today's
+  // already-queued entry (shown as a replaceable notice); one-time sync notices
+  // for entries the server refused (409/422) during a background flush.
+  const [offlineSaved, setOfflineSaved] = useState<QueuedCheckIn | null>(null);
+  const [queuedToday, setQueuedToday] = useState<QueuedCheckIn | null>(() =>
+    getQueuedCheckIn(localCheckInDate()),
+  );
+  const [syncNotices, setSyncNotices] = useState<string[]>([]);
+  const [lastSynced, setLastSynced] = useState<SyncedCheckIn[]>([]);
+
+  useEffect(() => {
+    const pullNotices = () => {
+      const dropped = consumeDroppedNotices();
+      if (dropped.length > 0) {
+        setSyncNotices((current) => [
+          ...current,
+          ...dropped.map(
+            ({ entry, detail }) =>
+              `An offline check-in from ${displayDay(entry.check_in_date)} couldn't be sent: ${detail}`,
+          ),
+        ]);
+      }
+    };
+    pullNotices();
+    return subscribeFlushOutcomes((outcome) => {
+      pullNotices();
+      setLastSynced(outcome.synced);
+      setQueuedToday(getQueuedCheckIn(localCheckInDate()));
+    });
+  }, []);
+
+  // A background flush delivered THIS page's offline capture: show the normal
+  // saved view with the server's real response (score + superseded flag).
+  useEffect(() => {
+    if (offlineSaved === null) {
+      return;
+    }
+    const match = lastSynced.find((s) => s.entry.check_in_date === offlineSaved.check_in_date);
+    if (match !== undefined) {
+      setOfflineSaved(null);
+      setResult(match.result);
+    }
+  }, [lastSynced, offlineSaved]);
 
   const complete =
     answers.walking !== null && answers.stairs !== null && answers.balance_confidence !== null;
@@ -137,24 +206,47 @@ export function CheckInPage() {
     ) {
       return;
     }
+    // The patient's local calendar day — otherwise the backend defaults
+    // to today-UTC and evening check-ins west of UTC land on tomorrow.
+    const day = localCheckInDate();
+    const body = {
+      walking: answers.walking,
+      stairs: answers.stairs,
+      balance_confidence: answers.balance_confidence,
+      check_in_date: day,
+    };
     setSubmitting(true);
     setError(null);
     setFeatureOff(false);
     try {
-      setResult(
-        await postAdlCheckIn({
-          walking: answers.walking,
-          stairs: answers.stairs,
-          balance_confidence: answers.balance_confidence,
-          // The patient's local calendar day — otherwise the backend defaults
-          // to today-UTC and evening check-ins west of UTC land on tomorrow.
-          check_in_date: localCheckInDate(),
-        }),
-      );
+      const saved = await postAdlCheckIn(body);
+      // These newer answers supersede any same-day entry still queued on-device
+      // (ADR-0006 semantics: only the newest same-day check-in counts) — and the
+      // network clearly works, so flush any older queued days now.
+      removeQueuedCheckIn(day);
+      setQueuedToday(null);
+      setResult(saved);
+      void flushQueuedCheckIns();
     } catch (cause) {
-      if (cause instanceof ApiError && cause.status === 409) {
-        setFeatureOff(true);
-        setError(cause.detail);
+      if (cause instanceof ApiError) {
+        // API errors (4xx/5xx) keep their existing verbatim handling — only a
+        // network-level failure is queued.
+        if (cause.status === 409) {
+          setFeatureOff(true);
+          setError(cause.detail);
+        } else {
+          setError(messageFor(cause));
+        }
+      } else if (cause instanceof TypeError) {
+        // fetch rejects with a TypeError when the network is unreachable — the
+        // offline case (ADR-0030). Capture on-device instead of losing the entry.
+        const queued = enqueueCheckIn(body);
+        if (queued !== null) {
+          setOfflineSaved(queued);
+          setQueuedToday(queued);
+        } else {
+          setError(messageFor(cause));
+        }
       } else {
         setError(messageFor(cause));
       }
@@ -163,10 +255,28 @@ export function CheckInPage() {
     }
   };
 
+  const notices = syncNotices.map((notice) => <ErrorNotice key={notice}>{notice}</ErrorNotice>);
+
+  if (offlineSaved !== null) {
+    return (
+      <div>
+        <h1>Check-in saved on this device</h1>
+        {notices}
+        <SuccessNotice>
+          Saved on this device — will send automatically when you&apos;re back online.
+        </SuccessNotice>
+        <Link className="btn" to="/">
+          Back to Home
+        </Link>
+      </div>
+    );
+  }
+
   if (result !== null) {
     return (
       <div>
         <h1>Check-in saved</h1>
+        {notices}
         <SuccessNotice>
           Today&apos;s function score: <b>{result.daily_score} of 12</b>.
           {result.superseded && (
@@ -193,6 +303,14 @@ export function CheckInPage() {
       <p className="muted" style={{ marginTop: 0 }}>
         Three quick questions about your day. 0 is the hardest, 4 is the easiest.
       </p>
+      {notices}
+      {queuedToday !== null && (
+        <SuccessNotice>
+          A check-in from today is saved on this device, waiting to send: walking{' '}
+          {queuedToday.walking}, stairs {queuedToday.stairs}, balance{' '}
+          {queuedToday.balance_confidence}. Submitting again replaces it.
+        </SuccessNotice>
+      )}
       {error !== null && (
         <ErrorNotice>
           {error}

@@ -1,11 +1,13 @@
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import type { AdlCheckInIn } from '../../api/types';
 import { renderApp } from '../../test/renderApp';
 import { server } from '../../test/server';
 import { localCheckInDate } from './CheckInPage';
+import { enqueueCheckIn, listQueuedCheckIns } from './offlineQueue';
+import { consumeDroppedNotices } from './offlineSync';
 
 async function answerAll(user: ReturnType<typeof userEvent.setup>) {
   const groups = await screen.findAllByRole('radiogroup');
@@ -14,6 +16,11 @@ async function answerAll(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getAllByRole('radio', { name: '2' })[1] as HTMLElement);
   await user.click(screen.getByRole('radio', { name: '4 — Very confident' }));
 }
+
+beforeEach(() => {
+  localStorage.clear();
+  consumeDroppedNotices();
+});
 
 describe('CheckInPage', () => {
   it('keeps Save disabled until all three questions are answered', async () => {
@@ -141,12 +148,163 @@ describe('CheckInPage', () => {
     expect(screen.getByRole('link', { name: /turn it back on in Sources/ })).toBeInTheDocument();
   });
 
-  it('shows a friendly message on other failures', async () => {
+  it('shows a friendly message on other API failures — a 500 is NEVER queued offline', async () => {
     server.use(http.post('/adl', () => new HttpResponse(null, { status: 500 })));
     const user = userEvent.setup();
     renderApp('/check-in');
     await answerAll(user);
     await user.click(screen.getByRole('button', { name: 'Save my check-in' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Something went wrong');
+    // The network-vs-API split (ADR-0030): an API error means the server SAW the
+    // request — queueing it would risk a duplicate; only network failures queue.
+    expect(listQueuedCheckIns()).toEqual([]);
+  });
+
+  it('queues the check-in on a NETWORK failure and shows the saved-on-device status', async () => {
+    server.use(http.post('/adl', () => HttpResponse.error()));
+    const user = userEvent.setup();
+    renderApp('/check-in');
+    await answerAll(user);
+    await user.click(screen.getByRole('button', { name: 'Save my check-in' }));
+
+    expect(
+      await screen.findByRole('heading', { name: 'Check-in saved on this device' }),
+    ).toBeInTheDocument();
+    // role=status (polite live region), not an alert — this is a success variant.
+    expect(screen.getByRole('status')).toHaveTextContent(
+      "Saved on this device — will send automatically when you're back online.",
+    );
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(listQueuedCheckIns()).toEqual([
+      {
+        walking: 3,
+        stairs: 2,
+        balance_confidence: 4,
+        check_in_date: localCheckInDate(),
+        queued_at: expect.any(String) as string,
+      },
+    ]);
+  });
+
+  it('flips the offline-saved state to the real saved view when connectivity returns', async () => {
+    let offline = true;
+    server.use(
+      http.post('/adl', async ({ request }) => {
+        if (offline) {
+          return HttpResponse.error();
+        }
+        const body = (await request.json()) as AdlCheckInIn;
+        return HttpResponse.json({
+          check_in_date: body.check_in_date,
+          daily_score: body.walking + body.stairs + body.balance_confidence,
+          superseded: false,
+        });
+      }),
+    );
+    const user = userEvent.setup();
+    renderApp('/check-in');
+    await answerAll(user);
+    await user.click(screen.getByRole('button', { name: 'Save my check-in' }));
+    await screen.findByRole('heading', { name: 'Check-in saved on this device' });
+
+    // Connectivity returns: the 'online' event triggers the flush, and the page
+    // reflects the server's REAL response for the queued entry.
+    offline = false;
+    window.dispatchEvent(new Event('online'));
+
+    expect(await screen.findByRole('heading', { name: 'Check-in saved' })).toBeInTheDocument();
+    expect(screen.getByText('9 of 12')).toBeInTheDocument();
+    expect(listQueuedCheckIns()).toEqual([]);
+  });
+
+  it('shows a queued same-day entry on load and lets a new submission replace it', async () => {
+    let offline = true;
+    server.use(
+      http.post('/adl', async ({ request }) => {
+        if (offline) {
+          return HttpResponse.error();
+        }
+        const body = (await request.json()) as AdlCheckInIn;
+        return HttpResponse.json({
+          check_in_date: body.check_in_date,
+          daily_score: body.walking + body.stairs + body.balance_confidence,
+          superseded: true,
+        });
+      }),
+    );
+    enqueueCheckIn({
+      walking: 1,
+      stairs: 2,
+      balance_confidence: 0,
+      check_in_date: localCheckInDate(),
+    });
+    const user = userEvent.setup();
+    renderApp('/check-in');
+
+    // The pending entry is visible, with its values, in a polite live region.
+    const notice = await screen.findByText(/A check-in from today is saved on this device/);
+    expect(notice).toHaveTextContent(
+      'A check-in from today is saved on this device, waiting to send: walking 1, stairs 2, balance 0. Submitting again replaces it.',
+    );
+    expect(notice).toHaveAttribute('role', 'status');
+
+    // A new submission (now online) REPLACES the queued one — one check-in per
+    // day, newest wins (ADR-0006 mirrored on-device).
+    offline = false;
+    await answerAll(user);
+    await user.click(screen.getByRole('button', { name: 'Save my check-in' }));
+    expect(await screen.findByRole('heading', { name: 'Check-in saved' })).toBeInTheDocument();
+    expect(listQueuedCheckIns()).toEqual([]);
+  });
+
+  it('flushes OLDER queued days after a successful new submission', async () => {
+    const bodies: AdlCheckInIn[] = [];
+    server.use(
+      http.post('/adl', async ({ request }) => {
+        const body = (await request.json()) as AdlCheckInIn;
+        bodies.push(body);
+        return HttpResponse.json({
+          check_in_date: body.check_in_date,
+          daily_score: 6,
+          superseded: false,
+        });
+      }),
+    );
+    enqueueCheckIn({ walking: 2, stairs: 2, balance_confidence: 2, check_in_date: '2020-01-01' });
+    const user = userEvent.setup();
+    renderApp('/check-in');
+    // The boot flush may already have sent the old entry; a successful submit
+    // must trigger a flush too, so drain and re-seed AFTER load to isolate the
+    // post-submit trigger.
+    await screen.findAllByRole('radiogroup');
+    bodies.length = 0;
+    enqueueCheckIn({ walking: 2, stairs: 2, balance_confidence: 2, check_in_date: '2020-01-01' });
+
+    await answerAll(user);
+    await user.click(screen.getByRole('button', { name: 'Save my check-in' }));
+    await screen.findByRole('heading', { name: 'Check-in saved' });
+    await waitFor(() => {
+      expect(bodies.map((b) => b.check_in_date)).toEqual([localCheckInDate(), '2020-01-01']);
+    });
+    expect(listQueuedCheckIns()).toEqual([]);
+  });
+
+  it('surfaces a one-time notice when a background flush drops a refused entry', async () => {
+    server.use(
+      http.post('/adl', () =>
+        HttpResponse.json({ detail: 'This check-in is turned off right now.' }, { status: 409 }),
+      ),
+    );
+    enqueueCheckIn({ walking: 1, stairs: 1, balance_confidence: 1, check_in_date: '2026-07-14' });
+    renderApp('/check-in');
+
+    // The boot flush (OfflineCheckInSync) hits the 409 → the entry is dropped and
+    // the refusal surfaces ONCE, with the entry's day.
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(
+      "An offline check-in from Jul 14 couldn't be sent: This check-in is turned off right now.",
+    );
+    expect(listQueuedCheckIns()).toEqual([]);
+    expect(consumeDroppedNotices()).toEqual([]);
   });
 });

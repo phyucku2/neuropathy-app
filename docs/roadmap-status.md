@@ -68,6 +68,13 @@ Portion 3.
 | 2 | Vendor registrations + sandbox smoke (runbook §§1–5: Epic + Oracle accounts, app registrations, client ids into env, §5 smoke both vendors — record `granted_scope` + the Epic refresh-token outcome) | — | — | — | **USER-side** (owner credentials; see runbook checklist rows 1–6, 11–12). The app side is ready: the smoke test can now run through the UI end-to-end. |
 | 3 | Production enrollment (per-org FHIR bases, Epic mark-live/distribution, Oracle per-tenant provisioning, deployed HTTPS origin + `assetlinks.json`) | — | — | — | USER + ops; after #2. Refresh-token rotation job (runbook row 13) is informed by #2's outcomes. |
 
+**Patient experience** — quality-of-life portions on the shipped patient app
+(each row is one portion = one PR; appended per-portion, merge keep-both).
+
+| # | Portion | Built | Tested | Merged | Notes |
+|---|---|---|---|---|---|
+| 1 | Offline check-in queue (ADR-0030) — an offline ADL submission is captured on-device (localStorage, one entry per day mirroring ADR-0006 supersede; cleared on sync AND on every session clear incl. account deletion) and flushed automatically on boot / 'online' / post-submit with its TRUE local capture date (POST /adl accepts a client `check_in_date` — confirmed in backend schemas/route); 409/422 refusals drop with a one-time verbatim notice; network-vs-API error split keeps existing 4xx/5xx handling | ✅ | ✅ | ⏳ | Frontend-only (backend untouched). 20 new unit tests (203 total, coverage ≥90 all four); 32nd Playwright spec drives offline→queued→online→synced in the built bundle with zero console errors (allowlist gains only the pinned `net::ERR_INTERNET_DISCONNECTED` line for this designed scenario, self-check-proven). |
+
 **Wave 4 — Reimbursement-enabling features (RTM-first)** — build the app capture/export
 that could enable a covered entity to pursue a compliant claim, pending compliance
 validation, prioritized for RTM given the
