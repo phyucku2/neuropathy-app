@@ -96,6 +96,17 @@ export function LoginPage() {
         </p>
       </div>
       <p className="muted centered">Your data stays private until you approve a connection.</p>
+      {/* Auth-less About/Privacy links (ADR-0032): reachable by a logged-out user and a
+          store reviewer. The matching Settings link row is deferred (sibling surface). */}
+      <p className="muted centered">
+        <Link className="link" to="/about">
+          About
+        </Link>
+        {' · '}
+        <Link className="link" to="/privacy">
+          Privacy
+        </Link>
+      </p>
     </div>
   );
 }
