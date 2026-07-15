@@ -167,6 +167,15 @@ export const CAPABILITIES: CapabilityStateOut[] = [
     enforced: true,
   },
   {
+    // Opt-in symptom capture (ADR-0034 Phase 1) — default OFF until the owner enables it.
+    key: 'ingest_symptoms',
+    name: 'Symptom check-in (pain & numbness)',
+    active: false,
+    managed_by: 'patient',
+    expires_at: null,
+    enforced: true,
+  },
+  {
     key: 'emr_connect',
     name: 'Medical record connection',
     active: true,

@@ -93,6 +93,11 @@ export interface AdlCheckInIn {
   walking: number;
   stairs: number;
   balance_confidence: number;
+  /** 0-10 pain NRS + 0-10 numbness/tingling severity (ADR-0034 Phase 1). Higher =
+   *  worse. Optional and persisted only when the `ingest_symptoms` capability is on;
+   *  the server ignores them when it is off (enforced-flag honesty, ADR-0013). */
+  pain?: number | null;
+  numbness?: number | null;
   check_in_date?: string | null;
 }
 

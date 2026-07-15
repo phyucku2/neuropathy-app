@@ -12,7 +12,12 @@ describe('SettingsPage — capability toggles', () => {
     const biomech = await screen.findByRole('switch', { name: 'BioMech report upload' });
     expect(biomech).toBeChecked();
     expect(screen.getByRole('switch', { name: 'Daily function check-in' })).not.toBeChecked();
-    expect(screen.getByText('Off · hidden and paused in your trend')).toBeInTheDocument();
+    // The opt-in symptom capture (ADR-0034) is also a real, default-off toggle row.
+    expect(
+      screen.getByRole('switch', { name: 'Symptom check-in (pain & numbness)' }),
+    ).not.toBeChecked();
+    // Two default-off capabilities now share the "off" copy.
+    expect(screen.getAllByText('Off · hidden and paused in your trend')).toHaveLength(2);
   });
 
   it('renders an unenforced (not-yet-wired) capability read-only in the coming-soon style', async () => {

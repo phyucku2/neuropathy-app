@@ -45,6 +45,11 @@ export interface QueuedCheckIn {
   walking: number;
   stairs: number;
   balance_confidence: number;
+  /** Symptom items (ADR-0034 Phase 1): 0-10 pain + numbness, present only when the
+   *  symptom-capture toggle was on at capture time. Higher = worse. Optional so a
+   *  base (function-only) check-in queues unchanged. */
+  pain?: number;
+  numbness?: number;
   /** The patient's LOCAL calendar day at capture time (YYYY-MM-DD) — never UTC. */
   check_in_date: string;
   /** When the entry was captured (ISO instant) — provenance for the sync notice. */
@@ -60,6 +65,15 @@ function isAnswer(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 4;
 }
 
+/** A 0-10 symptom item (pain/numbness). Absent (undefined) is valid — the item is
+ *  optional; anything present must be an integer in range. */
+function isSymptom(value: unknown): value is number | undefined {
+  return (
+    value === undefined ||
+    (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 10)
+  );
+}
+
 function isQueuedCheckIn(value: unknown): value is QueuedCheckIn {
   if (value === null || typeof value !== 'object') {
     return false;
@@ -69,6 +83,8 @@ function isQueuedCheckIn(value: unknown): value is QueuedCheckIn {
     isAnswer(entry['walking']) &&
     isAnswer(entry['stairs']) &&
     isAnswer(entry['balance_confidence']) &&
+    isSymptom(entry['pain']) &&
+    isSymptom(entry['numbness']) &&
     typeof entry['check_in_date'] === 'string' &&
     DATE_SHAPE.test(entry['check_in_date']) &&
     typeof entry['queued_at'] === 'string'

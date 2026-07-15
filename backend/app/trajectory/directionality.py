@@ -50,6 +50,10 @@ _PAIN = SignalInfo(Polarity.lower_is_better, "pain")
 _WALKING = SignalInfo(Polarity.higher_is_better, "walking")
 _STAIRS = SignalInfo(Polarity.higher_is_better, "stairs")
 _BALANCE_CONFIDENCE = SignalInfo(Polarity.higher_is_better, "balance confidence")
+# Symptom check-in (POST /adl, ADR-0034 Phase 1): pain + numbness/paresthesia, higher =
+# WORSE, so lower_is_better here inverts them into the shared better/worse judgment.
+_SYMPTOM_PAIN = SignalInfo(Polarity.lower_is_better, "pain")
+_SYMPTOM_NUMBNESS = SignalInfo(Polarity.lower_is_better, "numbness or tingling")
 # BioMech balance/gait report metrics (ADR-0014). Polarities mirror the parser's
 # METRICS registry (app/biomech/parser.py); a parity test keeps the two in agreement.
 # Cadence and step length have no clear better/worse direction — reported, not judged.
@@ -92,6 +96,9 @@ _REGISTRY: dict[str, SignalInfo] = {
     "adl_stairs": _STAIRS,
     "adl_balance_confidence": _BALANCE_CONFIDENCE,
     "adl_daily_score": _DAILY_FUNCTION,
+    # Symptom check-in (POST /adl, ADR-0034 Phase 1) — higher raw = worse, inverted here.
+    "symptom_pain": _SYMPTOM_PAIN,
+    "symptom_numbness": _SYMPTOM_NUMBNESS,
     # BioMech report metrics (source='biomech'), friendly keys — code_system stays null
     # like the other non-lab codes. Trends read as "balance up 8 over 30 days".
     "biomech_balance_score": _BIOMECH_BALANCE,

@@ -163,8 +163,15 @@ export const CAPABILITIES: CapabilityStateOut[] = [
   cap('ingest_biomech', 'BioMech report upload', true, 'patient', true),
   cap('ingest_labs', 'Lab result upload', true, 'patient', true),
   cap('ingest_adl', 'Daily function check-in', false, 'patient', true),
+  // Opt-in symptom capture (ADR-0034 Phase 1) — default OFF.
+  cap('ingest_symptoms', 'Symptom check-in (pain & numbness)', false, 'patient', true),
   cap('emr_connect', 'Medical record connection', true, 'patient', true),
 ];
+
+/** Capabilities with the symptom-capture toggle ON — for the symptom check-in E2E. */
+export const CAPABILITIES_SYMPTOMS_ON: CapabilityStateOut[] = CAPABILITIES.map((c) =>
+  c.key === 'ingest_symptoms' ? { ...c, active: true } : c,
+);
 
 /** Adds one enforced=false ("coming soon") row to prove the read-only rendering. */
 export const CAPABILITIES_WITH_UNWIRED: CapabilityStateOut[] = [

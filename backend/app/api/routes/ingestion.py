@@ -18,13 +18,25 @@ Contracts:
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.api.deps import EmrServiceDep, PatientUserDep, require_capability
-from app.ingestion.adl import ADL_CODES, adl_check_in_to_observations, day_bounds_utc
+from app.api.deps import (
+    CapabilityServiceDep,
+    EmrServiceDep,
+    PatientUserDep,
+    require_capability,
+)
+from app.ingestion.adl import (
+    ADL_CODES,
+    SYMPTOM_CODES,
+    adl_check_in_to_observations,
+    day_bounds_utc,
+    symptom_check_in_to_observations,
+)
 from app.ingestion.labs import lab_import_key, lab_result_to_observation
 from app.models.audit import AuditEvent
 from app.models.observation import DataOrigin, Observation
@@ -115,15 +127,16 @@ async def _current_same_day_rows(
     patient_id: uuid.UUID,
     start: datetime,
     end: datetime,
+    codes: Iterable[str],
 ) -> dict[str, uuid.UUID]:
-    """The current (non-superseded, analyzable) ADL row ids for one calendar day.
+    """The current (non-superseded, analyzable) row ids for one calendar day, per code.
 
     These are the rows a re-submitted check-in supersedes. The repository already
     resolves revises_id chains to the current record, so a third submission chains
     onto the second, never back onto the first.
     """
     revises: dict[str, uuid.UUID] = {}
-    for code in ADL_CODES:
+    for code in codes:
         rows = await observations.list_for_patient(patient_id, code=code, since=start)
         same_day = [r for r in rows if _aware(r.effective_at) < end]
         if same_day and same_day[-1].id is not None:
@@ -141,11 +154,20 @@ def _aware(value: datetime) -> datetime:
     dependencies=[Depends(require_capability("ingest_adl"))],
 )
 async def record_adl_check_in(
-    body: AdlCheckInIn, current: PatientUserDep, service: EmrServiceDep
+    body: AdlCheckInIn,
+    current: PatientUserDep,
+    service: EmrServiceDep,
+    capabilities: CapabilityServiceDep,
 ) -> AdlCheckInOut:
     """Record the daily function check-in: three 0-4 answers plus the derived 0-12
     composite. One check-in per calendar day — a second POST for the same date
-    supersedes the first via revises_id chains (ADR-0006), never an overwrite."""
+    supersedes the first via revises_id chains (ADR-0006), never an overwrite.
+
+    When the `ingest_symptoms` capability is on for this patient (ADR-0034 Phase 1),
+    the optional 0-10 pain + numbness items are ALSO persisted as their own higher-is-
+    worse observations. When it is off, those answers are ignored entirely — a stored
+    "off" the code actually respects (enforced-flag honesty, ADR-0013), so nothing is
+    captured regardless of what the client sends."""
     assert current.patient_id is not None  # guaranteed by require_patient
     now = datetime.now(UTC)
     day = body.check_in_date or now.date()
@@ -155,21 +177,40 @@ async def record_adl_check_in(
     if day > (now + timedelta(hours=14)).date():
         raise HTTPException(status_code=422, detail="check_in_date cannot be in the future")
 
+    # The symptom sub-feature is a SEPARATE, opt-in toggle from the base check-in
+    # (which the endpoint's require_capability("ingest_adl") gate already enforced).
+    symptoms_on = await capabilities.is_active(current.patient_id, "ingest_symptoms", now=now)
+
     start, end = day_bounds_utc(day)
-    revises = await _current_same_day_rows(service.observations, current.patient_id, start, end)
+    # Only resolve symptom supersessions when the feature is on AND an item was answered.
+    codes = list(ADL_CODES)
+    if symptoms_on and (body.pain is not None or body.numbness is not None):
+        codes += list(SYMPTOM_CODES)
+    revises = await _current_same_day_rows(
+        service.observations, current.patient_id, start, end, codes
+    )
     rows = adl_check_in_to_observations(
         body, patient_id=current.patient_id, effective_at=start, revises=revises
     )
+    if symptoms_on:
+        rows += symptom_check_in_to_observations(
+            body, patient_id=current.patient_id, effective_at=start, revises=revises
+        )
     for row in rows:
         await service.observations.add(row)
-    # PHI write — audit-logged with counts only, never answer values (CLAUDE.md §5).
+    # PHI write — audit-logged with counts/flags only, never answer values (CLAUDE.md §5).
+    symptom_rows = sum(1 for row in rows if row.code in SYMPTOM_CODES)
     await service.audit.add(
         AuditEvent(
             actor_id=current.user_id,
             actor_role=current.role.value,
             action="record_adl",
             patient_id=current.patient_id,
-            detail={"observations": len(rows), "superseded": len(revises)},
+            detail={
+                "observations": len(rows),
+                "superseded": len(revises),
+                "symptoms": symptom_rows,
+            },
         )
     )
     return AdlCheckInOut(

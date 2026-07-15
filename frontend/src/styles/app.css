@@ -651,11 +651,15 @@ h2 {
 
 .seg-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
 .seg {
   flex: 1;
+  /* Keep a tappable width so the 0-10 symptom scale wraps onto a second row rather
+     than shrinking below a comfortable touch target (AA/mobile). */
+  min-width: var(--min-touch-target);
   font-family: var(--font-body);
   font-size: 18px;
   font-weight: 600;

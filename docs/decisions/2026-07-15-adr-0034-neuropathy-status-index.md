@@ -122,3 +122,39 @@ anchored to a real **"as of" date**, presented as **non-diagnostic v1, pending c
   scoring, or MCID. The "validated" claim, and any SaMD/reimbursement-enabling build, remain gated on the
   validation study and the FDA consultant's opinion. This ADR asserts **no** regulatory classification and
   **no** validated clinical claim; it processes synthetic data only.
+
+## Addendum — Phase 1 implementation note (symptom capture)
+
+Phase 1 shipped the two symptom items in the daily check-in (backend schema/ingestion/storage +
+frontend UI). What was actually built, and the honesty caveats to relay:
+
+- **Items are validated-measure-*aligned*, not the instruments themselves.**
+  - **Pain** — a **0–10 Numeric Rating Scale (NRS)**: "Worst pain today (0 = none, 10 = worst
+    imaginable)." NRS is a public-domain pain measure; the item is used directly.
+  - **Numbness/tingling** — a **0–10 severity item** intended to map onto the **NTSS-6**
+    numbness/paresthesia model. **NTSS-6 exact item wording, scoring, and licensing are NOT yet
+    confirmed** (this ADR marks the instrument "confirm against source"). Phase 1 therefore uses an
+    NTSS-6-*aligned* severity item and **does not reproduce NTSS-6 verbatim**.
+  - **No code or UI text claims the capture *is* NTSS-6 or a validated/clinical measure.** Each stored
+    observation carries `measure_alignment` (`"NRS-aligned"` / `"NTSS-6-aligned"`) and
+    `validated_instrument: false` in its `quality`. **Confirm licensing + exact items before any
+    validated/clinical claim, published instrument name, or verbatim wording.**
+- **Storage & provenance.** Each answered item stores its own research-grade `Observation`
+  (codes `symptom_pain` / `symptom_numbness`, `source=adl`, `origin=patient_reported`), ALCOA+
+  provenance (dual UTC timestamps, `recorded_by_role`), corrections-as-new-records via `revises_id`
+  (same-day supersession, ADR-0006). No composite/normalization is computed in Phase 1 (Phase 2's job).
+- **Polarity is persisted explicitly.** Symptoms are **higher = worse**, the inverse of the function
+  answers. Recorded two ways so Phase 2 can invert them correctly: per-observation `quality`
+  (`higher_is_worse: true`, `polarity: "lower_is_better"`) **and** the code registry
+  (`app/trajectory/directionality.py`).
+- **Feature toggle (ADR-0013).** Gated behind a new capability **`ingest_symptoms`**, registered
+  **`default=False, enforced=True`** — the first opt-in key (every other shipped key defaults on for
+  back-compat). Off by default and honestly enforced: the `/adl` route persists symptom rows **only**
+  when the toggle is on for the patient; when off it ignores `pain`/`numbness` entirely regardless of
+  what the client sends. The frontend reads the effective toggle and shows the two questions only when
+  it is on; when off the check-in behaves exactly as before. Observability stays PHI-free (audit detail
+  carries symptom *counts*, never values).
+- **No DB migration.** The new observations reuse existing columns and existing enum values
+  (`source_type='adl'`, `data_origin='patient_reported'`); the capability is a lazily-seeded registry
+  key. `Base.metadata` is unchanged, so the autogenerate-parity integration test stays green and per
+  repo convention (migrations mirror the models) **no Alembic migration is added**.

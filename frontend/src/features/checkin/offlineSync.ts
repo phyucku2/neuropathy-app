@@ -95,6 +95,10 @@ async function runFlush(ownerId: string): Promise<FlushOutcome> {
         stairs: entry.stairs,
         balance_confidence: entry.balance_confidence,
         check_in_date: entry.check_in_date,
+        // Symptom items ride along when they were captured (ADR-0034 Phase 1); a
+        // base check-in has neither and sends nothing extra.
+        ...(entry.pain !== undefined ? { pain: entry.pain } : {}),
+        ...(entry.numbness !== undefined ? { numbness: entry.numbness } : {}),
       });
       removeIfStillQueued(ownerId, entry);
       synced.push({ entry, result });

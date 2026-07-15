@@ -83,20 +83,29 @@ class CapabilitySpec:
     enforced: bool
 
 
-# The canonical registry — every feature the app ships today. Defaults are all True:
+# The canonical registry — every feature the app ships. Back-compat keys default True:
 # absence of a PatientCapability row means "works exactly as before toggles existed"
-# (back-compat, ADR-0013). The DB row's `available` flag is the ops kill switch; the
-# default lives here in code because it is a product decision, not per-deployment state.
+# (ADR-0013). The DB row's `available` flag is the ops kill switch; the default lives here
+# in code because it is a product decision, not per-deployment state.
 # `enforced=False` keys are visible but NOT yet settable: a stored "off" the feature
 # ignores would be a false promise about what is processed/disclosed (review finding);
 # each key flips to enforced=True in the PR that wires its consumer. As of ADR-0020 all
 # shipped keys are wired: emr_connect gates the EMR connect flow, ai_narrative gates
 # narrator scheduling, share_with_clinic gates clinician reads. The `enforced` flag and
 # its read-only rendering stay in place for any FUTURE key introduced un-wired.
+# `ingest_symptoms` (ADR-0034 Phase 1) is the first OPT-IN key — default=False, so the
+# symptom check-in (pain + numbness) is off until the owner turns it on; enforced=True
+# because it is genuinely wired (the /adl route only persists symptom rows when it is on).
 CAPABILITIES: tuple[CapabilitySpec, ...] = (
     CapabilitySpec(key="ingest_labs", name="Lab result upload", default=True, enforced=True),
     CapabilitySpec(key="ingest_adl", name="Daily function check-in", default=True, enforced=True),
     CapabilitySpec(key="ingest_biomech", name="BioMech report upload", default=True, enforced=True),
+    CapabilitySpec(
+        key="ingest_symptoms",
+        name="Symptom check-in (pain & numbness)",
+        default=False,
+        enforced=True,
+    ),
     CapabilitySpec(
         key="emr_connect", name="Medical record connection", default=True, enforced=True
     ),
