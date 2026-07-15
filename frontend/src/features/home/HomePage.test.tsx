@@ -9,6 +9,8 @@ describe('HomePage', () => {
   it('renders the improving hero with summary, confidence, signals, and gaps', async () => {
     renderApp('/');
     expect(await screen.findByText('Improving')).toBeInTheDocument();
+    // Personalized greeting uses the signed-in patient's first name (ME = 'Pat Example').
+    expect(await screen.findByRole('heading', { name: 'Hi, Pat' })).toBeInTheDocument();
     const hero = screen.getByRole('region', { name: 'Your 30-day trend' });
     expect(hero).toHaveClass('traj', 'improving');
     expect(screen.getByText(/Balance and daily function are up/)).toBeInTheDocument();

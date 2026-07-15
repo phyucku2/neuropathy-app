@@ -5,13 +5,17 @@
  */
 
 import { Link } from 'react-router-dom';
+import { useAuth } from '../../auth/AuthContext';
 import { getTrajectory } from '../../api/endpoints';
 import { ErrorNotice, Loading } from '../../components/StatusMessages';
 import { SignalRow, TrajectoryHero } from '../../components/TrajectoryView';
+import { firstName } from '../../lib/format';
 import { useApi } from '../../lib/useApi';
 
 export function HomePage() {
+  const { user } = useAuth();
   const { data: trajectory, error, loading } = useApi(getTrajectory);
+  const greetingName = firstName(user?.display_name ?? '');
 
   if (loading) {
     return <Loading label="Working out your trend…" />;
@@ -22,6 +26,7 @@ export function HomePage() {
 
   return (
     <div>
+      <h1 className="greeting">{greetingName ? `Hi, ${greetingName}` : 'Welcome back'}</h1>
       <TrajectoryHero
         trajectory={trajectory}
         eyebrow="Your 30-day trend"
