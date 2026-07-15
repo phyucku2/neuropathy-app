@@ -11,12 +11,19 @@ import hashlib
 import secrets
 from urllib.parse import urlencode
 
-# Default scopes for a patient reading their own labs (least privilege).
+# Default scopes for a patient reading their own labs — exactly what the code uses,
+# nothing more (least privilege; ADR-0028 scope trim):
+#   launch/patient           — standalone-launch patient context; pull_labs requires the
+#                              token response's `patient` id.
+#   patient/Observation.read — the ONLY resource the pull reads (labs).
+#   offline_access           — refresh token, vaulted when the EMR returns one.
+# `openid fhirUser` were DROPPED (registration-runbook mismatch (a)): the id_token was
+# never read, so requesting identity scopes was a false disclosure to the patient on the
+# EHR consent screen. `patient/Patient.read` is deliberately absent — the code never
+# fetches Patient. Re-add a scope only in the PR that adds its consumer.
 DEFAULT_SCOPES = (
     "launch/patient",
     "patient/Observation.read",
-    "openid",
-    "fhirUser",
     "offline_access",
 )
 

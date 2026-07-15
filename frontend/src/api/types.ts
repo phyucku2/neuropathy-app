@@ -142,6 +142,67 @@ export interface ClinicianCapabilitySetIn {
   expires_at?: string | null;
 }
 
+// ---- emr.py (ADR-0028 — patient EMR connect) ----
+
+/** ProviderOut */
+export interface EmrProviderOut {
+  key: string;
+  name: string;
+  vendor: string;
+  sandbox_fhir_base: string | null;
+  note: string;
+}
+
+/** ConnectStartIn */
+export interface EmrConnectStartIn {
+  provider_key?: string | null;
+  fhir_base?: string | null;
+}
+
+/** ConnectStartOut */
+export interface EmrConnectStartOut {
+  connection_id: string;
+  /** Open this in the patient's browser (system browser on native). */
+  authorize_url: string;
+  state: string;
+}
+
+/** ConnectionOut (EMR connection — schemas/emr.py; distinct from the clinic ConnectionOut) */
+export interface EmrConnectionOut {
+  id: string;
+  patient_id: string;
+  fhir_base: string;
+  provider_name: string | null;
+  status: string;
+  granted_scope: string | null;
+  patient_fhir_id: string | null;
+  token_expires_at: string | null;
+  revoked_at: string | null;
+}
+
+/** LabResultIn (schemas/lab.py — the pull echoes the fetched lab results) */
+export interface EmrLabResult {
+  loinc_code: string;
+  source_record_id: string | null;
+  display: string;
+  value: number | null;
+  value_text: string | null;
+  unit: string | null;
+  effective_at: string;
+  issued_at: string | null;
+  status: string;
+  reference_range: { low: number | null; high: number | null; unit: string | null } | null;
+  interpretation: string | null;
+  code_system: string;
+  unit_system: string;
+}
+
+/** PullOut */
+export interface EmrPullOut {
+  imported: number;
+  results: EmrLabResult[];
+}
+
 // ---- clinic.py ----
 
 /** ConnectionOut (patient-side clinic connection) */

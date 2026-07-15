@@ -1,7 +1,8 @@
 /**
- * React entry point for the native shell (ADR-0025). Runs once on mount: initializes the status
- * bar / splash / hardware-back wiring and cleans the listener up on unmount. No-op on web (the
- * underlying `initNativeShell` gates on the platform), so it is safe to call unconditionally.
+ * React entry point for the native shell (ADR-0025/0028). Runs once on mount: initializes the
+ * status bar / splash / hardware-back / incoming-URL wiring and cleans the listeners up on
+ * unmount. No-op on web (the underlying `initNativeShell` gates on the platform), so it is safe
+ * to call unconditionally.
  */
 
 import { useEffect } from 'react';
@@ -13,7 +14,10 @@ export function useNativeShell(): void {
   useEffect(() => {
     let cancelled = false;
     let cleanup: () => void = () => undefined;
-    void initNativeShell(() => navigate(-1)).then((detach) => {
+    void initNativeShell(
+      () => navigate(-1),
+      (path) => navigate(path),
+    ).then((detach) => {
       if (cancelled) {
         detach();
       } else {

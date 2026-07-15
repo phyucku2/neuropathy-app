@@ -58,12 +58,15 @@ submission.**
 
 **Wave 3 — EMR registrations**: Epic/Cerner sandbox enrollment — operator runbook at
 [`docs/emr/sandbox-registration-runbook.md`](emr/sandbox-registration-runbook.md)
-(signup → app registration → redirect URIs → smoke test; also surfaces the code
-changes needed: per-provider client ids, browser-reachable callback, scope alignment) —
-plus the provider config surface, then production enrollment. **Includes the patient EMR-connect UI + the
-native SMART OAuth-callback handler deferred from Wave 2 Portion 3** (custom app scheme +
-`@capacitor/app` `appUrlOpen` + in-app browser), so the connect flow and its native handler
-ship and verify together against a registered sandbox.
+(signup → app registration → redirect URIs → smoke test) — plus the code the runbook
+surfaced and the patient EMR-connect UI + native OAuth handler deferred from Wave 2
+Portion 3.
+
+| # | Portion | Built | Tested | Merged | Notes |
+|---|---|---|---|---|---|
+| 1 | Patient EMR-connect UI + per-provider client ids + native OAuth return path (ADR-0028) — Sources "Health record connections" card (picker/search/connect), authenticated `/emr/callback` SPA relay (backend auth unchanged), system-browser OAuth on native (`@capacitor/browser`, never the WebView), `appUrlOpen` App-Links/custom-scheme routing + manifest scheme filter (assetlinks template in `docs/mobile/emr-app-links.md`), `SMART_CLIENT_ID_<VENDOR>` per registry entry, scope trim to `launch/patient patient/Observation.read offline_access` — closes runbook code rows 7/8/9/10 | ✅ | ✅ | ⏳ | Backend 100% cov (live-Postgres green); frontend unit ≥90% all four; 31 Playwright specs incl. the full connect→callback→pull→revoke round trip in the built bundle, zero console errors; `cap sync` warning-free; prod audit + license + secret scans clean. Known gap (recorded in ADR-0028): no EMR-connections LIST endpoint yet — post-connect confirmation carries pull/revoke; list endpoint + card list is a follow-up portion. |
+| 2 | Vendor registrations + sandbox smoke (runbook §§1–5: Epic + Oracle accounts, app registrations, client ids into env, §5 smoke both vendors — record `granted_scope` + the Epic refresh-token outcome) | — | — | — | **USER-side** (owner credentials; see runbook checklist rows 1–6, 11–12). The app side is ready: the smoke test can now run through the UI end-to-end. |
+| 3 | Production enrollment (per-org FHIR bases, Epic mark-live/distribution, Oracle per-tenant provisioning, deployed HTTPS origin + `assetlinks.json`) | — | — | — | USER + ops; after #2. Refresh-token rotation job (runbook row 13) is informed by #2's outcomes. |
 
 **Wave 4 — Reimbursement-enabling features (RTM-first)** — build the app capture/export
 that could enable a covered entity to pursue a compliant claim, pending compliance

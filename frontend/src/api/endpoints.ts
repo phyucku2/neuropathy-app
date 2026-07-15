@@ -13,6 +13,11 @@ import type {
   CapabilityStateOut,
   ClinicianCapabilitySetIn,
   ConnectionOut,
+  EmrConnectionOut,
+  EmrConnectStartIn,
+  EmrConnectStartOut,
+  EmrProviderOut,
+  EmrPullOut,
   InvitationOut,
   LoginIn,
   MeOut,
@@ -112,6 +117,43 @@ export function grantConsent(connectionId: string): Promise<ConnectionOut> {
 
 export async function revokeConnection(connectionId: string): Promise<void> {
   await request<unknown>(`/connections/${encodeURIComponent(connectionId)}`, { method: 'DELETE' });
+}
+
+// ---- EMR connections (SMART on FHIR — ADR-0008/0009/0028) ----
+
+export function getEmrProviders(q = ''): Promise<EmrProviderOut[]> {
+  const suffix = q !== '' ? `?q=${encodeURIComponent(q)}` : '';
+  return request<EmrProviderOut[]>(`/emr/providers${suffix}`);
+}
+
+/** Start the SMART handshake: the backend does discovery + PKCE and returns the
+ * authorize URL to open plus the `state` the callback must echo. */
+export function startEmrConnect(body: EmrConnectStartIn): Promise<EmrConnectStartOut> {
+  return request<EmrConnectStartOut>('/emr/connect', { method: 'POST', body });
+}
+
+/**
+ * Relay the EMR's redirect back to the backend (ADR-0028): GET /emr/callback is
+ * bearer-authenticated, so the EHR's browser redirect cannot reach it directly —
+ * the SPA's /emr/callback route forwards code+state with the patient's token and
+ * the backend exchanges the code (PKCE) and activates the connection.
+ */
+export function completeEmrCallback(state: string, code: string): Promise<EmrConnectionOut> {
+  const query = new URLSearchParams({ state, code });
+  return request<EmrConnectionOut>(`/emr/callback?${query.toString()}`);
+}
+
+export function pullEmrLabs(connectionId: string): Promise<EmrPullOut> {
+  return request<EmrPullOut>(`/emr/connections/${encodeURIComponent(connectionId)}/pull`, {
+    method: 'POST',
+  });
+}
+
+/** Revoke: the backend flips the status AND deletes the vaulted tokens (ADR-0017). */
+export function revokeEmrConnection(connectionId: string): Promise<EmrConnectionOut> {
+  return request<EmrConnectionOut>(`/emr/connections/${encodeURIComponent(connectionId)}`, {
+    method: 'DELETE',
+  });
 }
 
 // ---- clinician surface (ADR-0012 / ADR-0013) ----

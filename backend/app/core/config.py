@@ -104,9 +104,24 @@ class Settings(BaseSettings):
 
     # SMART on FHIR / EMR pull (ADR-0008). Client secret (if any) and OAuth tokens live
     # in a secret manager, never here.
+    #
+    # Client ids are PER VENDOR (ADR-0028; each EMR issues its own at registration):
+    # every provider-registry entry (app/emr/providers.py) names its field below via
+    # `client_id_env`, and the generic `smart_client_id` is the fallback for custom
+    # fhir_base connections and providers with no specific id configured. Client ids
+    # are low-sensitivity but stay env-driven — values are never committed.
     smart_client_id: str | None = None
+    smart_client_id_epic: str | None = None
+    smart_client_id_oracle_health: str | None = None
+    smart_client_id_athenahealth: str | None = None
+    smart_client_id_meditech: str | None = None
+    smart_client_id_nextgen: str | None = None
+    smart_client_id_veradigm: str | None = None
     smart_redirect_uri: str | None = None
-    smart_scopes: str = "launch/patient patient/Observation.read openid fhirUser offline_access"
+    # NOTE: the former `smart_scopes` setting was removed (ADR-0028): nothing ever read
+    # it, so an operator changing SMART_SCOPES would have changed nothing — the same
+    # false promise the enforced-flag rule exists to prevent (docs/lessons.md). The
+    # requested scope set is code: DEFAULT_SCOPES in app/emr/smart.py.
 
     # BioMech PDF ingest (ADR-0014). Guards on the text-layer extractor: an upload
     # larger than the byte cap, or with more pages than the page cap, is rejected as a

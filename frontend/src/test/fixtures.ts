@@ -6,6 +6,10 @@
 import type {
   CapabilityStateOut,
   ConnectionOut,
+  EmrConnectionOut,
+  EmrConnectStartOut,
+  EmrProviderOut,
+  EmrPullOut,
   MeOut,
   ObservationItem,
   PanelOut,
@@ -247,6 +251,92 @@ export const CLINIC_CAPABILITIES: CapabilityStateOut[] = [
     enforced: true,
   },
 ];
+
+// ---- EMR connect (ADR-0028; shapes mirror backend/app/schemas/emr.py) ----
+
+/** Two registry providers: one with a public sandbox (connectable) and one without
+ * (renders "Not available yet" — the API would 422 a connect for it). */
+export const EMR_PROVIDERS: EmrProviderOut[] = [
+  {
+    key: 'epic',
+    name: 'Epic (MyChart)',
+    vendor: 'Epic Systems',
+    sandbox_fhir_base: 'https://fhir.epic.example/api/FHIR/R4',
+    note: 'Largest US hospital EMR; patient portal is MyChart.',
+  },
+  {
+    key: 'meditech',
+    name: 'MEDITECH',
+    vendor: 'MEDITECH',
+    sandbox_fhir_base: null,
+    note: 'Community-hospital EMR; sandbox access granted on registration.',
+  },
+];
+
+export const EMR_STATE = 'synthetic-emr-state';
+export const EMR_AUTH_CODE = 'synthetic-emr-auth-code';
+export const EMR_CONNECTION_ID = '66666666-6666-4666-8666-666666666666';
+
+export const EMR_CONNECT_START: EmrConnectStartOut = {
+  connection_id: EMR_CONNECTION_ID,
+  authorize_url: `https://ehr.example/oauth/authorize?state=${EMR_STATE}`,
+  state: EMR_STATE,
+};
+
+export const EMR_CONNECTION_ACTIVE: EmrConnectionOut = {
+  id: EMR_CONNECTION_ID,
+  patient_id: '22222222-2222-4222-8222-222222222222',
+  fhir_base: 'https://fhir.epic.example/api/FHIR/R4',
+  provider_name: 'Epic (MyChart)',
+  status: 'active',
+  granted_scope: 'launch/patient patient/Observation.read offline_access',
+  patient_fhir_id: 'synthetic-fhir-patient-9',
+  token_expires_at: '2026-07-13T13:00:00Z',
+  revoked_at: null,
+};
+
+export const EMR_CONNECTION_REVOKED: EmrConnectionOut = {
+  ...EMR_CONNECTION_ACTIVE,
+  status: 'revoked',
+  granted_scope: null,
+  revoked_at: '2026-07-13T14:00:00Z',
+};
+
+export const EMR_PULL: EmrPullOut = {
+  imported: 2,
+  results: [
+    {
+      loinc_code: '4548-4',
+      source_record_id: 'synthetic-obs-1',
+      display: 'Hemoglobin A1c',
+      value: 7.2,
+      value_text: null,
+      unit: '%',
+      effective_at: '2026-06-15T08:30:00Z',
+      issued_at: null,
+      status: 'final',
+      reference_range: null,
+      interpretation: null,
+      code_system: 'LOINC',
+      unit_system: 'UCUM',
+    },
+    {
+      loinc_code: '2345-7',
+      source_record_id: 'synthetic-obs-2',
+      display: 'Glucose',
+      value: 101,
+      value_text: null,
+      unit: 'mg/dL',
+      effective_at: '2026-06-15T08:30:00Z',
+      issued_at: null,
+      status: 'final',
+      reference_range: null,
+      interpretation: null,
+      code_system: 'LOINC',
+      unit_system: 'UCUM',
+    },
+  ],
+};
 
 export const CONNECTION_PENDING: ConnectionOut = {
   id: '33333333-3333-4333-8333-333333333333',

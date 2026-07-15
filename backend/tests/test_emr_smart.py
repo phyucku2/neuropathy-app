@@ -70,3 +70,23 @@ def test_token_request_uses_pkce_verifier() -> None:
     assert body["grant_type"] == "authorization_code"
     assert body["code"] == "the-code"
     assert body["code_verifier"] == "the-verifier"
+
+
+def test_default_scopes_are_exactly_the_trimmed_least_privilege_set() -> None:
+    """ADR-0028 scope trim: request EXACTLY what the code uses. `openid fhirUser` were
+    requested-but-never-read (the id_token is never parsed) and patient/Patient.read
+    must not creep in (the pull never fetches Patient) — the registration and the code
+    must agree, and the EHR consent screen must not over-claim."""
+    url = build_authorize_url(
+        authorization_endpoint="https://ehr.example/oauth/authorize",
+        client_id="my-client",
+        redirect_uri="https://app.example/callback",
+        fhir_base="https://ehr.example/fhir",
+        state="xyz",
+        code_challenge="challenge123",
+    )
+    q = parse_qs(urlparse(url).query)
+    assert q["scope"] == ["launch/patient patient/Observation.read offline_access"]
+    assert "openid" not in q["scope"][0]
+    assert "fhirUser" not in q["scope"][0]
+    assert "Patient.read" not in q["scope"][0]

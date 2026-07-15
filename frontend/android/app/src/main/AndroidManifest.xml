@@ -23,6 +23,20 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- Custom-scheme deep link (ADR-0028) — the FALLBACK return path from the
+                 system browser's SMART OAuth redirect on devices where App Links
+                 verification fails. The PREFERRED path is an Android App Links (https)
+                 intent-filter, which needs the deployed app origin + its
+                 /.well-known/assetlinks.json (release-cert SHA-256) — owner-side; the
+                 exact template lives in docs/mobile/emr-app-links.md. The appUrlOpen
+                 handler (src/native/nativeShell.ts) routes both shapes. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="@string/custom_url_scheme" />
+            </intent-filter>
+
         </activity>
 
         <provider

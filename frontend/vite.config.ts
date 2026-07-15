@@ -14,6 +14,12 @@ const API_PREFIXES = [
   '/capabilities',
   '/connections',
   '/clinic',
+  // NOTE: /emr is both an API prefix (POST /emr/connect, GET /emr/providers, ...) and
+  // a client route (/emr/callback, the SMART relay) — the same shared-prefix situation
+  // as /clinic (ADR-0022): fetch/XHR goes to the API, document navigations render the
+  // SPA (the E2E mock serves index.html for them; in dev, land on the SPA via an
+  // in-app navigation).
+  '/emr',
 ];
 
 export default defineConfig({

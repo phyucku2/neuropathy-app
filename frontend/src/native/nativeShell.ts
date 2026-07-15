@@ -1,7 +1,8 @@
 /**
- * Native shell wiring (ADR-0025): status bar, splash screen, and the Android hardware back
- * button. All of it is native-only — on web `initNativeShell` is a no-op, so the browser build
- * and the E2E suite are unaffected.
+ * Native shell wiring (ADR-0025, extended by ADR-0028): status bar, splash screen, the
+ * Android hardware back button, and the incoming-URL handler that returns the patient
+ * from the system browser's SMART OAuth redirect. All of it is native-only — on web
+ * `initNativeShell` is a no-op, so the browser build and the E2E suite are unaffected.
  */
 
 import { App as CapApp } from '@capacitor/app';
@@ -19,11 +20,46 @@ export function backAction(canGoBack: boolean): 'back' | 'exit' {
 }
 
 /**
- * Initialize the native shell and return a cleanup that detaches the back-button listener.
- * `goBack` is the app's in-history navigation (injected so this stays framework-agnostic).
+ * The SPA path (+query) an incoming deep-link URL should route to, or null when the
+ * URL is unparseable (ADR-0028). Pure, so the routing decision is unit-locked.
+ *
+ * Two shapes arrive here (docs/mobile/emr-app-links.md):
+ * - Android App Links — `https://<app-origin>/emr/callback?code=..&state=..` (the OS
+ *   verified the origin against assetlinks.json before handing it to us): route to the
+ *   URL's own path+query.
+ * - Custom-scheme fallback — `com.ahwg.neuropathy://emr/callback?..`: the URL "host"
+ *   is the first path segment (something must follow `://`, per the vendors' rules).
+ *
+ * Routing is INTERNAL only (React Router), so an unexpected path is harmless — the
+ * router's catch-all redirects home; nothing here can navigate off-app.
+ */
+export function appUrlPath(url: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+    return `${parsed.pathname}${parsed.search}`;
+  }
+  if (parsed.host === '') {
+    return null;
+  }
+  return `/${parsed.host}${parsed.pathname}${parsed.search}`;
+}
+
+/**
+ * Initialize the native shell and return a cleanup that detaches the listeners.
+ * `goBack` (hardware back) and `navigateTo` (incoming deep links, e.g. the SMART
+ * OAuth return) are the app's router actions, injected so this stays
+ * framework-agnostic and unit-testable (ADR-0024 seam lesson).
  * No-op (and a no-op cleanup) on web.
  */
-export async function initNativeShell(goBack: () => void): Promise<() => void> {
+export async function initNativeShell(
+  goBack: () => void,
+  navigateTo: (path: string) => void,
+): Promise<() => void> {
   if (!isNativePlatform()) {
     return () => undefined;
   }
@@ -46,20 +82,45 @@ export async function initNativeShell(goBack: () => void): Promise<() => void> {
     // splash already gone — ignore
   }
 
+  const cleanups: (() => void)[] = [];
+
+  // Incoming URLs (ADR-0028): the EMR's OAuth redirect re-enters the app as an App
+  // Link (or the custom-scheme fallback); route the SPA to its path+query so the
+  // /emr/callback relay handles it exactly as on web.
   try {
-    const handle = await CapApp.addListener('backButton', ({ canGoBack }) => {
+    const urlHandle = await CapApp.addListener('appUrlOpen', ({ url }) => {
+      const path = appUrlPath(url);
+      if (path !== null) {
+        navigateTo(path);
+      }
+    });
+    cleanups.push(() => {
+      void urlHandle.remove();
+    });
+  } catch {
+    // Registration failed: deep links fall back to a cold open of the app. Degraded
+    // but never fatal.
+  }
+
+  try {
+    const backHandle = await CapApp.addListener('backButton', ({ canGoBack }) => {
       if (backAction(canGoBack) === 'back') {
         goBack();
       } else {
         void CapApp.exitApp();
       }
     });
-    return () => {
-      void handle.remove();
-    };
+    cleanups.push(() => {
+      void backHandle.remove();
+    });
   } catch {
     // Listener registration failed: the OS default back behavior applies. Degraded but
     // never fatal — and the splash is already hidden above.
-    return () => undefined;
   }
+
+  return () => {
+    for (const cleanup of cleanups) {
+      cleanup();
+    }
+  };
 }

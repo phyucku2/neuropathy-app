@@ -476,3 +476,84 @@ async def test_pull_is_gated_by_the_ingest_labs_toggle(client: TestClient) -> No
     assert client.get("/emr/callback", params={"state": state, "code": "c"}).status_code == 200
     resp = client.post(f"/emr/connections/{connection_id}/pull")
     assert resp.status_code == 200  # re-enabled: the pull works again
+
+
+def test_provider_connect_uses_the_vendor_client_id_on_both_hops() -> None:
+    """ADR-0028 per-provider client ids: each EMR issues its OWN client_id, so a
+    registry-provider connect must carry the vendor id on the authorize URL AND the
+    token exchange — mixing the vendor id on one hop with the fallback on the other
+    would fail every exchange."""
+    fake = FakeEmr()
+    service = EmrService(
+        transport=fake,
+        client_id="generic-client",
+        redirect_uri="https://app.test/emr/callback",
+        provider_client_ids={"Epic (MyChart)": "synthetic-epic-client-id"},
+    )
+    try:
+        c = _client_with(service)
+        resp = c.post("/emr/connect", json={"provider_key": "epic"})
+        assert resp.status_code == 200
+        q = parse_qs(urlparse(resp.json()["authorize_url"]).query)
+        assert q["client_id"] == ["synthetic-epic-client-id"]
+
+        cb = c.get("/emr/callback", params={"state": resp.json()["state"], "code": "auth-code"})
+        assert cb.status_code == 200
+        assert fake.token_requests[-1]["client_id"] == "synthetic-epic-client-id"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_custom_fhir_base_connect_keeps_the_generic_client_id() -> None:
+    """A custom fhir_base connect has no registry provider, so the generic
+    SMART_CLIENT_ID fallback applies on both hops — existing behavior, unchanged."""
+    fake = FakeEmr()
+    service = EmrService(
+        transport=fake,
+        client_id="generic-client",
+        redirect_uri="https://app.test/emr/callback",
+        provider_client_ids={"Epic (MyChart)": "synthetic-epic-client-id"},
+    )
+    try:
+        c = _client_with(service)
+        resp = c.post("/emr/connect", json={"fhir_base": FHIR_BASE})
+        q = parse_qs(urlparse(resp.json()["authorize_url"]).query)
+        assert q["client_id"] == ["generic-client"]
+        cb = c.get("/emr/callback", params={"state": resp.json()["state"], "code": "c"})
+        assert cb.status_code == 200
+        assert fake.token_requests[-1]["client_id"] == "generic-client"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_provider_without_a_configured_client_id_falls_back_to_the_generic() -> None:
+    """An unconfigured vendor id must not break the flow — the fallback keeps sandbox
+    development working until the user registers with that vendor."""
+    fake = FakeEmr()
+    service = EmrService(
+        transport=fake, client_id="generic-client", redirect_uri="https://app.test/emr/callback"
+    )
+    try:
+        c = _client_with(service)
+        resp = c.post("/emr/connect", json={"provider_key": "epic"})
+        q = parse_qs(urlparse(resp.json()["authorize_url"]).query)
+        assert q["client_id"] == ["generic-client"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_deps_build_the_provider_client_id_map_from_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The wiring seam (deps._smart_provider_client_ids): configured vendors appear,
+    keyed by DISPLAY NAME (what a ConnectionRecord persists), and unconfigured ones are
+    simply absent so the service falls back to the generic id."""
+    from app.api.deps import _smart_provider_client_ids
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "smart_client_id_epic", "synthetic-epic-client-id")
+    monkeypatch.setattr(settings, "smart_client_id_oracle_health", "synthetic-oracle-client-id")
+    ids = _smart_provider_client_ids()
+    assert ids["Epic (MyChart)"] == "synthetic-epic-client-id"
+    assert ids["Oracle Health (Cerner)"] == "synthetic-oracle-client-id"
+    assert "athenahealth" not in ids and "MEDITECH" not in ids  # unconfigured -> absent

@@ -6,6 +6,7 @@ import { AddDataPage } from './features/add/AddDataPage';
 import { LoginPage } from './features/auth/LoginPage';
 import { RegisterPage } from './features/auth/RegisterPage';
 import { CheckInPage } from './features/checkin/CheckInPage';
+import { EmrCallbackPage } from './features/emr/EmrCallbackPage';
 import { PanelPage } from './features/clinic/PanelPage';
 import { PatientDetailPage } from './features/clinic/PatientDetailPage';
 import { HomePage } from './features/home/HomePage';
@@ -61,6 +62,11 @@ export function App() {
             <Route path="check-in" element={<CheckInPage />} />
             <Route path="add" element={<AddDataPage />} />
             <Route path="settings" element={<SettingsPage />} />
+            {/* The SMART redirect relay (ADR-0028): the EMR sends the patient's browser
+                to /emr/callback?code=..&state=..; this authenticated route forwards
+                them to the bearer-only backend callback. On native, the App-Links /
+                custom-scheme handler (nativeShell appUrlOpen) routes here too. */}
+            <Route path="emr/callback" element={<EmrCallbackPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Route>

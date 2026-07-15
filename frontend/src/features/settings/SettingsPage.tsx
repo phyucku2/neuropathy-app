@@ -3,7 +3,7 @@
  * enforced=false rows render read-only ("coming soon"); PUT is optimistic
  * with rollback on failure, and a 409's server message (e.g. clinically
  * managed) is surfaced verbatim (ADR-0013). Below: clinic connections with
- * consent grant/revoke.
+ * consent grant/revoke, then EMR health-record connections (ADR-0028).
  */
 
 import { useEffect, useState } from 'react';
@@ -15,6 +15,7 @@ import { formatDayYear } from '../../lib/format';
 import { useApi } from '../../lib/useApi';
 import { ConnectionRow } from './ConnectionRow';
 import { DeleteAccountCard } from './DeleteAccountCard';
+import { EmrConnectCard } from './EmrConnectCard';
 
 const CAPABILITY_ICONS: Record<string, { glyph: string; color: string }> = {
   ingest_biomech: { glyph: '◔', color: 'var(--color-brand-blue)' },
@@ -183,6 +184,9 @@ export function SettingsPage() {
       </p>
       <CapabilitiesCard />
       <ConnectionsCard />
+      {/* EMR connect (ADR-0028) sits with the clinic connections — a data-source
+          concern, deliberately outside the danger zone below. */}
+      <EmrConnectCard />
       <DeleteAccountCard />
     </div>
   );

@@ -56,3 +56,21 @@ def test_phi_free_format_keeps_correlatable_safe_fields() -> None:
     block = _log_format_block(_read_template())
     for var in ("$request_method", "$status", "$http_x_request_id"):
         assert var in block, f"expected {var} in the phi_free format"
+
+
+def test_emr_callback_splits_spa_redirect_from_authenticated_relay() -> None:
+    """/emr/callback is BOTH the SPA relay route and the backend API route (ADR-0028).
+
+    The EMR's redirect is a bare document navigation (no Authorization header) and MUST
+    receive the SPA shell — a blanket `/emr/` proxy would hand the patient the backend's
+    401 JSON and the handshake could never complete. The relay's own fetch carries the
+    bearer and MUST reach the backend. This locks the exact-match split."""
+    config = _read_template()
+    match = re.search(r"location = /emr/callback \{(.*?)\n    \}", config, re.DOTALL)
+    assert match, "expected an exact-match location for /emr/callback"
+    block = match.group(1)
+    # Unauthenticated document navigation -> the SPA shell...
+    assert re.search(r'if \(\$http_authorization = ""\)', block)
+    assert "rewrite ^ /index.html last;" in block
+    # ...and the bearer'd relay fetch -> the backend.
+    assert "proxy_pass http://$backend_origin$request_uri;" in block
