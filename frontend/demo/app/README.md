@@ -49,6 +49,28 @@ and saving screenshots to `/tmp/demo-verify/`:
 node demo/app/verify.mjs
 ```
 
+## Deploying to Vercel (public shareable link)
+
+`frontend/vercel.json` makes a repo connected to Vercel build and serve this demo
+as a static site — a public URL anyone can open with **no login** (unlike a
+claude.ai artifact). It serves the multi-file build (`dist/index.html` + assets);
+the single-file `build-singlefile.mjs` step is NOT needed for hosting.
+
+One-time setup (after `vercel.json` is on the default branch):
+
+1. Sign in to Vercel (the free Hobby plan is enough) → **Add New… → Project** →
+   import the GitHub repo.
+2. Set **Root Directory** to `frontend`. Leave Build/Output blank — `vercel.json`
+   supplies `buildCommand` (`npx vite build --config demo/app/vite.demo.config.ts`)
+   and `outputDirectory` (`demo/app/dist`).
+3. Deploy. Every push to the production branch rebuilds the demo automatically.
+4. If the URL asks visitors to log in, open **Project → Settings → Deployment
+   Protection** and set it to **Disabled** (the demo is synthetic-data-only, so a
+   public URL is fine).
+
+This Vercel project serves the DEMO (there is no backend yet); a real
+app deployment will be a separate project/config once hosting is chosen.
+
 ## Caveats
 
 - The EMR "connect" button in Sources starts a SMART-on-FHIR redirect whose
