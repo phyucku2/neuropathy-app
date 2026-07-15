@@ -56,3 +56,45 @@ def test_phi_free_format_keeps_correlatable_safe_fields() -> None:
     block = _log_format_block(_read_template())
     for var in ("$request_method", "$status", "$http_x_request_id"):
         assert var in block, f"expected {var} in the phi_free format"
+
+
+def test_emr_callback_splits_spa_redirect_from_authenticated_relay() -> None:
+    """/emr/callback is BOTH the SPA relay route and the backend API route (ADR-0028).
+
+    The EMR's redirect is a bare document navigation (no Authorization header) and MUST
+    receive the SPA shell — a blanket `/emr/` proxy would hand the patient the backend's
+    401 JSON and the handshake could never complete. The relay's own fetch carries the
+    bearer and MUST reach the backend.
+
+    STRUCTURAL, not string-presence (review finding): the rewrite must sit INSIDE the
+    no-Authorization `if` braces (conditional) and the proxy_pass OUTSIDE/after them
+    (unconditional for the authenticated fetch). A regression that unconditionally
+    rewrites — or reorders the two so the proxy never runs — must fail here, even
+    though both directive strings would still be present in the block."""
+    config = _read_template()
+    match = re.search(r"location = /emr/callback \{(.*?)\n    \}", config, re.DOTALL)
+    assert match, "expected an exact-match location for /emr/callback"
+    block = match.group(1)
+
+    if_open = re.search(r'if \(\$http_authorization = ""\)\s*\{', block)
+    assert if_open, "expected the no-Authorization `if` split inside the callback location"
+    before_if = block[: if_open.start()]
+    # The `if` body ends at its first closing brace (nginx `if` blocks don't nest here).
+    if_body, closing, after_if = block[if_open.end() :].partition("}")
+    assert closing == "}", "the no-Authorization `if` block never closes"
+
+    # The SPA rewrite is CONDITIONAL: inside the if braces, and nowhere else.
+    assert re.search(r"rewrite\s+\^\s+/index\.html\s+last;", if_body), (
+        "the SPA-shell rewrite must sit INSIDE the no-Authorization if-block"
+    )
+    assert "rewrite" not in before_if and "rewrite" not in after_if, (
+        "an unconditional rewrite would ALSO shell-swap the authenticated relay fetch"
+    )
+    # The backend proxy is UNCONDITIONAL: outside (after) the if braces, and never inside.
+    assert re.search(r"proxy_pass\s+http://\$backend_origin\$request_uri;", after_if), (
+        "proxy_pass must follow the if-block so the bearer'd fetch reaches the backend"
+    )
+    assert "proxy_pass" not in if_body and "proxy_pass" not in before_if, (
+        "proxy_pass inside/before the if would proxy the bare EMR redirect to the "
+        "backend's 401 JSON"
+    )

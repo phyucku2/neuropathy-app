@@ -23,8 +23,9 @@ aspires to.
   standalone-launch URL with `aud` = FHIR base, `state`, and an S256 challenge. This is
   **not** an EHR launch.
 - **Scopes the code requests** (`DEFAULT_SCOPES` in `backend/app/emr/smart.py`):
-  `launch/patient patient/Observation.read openid fhirUser offline_access` (SMART **v1**
-  scope syntax).
+  `launch/patient patient/Observation.read offline_access` (SMART **v1** scope syntax).
+  `openid fhirUser` were dropped 2026-07-15 (ADR-0028 — mismatch (a) resolved:
+  least-privilege; the id_token was never read).
 - **Resources the pull actually reads** (`backend/app/emr/client.py`): only
   `GET {fhirBase}/Observation?patient={id}&category=laboratory` + Bundle `next` paging.
   **No other resource is fetched — not even Patient.** The patient's FHIR id comes from
@@ -47,30 +48,32 @@ aspires to.
 | `patient/Observation.read` | **Yes** | The only resource the pull reads. |
 | `launch/patient` | **Yes** | Standalone launch patient-context; `pull_labs` requires the token response's `patient` id. |
 | `offline_access` | **Yes (intent)** | `complete_callback` vaults `refresh_token` when returned — but see mismatch (c). |
-| `openid` + `fhirUser` | **No (today)** | Requested, but `complete_callback` never reads the `id_token`. |
+| `openid` + `fhirUser` | **No — and no longer requested** | ADR-0028 dropped them (mismatch (a) resolved): `complete_callback` never reads an `id_token`. Re-add only with a consumer. |
 | `patient/Patient.read` | **No** | Code never fetches Patient; demographics aren't used. Do **not** add it just because tutorials do. |
 
 **Mismatches to resolve (flagged, not fixed here):**
 
-1. **(a) `openid fhirUser` requested but unused.** Least-privilege says drop them until
-   we verify id_tokens; product may prefer keeping them for future identity checks.
-   Either way, make the code and the registration agree.
-2. **(b) One `SMART_CLIENT_ID` for all providers.** Epic and Oracle each issue their
-   *own* client_id, but `EmrService` takes a single `client_id` and
-   `EmrProvider` (`providers.py`) has no client_id field. **Code change required before
-   two-vendor testing:** per-provider client ids (e.g. add `client_id_env` per registry
-   entry, or `SMART_CLIENT_ID_EPIC` / `SMART_CLIENT_ID_ORACLE_HEALTH` resolved by
-   provider key). Never commit the ids' values if treated as config; client_ids are not
-   secrets, but keep them env-driven like `sandbox_fhir_base`'s production counterparts.
+1. **(a) `openid fhirUser` requested but unused.** ✅ **RESOLVED (ADR-0028,
+   2026-07-15):** dropped from `DEFAULT_SCOPES` — the code and the registration now
+   agree on `launch/patient patient/Observation.read offline_access`. If a future
+   identity check needs the id_token, the scope returns in the PR that reads it.
+2. **(b) One `SMART_CLIENT_ID` for all providers.** ✅ **RESOLVED (ADR-0028,
+   2026-07-15):** every registry entry now carries `client_id_env`
+   (`SMART_CLIENT_ID_EPIC`, `SMART_CLIENT_ID_ORACLE_HEALTH`, …, mapped to Settings
+   fields; see `backend/.env.example`), and both handshake hops resolve the
+   connection's provider id with the generic `SMART_CLIENT_ID` as the
+   custom-fhir_base/unconfigured fallback. Values stay env-only, never committed.
 3. **(c) `offline_access` without a refresh implementation.** The refresh-token rotation
    job is a recorded follow-up (ADR-0008); until it exists, pulls fail after access-token
    expiry and the patient must re-link. Also see Epic's refresh-token caveat in §1.4.
-4. **(d) The callback requires OUR bearer auth.** `GET /emr/callback` is behind
-   `PatientUserDep` + the `emr_connect` capability — a bare browser redirect from the
-   EHR carries no `Authorization` header, so today the redirect landing must be relayed
-   by the (not-yet-built) connect UI, which forwards `code`+`state` to the backend with
-   the patient's token. This is exactly the Wave 3 connect-UI/native-handler work; the
-   smoke test in §5 does the relay manually.
+4. **(d) The callback requires OUR bearer auth.** ✅ **RESOLVED (ADR-0028,
+   2026-07-15):** the backend callback stays bearer-authenticated (unchanged, by
+   design), and the shipped connect UI provides the relay — the SPA's authenticated
+   `/emr/callback` route validates the echoed `state` against the pending handshake it
+   persisted and forwards `code`+`state` with the patient's token. On Android the
+   redirect re-enters the app via App Links / the custom-scheme fallback
+   (`docs/mobile/emr-app-links.md`). The §5 manual relay still works for curl-level
+   smoke tests.
 
 ---
 
@@ -222,9 +225,9 @@ from secondary sources — UNVERIFIED).**
     `/.well-known/smart-configuration`; our code always sends PKCE, which is fine for
     v1 too. Source: [Millennium authorization framework](https://docs.oracle.com/en/industries/health/millennium-platform-apis/millennium-authorization-framework/).
   - **FHIR spec:** R4. **Scopes:** tick exactly `launch/patient`,
-    `patient/Observation.read`, `openid`, `fhirUser`, `offline_access` (v1 syntax; v2
-    equivalent is `patient/Observation.rs`). **No wildcard scopes exist at Oracle —
-    each scope is explicit.** Note `offline_access` refresh tokens are auto-revoked
+    `patient/Observation.read`, `offline_access` (the ADR-0028 trimmed set — no
+    `openid`/`fhirUser`; v1 syntax, v2 equivalent is `patient/Observation.rs`). **No
+    wildcard scopes exist at Oracle — each scope is explicit.** Note `offline_access` refresh tokens are auto-revoked
     after **3 months of disuse**. Same source.
   - **Redirect URI:** see §2.3. If multiple URIs are registered, `redirect_uri` must be
     sent on both authorize and token requests — our code always sends it on both
@@ -391,10 +394,10 @@ items above the line are done.
 | 4 | Register Oracle Health app (Patient persona, Public, standalone, scope set §0, backend https redirect) | user | ☐ |
 | 5 | Record sandbox client_ids into env (never committed) | user | ☐ |
 | 6 | Re-verify both `sandbox_fhir_base` values in `providers.py` against the portals | user + code change (if drifted) | ☐ |
-| 7 | Per-provider client_id support (mismatch (b)) | code change | ☐ |
-| 8 | Decide & align `openid fhirUser` (mismatch (a)) | code change + ADR note | ☐ |
-| 9 | Callback reachable from a bare browser redirect / connect-UI relay (mismatch (d)) — part of Wave 3 connect UI | code change | ☐ |
-| 10 | Native handler: App Links (`assetlinks.json` for `com.ahwg.neuropathy`) + custom-scheme fallback (§3 Option A) | code change | ☐ |
+| 7 | Per-provider client_id support (mismatch (b)) | code change | ✅ ADR-0028 (`SMART_CLIENT_ID_<VENDOR>` env per registry entry) |
+| 8 | Decide & align `openid fhirUser` (mismatch (a)) | code change + ADR note | ✅ ADR-0028 (dropped; scope set = §0 minimal set) |
+| 9 | Callback reachable from a bare browser redirect / connect-UI relay (mismatch (d)) — part of Wave 3 connect UI | code change | ✅ ADR-0028 (SPA `/emr/callback` relay; backend auth unchanged) |
+| 10 | Native handler: App Links (`assetlinks.json` for `com.ahwg.neuropathy`) + custom-scheme fallback (§3 Option A) | code change | ✅ code (ADR-0028: appUrlOpen + scheme filter) / ☐ owner: serve `assetlinks.json` + https intent-filter once origin+keystore exist (`docs/mobile/emr-app-links.md`) |
 | 11 | Run §5 smoke test vs Epic sandbox; record `granted_scope` + refresh-token outcome | user | ☐ |
 | 12 | Run §5 smoke test vs Oracle sandbox; same records | user | ☐ |
 | 13 | Refresh-token rotation job (mismatch (c)) — informed by #11/#12 outcomes | code change | ☐ |

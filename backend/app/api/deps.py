@@ -39,7 +39,9 @@ from app.core.config import settings
 from app.core.errors import ErrorReporter, HttpErrorReporter
 from app.core.security import AuthError, TokenKind, decode_token
 from app.db.session import get_db_session
+from app.emr.providers import TOP_PROVIDERS, client_id_for
 from app.emr.service import (
+    UNCONFIGURED_CLIENT_ID,
     EmrService,
     InMemoryPendingAuthStore,
     InMemorySecretStore,
@@ -237,11 +239,31 @@ def _secret_store_for(session: AsyncSession) -> SecretStore:
 
 
 def _smart_client_config() -> tuple[str, str]:
-    """(client_id, redirect_uri) with DB-less-dev fallbacks."""
+    """(fallback client_id, redirect_uri) with DB-less-dev fallbacks.
+
+    The client-id placeholder is deliberately the service's UNCONFIGURED sentinel:
+    POST /emr/connect refuses to build an authorize URL around it (422 naming the env
+    var to set) instead of sending the patient to the real EMR to hit an opaque
+    vendor-side invalid_client error."""
     return (
-        settings.smart_client_id or "unconfigured-client",
+        settings.smart_client_id or UNCONFIGURED_CLIENT_ID,
         settings.smart_redirect_uri or "http://localhost:8000/emr/callback",
     )
+
+
+def _smart_provider_client_ids() -> dict[str, str]:
+    """Vendor-issued client ids from the registry + settings (ADR-0028).
+
+    Keyed by provider display name — what a ConnectionRecord persists — so the service
+    resolves the SAME id on both handshake hops (see EmrService.provider_client_ids).
+    Unconfigured providers are simply absent and fall back to the generic client id.
+    """
+    ids: dict[str, str] = {}
+    for provider in TOP_PROVIDERS:
+        configured = client_id_for(provider)
+        if configured is not None:
+            ids[provider.name] = configured
+    return ids
 
 
 @lru_cache(maxsize=1)
@@ -254,6 +276,7 @@ def _default_emr_service() -> EmrService:
         transport=_process_transport(),
         client_id=client_id,
         redirect_uri=redirect_uri,
+        provider_client_ids=_smart_provider_client_ids(),
         secret_store=_process_secret_store(),
         _pending=_process_pending_auth(),
     )
@@ -267,6 +290,7 @@ def get_emr_service(session: DbSessionDep = None) -> EmrService:
         transport=_process_transport(),
         client_id=client_id,
         redirect_uri=redirect_uri,
+        provider_client_ids=_smart_provider_client_ids(),
         secret_store=_secret_store_for(session),
         connections=PostgresEmrConnectionRepository(session),
         observations=PostgresObservationRepository(session),

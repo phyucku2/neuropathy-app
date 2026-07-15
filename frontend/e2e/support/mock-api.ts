@@ -19,6 +19,9 @@ import type { Page, Route } from '@playwright/test';
 import type {
   CapabilityStateOut,
   ConnectionOut,
+  EmrConnectionOut,
+  EmrProviderOut,
+  EmrPullOut,
   MeOut,
   ObservationItem,
   PanelOut,
@@ -185,6 +188,51 @@ export const CONNECTION_ACTIVE: ConnectionOut = {
   consent_granted_at: '2026-06-01T12:00:00Z',
 };
 
+// ---- EMR connect fixtures (ADR-0028; shapes mirror backend/app/schemas/emr.py) ----
+
+export const EMR_STATE = 'synthetic-emr-state';
+export const EMR_AUTH_CODE = 'synthetic-emr-auth-code';
+export const EMR_CONNECTION_ID = '66666666-6666-4666-8666-666666666666';
+
+/** Mirrors the real registry (backend/app/emr/providers.py): one entry with a public
+ * sandbox (connectable) and one without (renders "Not available yet"). */
+export const EMR_PROVIDERS: EmrProviderOut[] = [
+  {
+    key: 'epic',
+    name: 'Epic (MyChart)',
+    vendor: 'Epic Systems',
+    sandbox_fhir_base: 'https://fhir.epic.example/api/FHIR/R4',
+    note: 'Largest US hospital EMR; patient portal is MyChart.',
+  },
+  {
+    key: 'meditech',
+    name: 'MEDITECH',
+    vendor: 'MEDITECH',
+    sandbox_fhir_base: null,
+    note: 'Community-hospital EMR; sandbox access granted on registration.',
+  },
+];
+
+export const EMR_CONNECTION_ACTIVE: EmrConnectionOut = {
+  id: EMR_CONNECTION_ID,
+  patient_id: '22222222-2222-4222-8222-222222222222',
+  fhir_base: 'https://fhir.epic.example/api/FHIR/R4',
+  provider_name: 'Epic (MyChart)',
+  status: 'active',
+  granted_scope: 'launch/patient patient/Observation.read offline_access',
+  patient_fhir_id: 'synthetic-fhir-patient-9',
+  token_expires_at: '2026-07-13T13:00:00Z',
+  revoked_at: null,
+};
+
+export const EMR_PULL: EmrPullOut = {
+  imported: 2,
+  results: [
+    emrLab('4548-4', 'Hemoglobin A1c', 7.2, '%'),
+    emrLab('2345-7', 'Glucose', 101, 'mg/dL'),
+  ],
+};
+
 // ---- clinician fixtures ----
 
 export const PANEL_PATIENT_ID = '22222222-2222-4222-8222-222222222222';
@@ -229,6 +277,10 @@ export const CLINIC_OBSERVATIONS: ObservationItem[] = buildClinicObservations();
 export interface MockApiState {
   /** How many DELETE /auth/me requests succeeded (password matched -> 204). */
   accountDeletions: number;
+  /** How many POST /emr/connections/{id}/pull requests were served. */
+  emrPulls: number;
+  /** How many DELETE /emr/connections/{id} revocations were served. */
+  emrRevocations: number;
 }
 
 export interface Scenario {
@@ -274,7 +326,7 @@ const patientNotFound = (route: Route) => fulfillJson(route, 404, { detail: 'Pat
  * so it never logs a benign 404 to the console.
  */
 export async function installApiMocks(page: Page, scenario: Scenario = {}): Promise<MockApiState> {
-  const state: MockApiState = { accountDeletions: 0 };
+  const state: MockApiState = { accountDeletions: 0, emrPulls: 0, emrRevocations: 0 };
   const me = scenario.me ?? ME;
   const trajectory = scenario.trajectory ?? TRAJECTORY_IMPROVING;
   const observations = scenario.observations ?? OBSERVATIONS;
@@ -288,7 +340,9 @@ export async function installApiMocks(page: Page, scenario: Scenario = {}): Prom
   await page.route('**/favicon.ico', (route) => route.fulfill({ status: 204, body: '' }));
 
   await page.route(
-    /\/(auth|observations|adl|biomech|trajectory|capabilities|connections|clinic)(\/|$|\?)/,
+    // /emr shares its prefix between API paths and the SPA's /emr/callback relay
+    // route, exactly like /clinic (see the document-navigation note below).
+    /\/(auth|observations|adl|biomech|trajectory|capabilities|connections|clinic|emr)(\/|$|\?)/,
     async (route) => {
       const req = route.request();
       // Only intercept the app's fetch/XHR API calls. The client routes /clinic and
@@ -422,6 +476,56 @@ export async function installApiMocks(page: Page, scenario: Scenario = {}): Prom
         return route.fulfill({ status: 204, body: '' });
       }
 
+      // ---- EMR connect (ADR-0028; mirrors backend/app/api/routes/emr.py) ----
+      if (method === 'GET' && path === '/emr/providers') {
+        // The real endpoint's search: case-insensitive match on key, name, or vendor.
+        const q = (new URL(req.url()).searchParams.get('q') ?? '').trim().toLowerCase();
+        return fulfillJson(
+          route,
+          200,
+          EMR_PROVIDERS.filter(
+            (p) =>
+              q === '' ||
+              p.key.toLowerCase().includes(q) ||
+              p.name.toLowerCase().includes(q) ||
+              p.vendor.toLowerCase().includes(q),
+          ),
+        );
+      }
+      if (method === 'POST' && path === '/emr/connect') {
+        // The authorize URL points back at the app's OWN /emr/callback with the
+        // code+state the real EMR would append — simulating the OAuth round trip
+        // without leaving the origin (the /emr document navigation renders the SPA).
+        const origin = new URL(req.url()).origin;
+        return fulfillJson(route, 200, {
+          connection_id: EMR_CONNECTION_ID,
+          authorize_url: `${origin}/emr/callback?code=${EMR_AUTH_CODE}&state=${EMR_STATE}`,
+          state: EMR_STATE,
+        });
+      }
+      if (method === 'GET' && path === '/emr/callback') {
+        const params = new URL(req.url()).searchParams;
+        if (params.get('state') !== EMR_STATE || params.get('code') !== EMR_AUTH_CODE) {
+          // Single-use/unknown state — the real endpoint's 404.
+          return fulfillJson(route, 404, { detail: 'Unknown, expired, or already-used state' });
+        }
+        return fulfillJson(route, 200, EMR_CONNECTION_ACTIVE);
+      }
+      if (method === 'POST' && /^\/emr\/connections\/[^/]+\/pull$/.test(path)) {
+        state.emrPulls += 1;
+        return fulfillJson(route, 200, EMR_PULL);
+      }
+      if (method === 'DELETE' && /^\/emr\/connections\/[^/]+$/.test(path)) {
+        state.emrRevocations += 1;
+        // The real revoke returns the connection with status=revoked (200, not 204).
+        return fulfillJson(route, 200, {
+          ...EMR_CONNECTION_ACTIVE,
+          status: 'revoked',
+          granted_scope: null,
+          revoked_at: '2026-07-13T14:00:00Z',
+        });
+      }
+
       // ---- clinician surface ----
       if (method === 'POST' && path === '/clinic/invitations') {
         return fulfillJson(route, 202, {
@@ -516,6 +620,24 @@ function page_(items: ObservationItem[], url: string) {
     total: items.length,
     limit,
     offset,
+  };
+}
+
+function emrLab(loinc_code: string, display: string, value: number, unit: string) {
+  return {
+    loinc_code,
+    source_record_id: `synthetic-${loinc_code}`,
+    display,
+    value,
+    value_text: null,
+    unit,
+    effective_at: '2026-06-15T08:30:00Z',
+    issued_at: null,
+    status: 'final',
+    reference_range: null,
+    interpretation: null,
+    code_system: 'LOINC',
+    unit_system: 'UCUM',
   };
 }
 

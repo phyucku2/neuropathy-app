@@ -10,6 +10,13 @@ import {
   CONNECTION_ACTIVE,
   CONNECTION_PENDING,
   DELETE_WRONG_PASSWORD_DETAIL,
+  EMR_AUTH_CODE,
+  EMR_CONNECT_START,
+  EMR_CONNECTION_ACTIVE,
+  EMR_CONNECTION_REVOKED,
+  EMR_PROVIDERS,
+  EMR_PULL,
+  EMR_STATE,
   ME,
   OBSERVATIONS,
   PANEL,
@@ -180,6 +187,66 @@ export const handlers = [
 
   http.delete('/connections/:id', ({ request }) =>
     isAuthorized(request) ? new HttpResponse(null, { status: 204 }) : unauthorized(),
+  ),
+
+  // ---- EMR connect (ADR-0028; mirrors backend/app/api/routes/emr.py) ----
+
+  http.get('/emr/providers', ({ request }) => {
+    if (!isAuthorized(request)) {
+      return unauthorized();
+    }
+    // The real endpoint's search: case-insensitive match on key, name, or vendor.
+    const q = (new URL(request.url).searchParams.get('q') ?? '').trim().toLowerCase();
+    return HttpResponse.json(
+      EMR_PROVIDERS.filter(
+        (p) =>
+          q === '' ||
+          p.key.toLowerCase().includes(q) ||
+          p.name.toLowerCase().includes(q) ||
+          p.vendor.toLowerCase().includes(q),
+      ),
+    );
+  }),
+
+  http.post('/emr/connect', async ({ request }) => {
+    if (!isAuthorized(request)) {
+      return unauthorized();
+    }
+    const body = (await request.json()) as { provider_key?: string | null };
+    if (body.provider_key === 'meditech') {
+      // The real 422 for a registry provider with no public sandbox.
+      return HttpResponse.json(
+        { detail: 'Provider has no public sandbox; supply fhir_base explicitly' },
+        { status: 422 },
+      );
+    }
+    return HttpResponse.json(EMR_CONNECT_START);
+  }),
+
+  http.get('/emr/callback', ({ request }) => {
+    if (!isAuthorized(request)) {
+      return unauthorized();
+    }
+    const url = new URL(request.url);
+    if (
+      url.searchParams.get('state') !== EMR_STATE ||
+      url.searchParams.get('code') !== EMR_AUTH_CODE
+    ) {
+      // Single-use/unknown state — the real endpoint's 404.
+      return HttpResponse.json(
+        { detail: 'Unknown, expired, or already-used state' },
+        { status: 404 },
+      );
+    }
+    return HttpResponse.json(EMR_CONNECTION_ACTIVE);
+  }),
+
+  http.post('/emr/connections/:id/pull', ({ request }) =>
+    isAuthorized(request) ? HttpResponse.json(EMR_PULL) : unauthorized(),
+  ),
+
+  http.delete('/emr/connections/:id', ({ request }) =>
+    isAuthorized(request) ? HttpResponse.json(EMR_CONNECTION_REVOKED) : unauthorized(),
   ),
 
   // ---- clinician surface ----

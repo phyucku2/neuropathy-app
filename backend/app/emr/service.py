@@ -15,11 +15,13 @@ from __future__ import annotations
 
 import secrets as pysecrets
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 from app.emr.client import EmrClient
+from app.emr.providers import client_id_env_for
 from app.emr.smart import (
     build_authorize_url,
     build_token_request,
@@ -47,6 +49,7 @@ from app.repositories.pending_auth import (
 from app.schemas.lab import LabResultIn
 
 __all__ = [
+    "UNCONFIGURED_CLIENT_ID",
     "ConnectionRecord",
     "EmrError",
     "EmrService",
@@ -57,6 +60,12 @@ __all__ = [
     "SecretStore",
     "pending_auth_ttl",
 ]
+
+# The DB-less-development placeholder deps.py wires when no SMART_CLIENT_ID is
+# configured. `start_connect` refuses to build an authorize URL around it (fail
+# early, review finding): redirecting the patient to the REAL EMR with this value
+# only produces an opaque vendor-side invalid_client error the app never sees.
+UNCONFIGURED_CLIENT_ID = "unconfigured-client"
 
 
 class EmrError(Exception):
@@ -111,18 +120,62 @@ class InMemorySecretStore:
 @dataclass
 class EmrService:
     transport: HttpTransport
+    # Fallback SMART client id — used for custom fhir_base connections and any provider
+    # without a configured per-vendor id.
     client_id: str
     redirect_uri: str
+    # Vendor-issued client ids keyed by provider DISPLAY NAME (ADR-0028): each EMR issues
+    # its own client_id, and the display name is exactly what a ConnectionRecord persists
+    # (`provider_name`), so the SAME resolution works on both handshake hops — the
+    # authorize URL at connect and the token exchange at callback — without a schema
+    # change. Custom fhir_base connections have provider_name=None -> the fallback.
+    # deps.py builds this from the registry + settings; tests inject dicts directly.
+    provider_client_ids: Mapping[str, str] = field(default_factory=dict)
     secret_store: SecretStore = field(default_factory=InMemorySecretStore)
     connections: EmrConnectionRepository = field(default_factory=InMemoryEmrConnectionRepository)
     observations: ObservationRepository = field(default_factory=InMemoryObservationRepository)
     audit: AuditEventRepository = field(default_factory=InMemoryAuditEventRepository)
     _pending: PendingAuthStore = field(default_factory=InMemoryPendingAuthStore)
 
+    def _client_id_for(self, provider_name: str | None) -> str:
+        """The client id this connection's authorize URL AND token exchange must use.
+
+        The two hops MUST resolve identically — an authorize URL built with the vendor
+        id but a token request sent with the fallback would fail every exchange."""
+        if provider_name is None:
+            return self.client_id
+        return self.provider_client_ids.get(provider_name, self.client_id)
+
+    def _require_configured_client_id(self, provider_name: str | None) -> str:
+        """The resolved client id — or a 422 EmrError when nothing real is configured.
+
+        The vendor-env -> generic fallback order is preserved (a single-vendor pilot
+        may legitimately run on the generic SMART_CLIENT_ID alone); ONLY landing on the
+        DB-less-dev placeholder / an empty value fails, and it fails EARLY — at connect,
+        with the exact env var to set — instead of redirecting the patient to the real
+        EMR to hit an opaque vendor-side invalid_client error (review finding)."""
+        client_id = self._client_id_for(provider_name)
+        if client_id and client_id != UNCONFIGURED_CLIENT_ID:
+            return client_id
+        env = client_id_env_for(provider_name) if provider_name is not None else None
+        if env is not None:
+            detail = (
+                "This provider isn't configured yet — the app operator must set "
+                f"{env} (or the generic SMART_CLIENT_ID)"
+            )
+        else:
+            detail = (
+                "EMR connections aren't configured yet — the app operator must set SMART_CLIENT_ID"
+            )
+        raise EmrError(detail, status_code=422)
+
     async def start_connect(
         self, *, patient_id: uuid.UUID, fhir_base: str, provider_name: str | None
     ) -> tuple[ConnectionRecord, str, str]:
         """SMART discovery -> PKCE -> authorize URL. Returns (connection, url, state)."""
+        # Fail BEFORE discovery and before persisting anything: an unconfigured client
+        # id can never complete a handshake, so no record or pending state may be born.
+        client_id = self._require_configured_client_id(provider_name)
         base = fhir_base.rstrip("/")
         config = await self.transport.get_json(f"{base}/.well-known/smart-configuration")
         authorization_endpoint = config.get("authorization_endpoint")
@@ -146,7 +199,7 @@ class EmrService:
         )
         url = build_authorize_url(
             authorization_endpoint=authorization_endpoint,
-            client_id=self.client_id,
+            client_id=client_id,
             redirect_uri=self.redirect_uri,
             fhir_base=base,
             state=state,
@@ -164,10 +217,18 @@ class EmrService:
         if pending is None:
             raise EmrError("Unknown, expired, or already-used state", status_code=404)
 
+        # The record comes FIRST: the token exchange must present the SAME client id the
+        # authorize URL carried, and that id is resolved from the connection's provider
+        # name (ADR-0028 per-provider client ids). Also avoids exchanging a code for a
+        # connection that no longer exists.
+        record = await self.connections.get(pending.connection_id)
+        if record is None:
+            raise EmrError("Connection not found", status_code=404)
+
         token_response: dict[str, Any] = await self.transport.post_form(
             pending.token_endpoint,
             build_token_request(
-                client_id=self.client_id,
+                client_id=self._client_id_for(record.provider_name),
                 redirect_uri=self.redirect_uri,
                 code=code,
                 code_verifier=pending.code_verifier,
@@ -176,10 +237,6 @@ class EmrService:
         access_token = token_response.get("access_token")
         if not access_token:
             raise EmrError("EMR token exchange returned no access token", status_code=502)
-
-        record = await self.connections.get(pending.connection_id)
-        if record is None:
-            raise EmrError("Connection not found", status_code=404)
         tokens = {"access_token": str(access_token)}
         if token_response.get("refresh_token"):
             tokens["refresh_token"] = str(token_response["refresh_token"])

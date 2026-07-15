@@ -23,6 +23,7 @@
     "@aparajita/capacitor-biometric-auth": "~9.0.0",
     "@aparajita/capacitor-secure-storage": "^6.0.1",
     "@capacitor/app": "^6.0.3",
+    "@capacitor/browser": "^6.0.6",
     "@capacitor/core": "^6.2.1",
     "@capacitor/splash-screen": "^6.0.4",
     "@capacitor/status-bar": "^6.0.3",

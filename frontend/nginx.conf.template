@@ -93,6 +93,19 @@ http {
 
     # ---- API reverse proxy (same-origin) ----
     location /auth/          { proxy_pass http://$backend_origin$request_uri; }
+
+    # `/emr/callback` is BOTH the SPA relay route (the EMR's browser redirect lands
+    # there as a bare document navigation — no Authorization header) AND the backend
+    # API route that relay then fetches WITH the patient's bearer (ADR-0028). Split on
+    # the Authorization header: the bare redirect gets the SPA shell so the relay can
+    # run; only the authenticated fetch reaches the backend. (`if` + rewrite/last is
+    # the documented-safe `if` usage.) Every other /emr/* path is API-only.
+    location = /emr/callback {
+      if ($http_authorization = "") {
+        rewrite ^ /index.html last;
+      }
+      proxy_pass http://$backend_origin$request_uri;
+    }
     location /emr/           { proxy_pass http://$backend_origin$request_uri; }
     location /biomech/       { proxy_pass http://$backend_origin$request_uri; }
     location /connections    { proxy_pass http://$backend_origin$request_uri; }
