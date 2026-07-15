@@ -20,18 +20,34 @@ export function backAction(canGoBack: boolean): 'back' | 'exit' {
 }
 
 /**
+ * Deep-link PATH allowlist: only the SMART OAuth return route may be driven by an
+ * incoming URL. Routing was already internal-only (React Router; the catch-all
+ * redirects home), but ignoring every other path outright means an arbitrary link
+ * cannot steer the SPA anywhere at all — cheap neutralization of arbitrary-route
+ * deep-linking.
+ */
+const DEEP_LINK_PATHS = ['/emr/callback'];
+
+function isAllowlistedPath(pathname: string): boolean {
+  return DEEP_LINK_PATHS.some(
+    (allowed) => pathname === allowed || pathname.startsWith(`${allowed}/`),
+  );
+}
+
+/**
  * The SPA path (+query) an incoming deep-link URL should route to, or null when the
- * URL is unparseable (ADR-0028). Pure, so the routing decision is unit-locked.
+ * URL is unparseable or its path is not allowlisted (ADR-0028). Pure, so the routing
+ * decision is unit-locked.
  *
  * Two shapes arrive here (docs/mobile/emr-app-links.md):
- * - Android App Links — `https://<app-origin>/emr/callback?code=..&state=..` (the OS
- *   verified the origin against assetlinks.json before handing it to us): route to the
- *   URL's own path+query.
+ * - Android App Links — `https://<app-origin>/emr/callback?code=..&state=..`: route to
+ *   the URL's own path+query. The https HOST is deliberately not checked here —
+ *   Android only delivers App Links whose host it verified against assetlinks.json,
+ *   and the callback relay's own state check refuses anything this app did not start;
+ *   the PATH allowlist is what neutralizes arbitrary-route deep links.
  * - Custom-scheme fallback — `com.ahwg.neuropathy://emr/callback?..`: the URL "host"
  *   is the first path segment (something must follow `://`, per the vendors' rules).
- *
- * Routing is INTERNAL only (React Router), so an unexpected path is harmless — the
- * router's catch-all redirects home; nothing here can navigate off-app.
+ *   The same allowlist applies to the reassembled path.
  */
 export function appUrlPath(url: string): string | null {
   let parsed: URL;
@@ -41,12 +57,13 @@ export function appUrlPath(url: string): string | null {
     return null;
   }
   if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-    return `${parsed.pathname}${parsed.search}`;
+    return isAllowlistedPath(parsed.pathname) ? `${parsed.pathname}${parsed.search}` : null;
   }
   if (parsed.host === '') {
     return null;
   }
-  return `/${parsed.host}${parsed.pathname}${parsed.search}`;
+  const pathname = `/${parsed.host}${parsed.pathname}`;
+  return isAllowlistedPath(pathname) ? `${pathname}${parsed.search}` : null;
 }
 
 /**

@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from app.api.deps import CurrentUser, get_current_user
 from app.api.routes.emr import get_emr_service
-from app.emr.service import EmrService
+from app.emr.service import UNCONFIGURED_CLIENT_ID, EmrService
 from app.main import app
 from app.models.user import UserRole
 
@@ -44,9 +44,11 @@ class FakeEmr:
 
     def __init__(self) -> None:
         self.token_requests: list[dict[str, str]] = []
+        self.discovery_calls = 0
 
     async def get_json(self, url: str, *, access_token: str | None = None) -> dict[str, Any]:
         if url.endswith("/.well-known/smart-configuration"):
+            self.discovery_calls += 1
             return {
                 "authorization_endpoint": "https://ehr.example/oauth/authorize",
                 "token_endpoint": "https://ehr.example/oauth/token",
@@ -527,8 +529,11 @@ def test_custom_fhir_base_connect_keeps_the_generic_client_id() -> None:
 
 
 def test_provider_without_a_configured_client_id_falls_back_to_the_generic() -> None:
-    """An unconfigured vendor id must not break the flow — the fallback keeps sandbox
-    development working until the user registers with that vendor."""
+    """When the generic SMART_CLIENT_ID IS configured, an unconfigured vendor id falls
+    back to it — a single-vendor pilot may legitimately run everything on the generic
+    id, and the fallback keeps sandbox development working until the user registers
+    with that vendor. (With NOTHING real configured, connect now fails early with a
+    422 instead — the tests below.)"""
     fake = FakeEmr()
     service = EmrService(
         transport=fake, client_id="generic-client", redirect_uri="https://app.test/emr/callback"
@@ -538,6 +543,46 @@ def test_provider_without_a_configured_client_id_falls_back_to_the_generic() -> 
         resp = c.post("/emr/connect", json={"provider_key": "epic"})
         q = parse_qs(urlparse(resp.json()["authorize_url"]).query)
         assert q["client_id"] == ["generic-client"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_provider_connect_fails_early_when_no_real_client_id_is_configured() -> None:
+    """With neither the vendor id nor the generic SMART_CLIENT_ID configured, deps
+    wires the 'unconfigured-client' placeholder — and the OLD behavior redirected the
+    patient to the REAL EMR carrying it, dead-ending in an opaque vendor-side
+    invalid_client error. Connect itself now answers 422 naming the exact env var to
+    set, before any discovery call and before any connection record is born."""
+    fake = FakeEmr()
+    service = EmrService(
+        transport=fake,
+        client_id=UNCONFIGURED_CLIENT_ID,
+        redirect_uri="https://app.test/emr/callback",
+    )
+    try:
+        c = _client_with(service)
+        resp = c.post("/emr/connect", json={"provider_key": "epic"})
+        assert resp.status_code == 422
+        assert "SMART_CLIENT_ID_EPIC" in resp.json()["detail"]  # actionable: the env var
+        assert fake.discovery_calls == 0  # failed EARLY — the EMR was never contacted
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_custom_fhir_base_connect_fails_early_without_a_client_id() -> None:
+    """A custom fhir_base connect has no vendor env var, so the 422 points the
+    operator at the generic SMART_CLIENT_ID. An empty client id is exactly as
+    unusable as the placeholder — both fail early."""
+    fake = FakeEmr()
+    service = EmrService(transport=fake, client_id="", redirect_uri="https://app.test/emr/callback")
+    try:
+        c = _client_with(service)
+        resp = c.post("/emr/connect", json={"fhir_base": FHIR_BASE})
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert "must set SMART_CLIENT_ID" in detail
+        assert "SMART_CLIENT_ID_" not in detail  # generic, not a vendor env var
+        assert fake.discovery_calls == 0
     finally:
         app.dependency_overrides.clear()
 

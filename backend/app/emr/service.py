@@ -21,6 +21,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 from app.emr.client import EmrClient
+from app.emr.providers import client_id_env_for
 from app.emr.smart import (
     build_authorize_url,
     build_token_request,
@@ -48,6 +49,7 @@ from app.repositories.pending_auth import (
 from app.schemas.lab import LabResultIn
 
 __all__ = [
+    "UNCONFIGURED_CLIENT_ID",
     "ConnectionRecord",
     "EmrError",
     "EmrService",
@@ -58,6 +60,12 @@ __all__ = [
     "SecretStore",
     "pending_auth_ttl",
 ]
+
+# The DB-less-development placeholder deps.py wires when no SMART_CLIENT_ID is
+# configured. `start_connect` refuses to build an authorize URL around it (fail
+# early, review finding): redirecting the patient to the REAL EMR with this value
+# only produces an opaque vendor-side invalid_client error the app never sees.
+UNCONFIGURED_CLIENT_ID = "unconfigured-client"
 
 
 class EmrError(Exception):
@@ -138,10 +146,36 @@ class EmrService:
             return self.client_id
         return self.provider_client_ids.get(provider_name, self.client_id)
 
+    def _require_configured_client_id(self, provider_name: str | None) -> str:
+        """The resolved client id — or a 422 EmrError when nothing real is configured.
+
+        The vendor-env -> generic fallback order is preserved (a single-vendor pilot
+        may legitimately run on the generic SMART_CLIENT_ID alone); ONLY landing on the
+        DB-less-dev placeholder / an empty value fails, and it fails EARLY — at connect,
+        with the exact env var to set — instead of redirecting the patient to the real
+        EMR to hit an opaque vendor-side invalid_client error (review finding)."""
+        client_id = self._client_id_for(provider_name)
+        if client_id and client_id != UNCONFIGURED_CLIENT_ID:
+            return client_id
+        env = client_id_env_for(provider_name) if provider_name is not None else None
+        if env is not None:
+            detail = (
+                "This provider isn't configured yet — the app operator must set "
+                f"{env} (or the generic SMART_CLIENT_ID)"
+            )
+        else:
+            detail = (
+                "EMR connections aren't configured yet — the app operator must set SMART_CLIENT_ID"
+            )
+        raise EmrError(detail, status_code=422)
+
     async def start_connect(
         self, *, patient_id: uuid.UUID, fhir_base: str, provider_name: str | None
     ) -> tuple[ConnectionRecord, str, str]:
         """SMART discovery -> PKCE -> authorize URL. Returns (connection, url, state)."""
+        # Fail BEFORE discovery and before persisting anything: an unconfigured client
+        # id can never complete a handshake, so no record or pending state may be born.
+        client_id = self._require_configured_client_id(provider_name)
         base = fhir_base.rstrip("/")
         config = await self.transport.get_json(f"{base}/.well-known/smart-configuration")
         authorization_endpoint = config.get("authorization_endpoint")
@@ -165,7 +199,7 @@ class EmrService:
         )
         url = build_authorize_url(
             authorization_endpoint=authorization_endpoint,
-            client_id=self._client_id_for(provider_name),
+            client_id=client_id,
             redirect_uri=self.redirect_uri,
             fhir_base=base,
             state=state,

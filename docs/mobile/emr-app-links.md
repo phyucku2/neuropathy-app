@@ -20,9 +20,15 @@ the deployed app origin and the release keystore, which do not exist yet.
    route the web uses, which forwards `code`+`state` to the bearer-only backend
    callback.
 
-On devices where the app is not installed or App Links verification fails, the same
-https URL simply opens in the browser — the web relay route handles it there, so the
-flow degrades gracefully instead of dead-ending.
+When App Links verification fails (or the app is not installed), the same https URL
+opens in the **browser** instead — and the browser **cannot complete a handshake the
+app started**: the pending `state` lives in the Capacitor WebView's `sessionStorage`
+(`pendingConnect.ts`), which the system browser does not share, so the browser path
+dead-ends at the app's login screen and then the relay's state-mismatch refusal
+("doesn't match a connection this app started"), with the restart-from-Sources hint.
+That clear error is the designed behavior there — the **real fallback** for a native
+flow is the **custom-scheme redirect** (`com.ahwg.neuropathy://emr/callback?…`, below),
+which re-enters the app that actually holds the pending state.
 
 ## Owner-side requirement 1: `assetlinks.json` at the app origin
 
@@ -107,8 +113,9 @@ final browser→app hop uses them.
 - **Known caveat to test explicitly in the sandbox smoke:** some browsers keep a
   server-issued HTTP *redirect* inside the browser instead of firing the App Link
   (App Links reliably intercept link *clicks*/intents; a 302 chain inside a Custom Tab
-  may not leave the browser). If the sandbox smoke shows the redirect staying in the
-  browser, the fixes are (i) an interstitial "Return to app" page at
+  may not leave the browser — the patient then hits the browser dead-end described
+  above, not a completed handshake). If the sandbox smoke shows the redirect staying
+  in the browser, the fixes are (i) an interstitial "Return to app" page at
   `/emr/callback` on the web origin whose tap is a normal link (App Links then fire),
   or (ii) making the final hop the custom scheme (`com.ahwg.neuropathy://emr/callback?…`),
   which the shipped handler already routes. Either is a small follow-up, decided on

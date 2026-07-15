@@ -411,6 +411,9 @@ def test_oauth_flow_survives_process_restarts_between_every_leg(
     callback on a second (durable pending_auth), pull on a third (encrypted durable
     token vault) — and the used state stays single-use across all of it."""
     monkeypatch.setattr(settings, "secret_store_key", Fernet.generate_key().decode())
+    # Connect now fails EARLY (422) on the unconfigured-client placeholder, so the
+    # flow under test needs a real (synthetic) generic client id configured.
+    monkeypatch.setattr(settings, "smart_client_id", "synthetic-generic-client-id")
     fake = _FakeEmr()
     # lru_cache so _reset_process_singletons can keep calling cache_clear() on it.
     monkeypatch.setattr(deps, "_process_transport", lru_cache(maxsize=1)(lambda: fake))
@@ -490,6 +493,8 @@ def test_revoke_deletes_the_secret_row_and_pull_still_409s(
     row itself — a database dump taken afterwards holds no ciphertext to decrypt —
     and a pull after revocation answers the clean 409, never a 500."""
     monkeypatch.setattr(settings, "secret_store_key", Fernet.generate_key().decode())
+    # A real (synthetic) generic client id — the placeholder now 422s at connect.
+    monkeypatch.setattr(settings, "smart_client_id", "synthetic-generic-client-id")
     fake = _FakeEmr()
     monkeypatch.setattr(deps, "_process_transport", lru_cache(maxsize=1)(lambda: fake))
     _reset_process_singletons()

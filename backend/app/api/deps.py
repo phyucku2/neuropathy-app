@@ -41,6 +41,7 @@ from app.core.security import AuthError, TokenKind, decode_token
 from app.db.session import get_db_session
 from app.emr.providers import TOP_PROVIDERS, client_id_for
 from app.emr.service import (
+    UNCONFIGURED_CLIENT_ID,
     EmrService,
     InMemoryPendingAuthStore,
     InMemorySecretStore,
@@ -238,9 +239,14 @@ def _secret_store_for(session: AsyncSession) -> SecretStore:
 
 
 def _smart_client_config() -> tuple[str, str]:
-    """(fallback client_id, redirect_uri) with DB-less-dev fallbacks."""
+    """(fallback client_id, redirect_uri) with DB-less-dev fallbacks.
+
+    The client-id placeholder is deliberately the service's UNCONFIGURED sentinel:
+    POST /emr/connect refuses to build an authorize URL around it (422 naming the env
+    var to set) instead of sending the patient to the real EMR to hit an opaque
+    vendor-side invalid_client error."""
     return (
-        settings.smart_client_id or "unconfigured-client",
+        settings.smart_client_id or UNCONFIGURED_CLIENT_ID,
         settings.smart_redirect_uri or "http://localhost:8000/emr/callback",
     )
 

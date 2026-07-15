@@ -83,6 +83,22 @@ describe('SettingsPage — health record connections (EMR connect)', () => {
     expect(sessionStorage.getItem(EMR_PENDING_CONNECT_KEY)).toBeNull();
   });
 
+  it('surfaces the fail-early 422 for an unconfigured client id verbatim (never opens the EMR)', async () => {
+    // The backend now refuses the connect when no real SMART client id is configured
+    // (instead of redirecting the patient into an opaque vendor-side invalid_client
+    // error) — its actionable detail must reach the patient word for word.
+    const detail =
+      "This provider isn't configured yet — the app operator must set SMART_CLIENT_ID_EPIC (or the generic SMART_CLIENT_ID)";
+    server.use(http.post('/emr/connect', () => HttpResponse.json({ detail }, { status: 422 })));
+    const user = userEvent.setup();
+    renderApp('/settings');
+    await user.click(await screen.findByRole('button', { name: 'Connect Epic (MyChart)' }));
+
+    expect(await screen.findByText(detail)).toBeInTheDocument();
+    expect(openAuthorizeUrl).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem(EMR_PENDING_CONNECT_KEY)).toBeNull();
+  });
+
   it('renders the toggled-off hint instead of the picker when emr_connect is off (UI hint; the server still enforces)', async () => {
     server.use(
       http.get('/capabilities', () =>

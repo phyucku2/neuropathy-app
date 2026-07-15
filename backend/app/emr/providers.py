@@ -96,10 +96,22 @@ TOP_PROVIDERS: tuple[EmrProvider, ...] = (
 )
 
 _BY_KEY = {p.key: p for p in TOP_PROVIDERS}
+_BY_NAME = {p.name: p for p in TOP_PROVIDERS}
 
 
 def get_provider(key: str) -> EmrProvider | None:
     return _BY_KEY.get(key)
+
+
+def client_id_env_for(provider_name: str) -> str | None:
+    """The env var carrying the vendor-issued client id for a provider DISPLAY NAME.
+
+    None when the name isn't a registry entry (a custom ``fhir_base`` connection or an
+    unknown name) — the caller then points the operator at the generic
+    ``SMART_CLIENT_ID`` instead. Keyed by display name because that is exactly what a
+    ``ConnectionRecord`` persists and what ``EmrService`` resolves client ids by."""
+    provider = _BY_NAME.get(provider_name)
+    return provider.client_id_env if provider is not None else None
 
 
 def client_id_for(provider: EmrProvider) -> str | None:

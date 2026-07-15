@@ -53,8 +53,27 @@ describe('appUrlPath (incoming deep links — ADR-0028)', () => {
     );
   });
 
-  it('routes an origin-only https URL to the root', () => {
-    expect(appUrlPath('https://app.example.org')).toBe('/');
+  it('still routes an allowlisted path from an unexpected https host (Android only delivers verified hosts; the relay state check guards the rest)', () => {
+    // The host is deliberately NOT checked in appUrlPath: App Links are only handed
+    // to the app after the OS verified the host against assetlinks.json, and the
+    // /emr/callback relay refuses any state this app did not start. The PATH
+    // allowlist is the layer this function owns.
+    expect(appUrlPath('https://anything.example.net/emr/callback?code=abc&state=xyz')).toBe(
+      '/emr/callback?code=abc&state=xyz',
+    );
+  });
+
+  it('ignores non-allowlisted paths — arbitrary-route deep links never steer the SPA', () => {
+    expect(appUrlPath('https://anything/settings')).toBeNull();
+    expect(appUrlPath('https://app.example.org/emr/callbackevil?x=1')).toBeNull(); // prefix, not a subpath
+    expect(appUrlPath('https://app.example.org')).toBeNull(); // origin-only: not allowlisted either
+    expect(appUrlPath('com.ahwg.neuropathy://settings')).toBeNull(); // custom scheme too
+  });
+
+  it('routes an allowlisted subpath (query preserved)', () => {
+    expect(appUrlPath('https://app.example.org/emr/callback/extra?code=abc')).toBe(
+      '/emr/callback/extra?code=abc',
+    );
   });
 
   it('returns null for an unparseable URL or a bare scheme', () => {

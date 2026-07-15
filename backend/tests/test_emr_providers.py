@@ -58,3 +58,15 @@ def test_client_id_for_reads_the_configured_setting_or_none(
     assert client_id_for(epic) is None
     monkeypatch.setattr(settings, "smart_client_id_epic", "")
     assert client_id_for(epic) is None
+
+
+def test_client_id_env_for_resolves_display_names_only() -> None:
+    """The service's fail-early 422 names the exact env var to set — resolution is by
+    provider DISPLAY NAME (what a ConnectionRecord persists); anything else (custom
+    fhir_base connections) yields None and the generic SMART_CLIENT_ID message."""
+    from app.emr.providers import client_id_env_for
+
+    assert client_id_env_for("Epic (MyChart)") == "SMART_CLIENT_ID_EPIC"
+    assert client_id_env_for("Oracle Health (Cerner)") == "SMART_CLIENT_ID_ORACLE_HEALTH"
+    assert client_id_env_for("https://ehr.example/fhir") is None
+    assert client_id_env_for("epic") is None  # keys are not display names
