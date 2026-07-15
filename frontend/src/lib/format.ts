@@ -34,3 +34,8 @@ export function initials(displayName: string): string {
   const letters = parts.slice(0, 2).map((part) => part.charAt(0).toUpperCase());
   return letters.join('') || '?';
 }
+
+/** The first word of a display name — a friendly greeting handle; '' when there is no name. */
+export function firstName(displayName: string): string {
+  return displayName.trim().split(/\s+/).filter(Boolean)[0] ?? '';
+}
