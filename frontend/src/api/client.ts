@@ -105,6 +105,12 @@ async function refreshAccessToken(): Promise<boolean> {
     notifySessionExpired();
     return false;
   }
+  // A NETWORK-failed refresh (this fetch rejecting with a TypeError) deliberately
+  // THROWS out of here without reaching notifySessionExpired: being offline is
+  // not a session end, so the stored refresh token and the offline check-in
+  // queue (ADR-0030) stay intact, and the caller sees the original TypeError —
+  // exactly what its offline handling expects. Only the server actively
+  // answering AND refusing the refresh (!response.ok below) expires the session.
   const response = await fetch(apiUrl('/auth/refresh'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

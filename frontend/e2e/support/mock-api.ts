@@ -281,6 +281,9 @@ export interface MockApiState {
   emrPulls: number;
   /** How many DELETE /emr/connections/{id} revocations were served. */
   emrRevocations: number;
+  /** Every POST /adl body the mock served (any status) — the offline-queue spec
+   *  asserts the flushed entry REACHED the API with its true check_in_date. */
+  adlPosts: unknown[];
 }
 
 export interface Scenario {
@@ -326,7 +329,12 @@ const patientNotFound = (route: Route) => fulfillJson(route, 404, { detail: 'Pat
  * so it never logs a benign 404 to the console.
  */
 export async function installApiMocks(page: Page, scenario: Scenario = {}): Promise<MockApiState> {
-  const state: MockApiState = { accountDeletions: 0, emrPulls: 0, emrRevocations: 0 };
+  const state: MockApiState = {
+    accountDeletions: 0,
+    emrPulls: 0,
+    emrRevocations: 0,
+    adlPosts: [],
+  };
   const me = scenario.me ?? ME;
   const trajectory = scenario.trajectory ?? TRAJECTORY_IMPROVING;
   const observations = scenario.observations ?? OBSERVATIONS;
@@ -417,6 +425,7 @@ export async function installApiMocks(page: Page, scenario: Scenario = {}): Prom
           stairs: number;
           balance_confidence: number;
         };
+        state.adlPosts.push(body);
         // An error status (feature-off 409, etc.) returns the raw override body —
         // that IS the real error shape. A success status instead MERGES the override
         // onto the full AdlCheckInOut default, so a { status: 200, body: { superseded:
