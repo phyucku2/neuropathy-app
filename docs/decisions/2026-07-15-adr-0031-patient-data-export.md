@@ -132,3 +132,31 @@ on every other read surface) — a full immutable audit-trail export was not in 
   URLs) can wrap this endpoint later without changing its contract.
 - **No `schema_version`:** rejected — a downloaded file outlives the app version that
   produced it; the version stamp is cheap forward-compat.
+
+## Review follow-ups (2026-07-15)
+
+Adversarial security + correctness review of the export surface produced small,
+boundary-preserving fixes (no change to WHAT is exported — still the current analyzable
+set, item 1):
+
+- **Throttle the disclosure (security).** `GET /me/export` is an unbounded O(n)
+  full-account assembly; it is now capped per actor by the same `SlidingWindowRateLimiter`
+  deletion uses, counting the `export_account` audit events each export already writes
+  (the invite-limiter pattern). Over the budget the endpoint answers 429 BEFORE any
+  assembly (`export_rate_limit_max`/`_window_seconds`, default 10/hour).
+- **`Cache-Control: no-store` on the PHI GET (security).** The 200 body is the whole
+  record, so it is served `no-store` — never cached by a proxy or the browser.
+- **Native cache hygiene (security).** The cache copy written for the Share sheet is now
+  deleted in a `finally` after the share flow (best-effort; a cleanup failure never
+  surfaces to the user).
+- **Share cancellation is not a failure (correctness).** `@capacitor/share` v6 rejects
+  when the user dismisses the sheet; the seam now treats a cancellation as success (no
+  alert) while still surfacing a genuine share/write failure.
+- **Wording aligned to "current" (correctness).** User-facing card copy and the
+  backend docstrings/schema said "COMPLETE record"/"complete copy", which overstates a
+  payload that excludes errored/superseded rows. The wording was softened to "current"
+  (honesty-first); the exported set is unchanged and still matches every other read
+  surface. The boundary in item 1 / the Verification boundary above stands.
+- **E2E proves BOTH web downloads (correctness).** The web path fires JSON + CSV in one
+  user gesture (kept dual-file, no zip dependency); the Playwright spec now captures and
+  asserts both `download` events, not just the first.

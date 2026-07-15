@@ -3,7 +3,7 @@
  * the danger zone and clearly separated from it: exporting your record is the safe,
  * reassuring counterpart to deleting it.
  *
- * One button fetches the complete record (GET /me/export) and hands it to the
+ * One button fetches the current record (GET /me/export) and hands it to the
  * platform-appropriate delivery seam (src/native/exportData.ts): a file download +
  * CSV on web, a written file + OS Share sheet on native. While the request is in
  * flight a role=status tells the patient their data is being prepared and every
@@ -45,7 +45,7 @@ export function DownloadDataCard() {
       <h2>Your data</h2>
       <div className="card">
         <p className="muted" style={{ marginTop: 0 }}>
-          Download a complete copy of your account and health data — the record itself, your
+          Download a copy of your current account and health data — the record itself, your
           observations (also as a spreadsheet), and your connections. It never includes passwords or
           access tokens.
         </p>

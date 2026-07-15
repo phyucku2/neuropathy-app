@@ -1,8 +1,10 @@
 """API contract for the patient data export — "Download my data" (ADR-0031).
 
-The right-of-access companion to account deletion (ADR-0027): the patient's COMPLETE
+The right-of-access companion to account deletion (ADR-0027): the patient's CURRENT
 record, assembled from the same read paths every other endpoint uses, serialized as
-one typed envelope.
+one typed envelope. "Current" (not "complete"): the payload is the analyzable set every
+read surface shows — errored/superseded observation rows are excluded there too — so the
+copy is faithful to what the app presents, without overstating it as an audit trail.
 
 NO SECRETS, EVER. The sub-models below carry only non-secret projections: the account
 profile has no password hash, the EMR-connection model reuses the token-free
@@ -75,7 +77,7 @@ class ExportObservation(BaseModel):
 
 
 class ExportOut(BaseModel):
-    """The complete export envelope for one patient (ADR-0031)."""
+    """The current-record export envelope for one patient (ADR-0031)."""
 
     # Envelope (ADR-0031): when the file was produced, the shape version for
     # forward-compat, and whose record it is.

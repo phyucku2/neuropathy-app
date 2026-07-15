@@ -87,7 +87,7 @@ describe('saveExport — platform branch', () => {
 
   it('web: downloads the JSON and a CSV of the observations, never touching a plugin', async () => {
     const download = vi.fn();
-    const filesystem: FilesystemLike = { writeFile: vi.fn() };
+    const filesystem: FilesystemLike = { writeFile: vi.fn(), deleteFile: vi.fn() };
     const share: ShareLike = { share: vi.fn() };
 
     await saveExport(EXPORT, {
@@ -109,15 +109,30 @@ describe('saveExport — platform branch', () => {
     expect(share.share).not.toHaveBeenCalled();
   });
 
-  it('native: writes the JSON to the cache dir and opens the Share sheet, no download', async () => {
+  it('web: falls back to the current date when now is not injected (covers the default dep)', async () => {
+    // No `now` override -> DEFAULT_DEPS.now (`() => new Date()`) runs, so its lambda is
+    // exercised. We only assert the shape of today's stem, never a fixed value.
+    const download = vi.fn();
+    await saveExport(EXPORT, {
+      isNative: () => false,
+      download,
+      filesystem: { writeFile: vi.fn(), deleteFile: vi.fn() },
+      share: { share: vi.fn() },
+    });
+    const [, jsonName] = download.mock.calls[0] as [Blob, string];
+    expect(jsonName).toMatch(/^neuropathy-export-\d{4}-\d{2}-\d{2}\.json$/);
+  });
+
+  it('native: writes the JSON to the cache dir, opens the Share sheet, then deletes the file', async () => {
     const download = vi.fn();
     const writeFile = vi.fn(async () => ({ uri: 'file:///cache/neuropathy-export.json' }));
+    const deleteFile = vi.fn(async () => undefined);
     const share = vi.fn(async () => undefined);
 
     await saveExport(EXPORT, {
       isNative: () => true,
       download,
-      filesystem: { writeFile },
+      filesystem: { writeFile, deleteFile },
       share: { share },
       now: fixedNow,
     });
@@ -133,10 +148,88 @@ describe('saveExport — platform branch', () => {
     expect(share).toHaveBeenCalledWith(
       expect.objectContaining({ url: 'file:///cache/neuropathy-export.json' }),
     );
+    // Data-at-rest hygiene: the cache copy is deleted after the share flow.
+    expect(deleteFile).toHaveBeenCalledTimes(1);
+    expect(deleteFile).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'neuropathy-export-2026-07-15.json' }),
+    );
     expect(download).not.toHaveBeenCalled();
   });
 
-  it('propagates an API/plugin failure to the caller (the card renders it)', async () => {
+  it('native: a cancelled Share sheet is a NON-error and still cleans up the cache file', async () => {
+    const deleteFile = vi.fn(async () => undefined);
+    // iOS-style cancellation message (Capacitor Share v6 rejects on dismissal).
+    const share = vi.fn(async () => {
+      throw new Error('Share canceled');
+    });
+
+    await expect(
+      saveExport(EXPORT, {
+        isNative: () => true,
+        download: vi.fn(),
+        filesystem: { writeFile: vi.fn(async () => ({ uri: 'file:///cache/x.json' })), deleteFile },
+        share: { share },
+        now: fixedNow,
+      }),
+    ).resolves.toBeUndefined();
+    expect(deleteFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('native: a cancellation signalled by a `code` field is also treated as success', async () => {
+    const deleteFile = vi.fn(async () => undefined);
+    const share = vi.fn(async () => {
+      throw { code: 'CANCELLED', message: 'user dismissed' };
+    });
+
+    await expect(
+      saveExport(EXPORT, {
+        isNative: () => true,
+        download: vi.fn(),
+        filesystem: { writeFile: vi.fn(async () => ({ uri: 'file:///cache/x.json' })), deleteFile },
+        share: { share },
+        now: fixedNow,
+      }),
+    ).resolves.toBeUndefined();
+    expect(deleteFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('native: a genuine Share failure still propagates to the caller (the card renders it)', async () => {
+    const deleteFile = vi.fn(async () => undefined);
+    const share = vi.fn(async () => {
+      throw new Error('share bridge exploded');
+    });
+
+    await expect(
+      saveExport(EXPORT, {
+        isNative: () => true,
+        download: vi.fn(),
+        filesystem: { writeFile: vi.fn(async () => ({ uri: 'file:///cache/x.json' })), deleteFile },
+        share: { share },
+        now: fixedNow,
+      }),
+    ).rejects.toThrow('share bridge exploded');
+    // Cleanup still ran (finally), even though the failure propagated.
+    expect(deleteFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('native: a cache-cleanup failure never surfaces as a user-facing error', async () => {
+    const share = vi.fn(async () => undefined);
+    const deleteFile = vi.fn(async () => {
+      throw new Error('unlink failed');
+    });
+
+    await expect(
+      saveExport(EXPORT, {
+        isNative: () => true,
+        download: vi.fn(),
+        filesystem: { writeFile: vi.fn(async () => ({ uri: 'file:///cache/x.json' })), deleteFile },
+        share: { share },
+        now: fixedNow,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('propagates an API/plugin write failure to the caller (the card renders it)', async () => {
     const failing: ExportOut = EXPORT;
     await expect(
       saveExport(failing, {
@@ -146,6 +239,7 @@ describe('saveExport — platform branch', () => {
           writeFile: vi.fn(async () => {
             throw new Error('disk full');
           }),
+          deleteFile: vi.fn(),
         },
         share: { share: vi.fn() },
         now: fixedNow,

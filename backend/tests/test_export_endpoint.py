@@ -15,7 +15,7 @@ import asyncio
 import json
 import uuid
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -28,16 +28,24 @@ from app.api.deps import (
     get_emr_service,
     get_patient_data_export_service,
 )
+from app.core.config import settings
 from app.emr.service import EmrService
 from app.main import app
+from app.models.audit import AuditEvent
 from app.models.clinic import Clinic
 from app.models.connection import ClinicConnection, ConnectionStatus, Initiator
 from app.models.observation import DataOrigin, Observation, ObservationStatus, SourceType
+from app.repositories.audit import InMemoryAuditEventRepository
 from app.repositories.patient_capability import InMemoryPatientCapabilityRepository
 from app.services.auth import AuthService
 from app.services.capability import CapabilityService
 from app.services.clinic import ClinicService
-from app.services.export import ExportError, PatientDataExportService
+from app.services.export import (
+    RATE_LIMITED_DETAIL,
+    ExportError,
+    PatientDataExportService,
+    export_rate_limiter,
+)
 
 SYNTHETIC_PASSWORD = "a-strong-password"
 FHIR_BASE = "https://ehr.example/fhir"
@@ -446,3 +454,89 @@ async def test_service_tolerates_a_missing_patient_row() -> None:
     assert export.patient.display_name == "Pat Synthetic"
     assert export.patient.connection_mode == "self_connected"
     assert export.patient.created_at is None
+
+
+# --- Cache-Control (FIX 5): the PHI payload is never cacheable ---
+
+
+def test_export_response_sets_cache_control_no_store(world: World, client: TestClient) -> None:
+    """The 200 export body is the patient's whole record — it must carry
+    `Cache-Control: no-store` so no proxy or browser caches the PHI (ADR-0031)."""
+    tokens, patient_id = _register(client)
+    asyncio.run(_populate(world, patient_id))
+
+    resp = client.get("/me/export", headers=_auth(tokens["access_token"]))
+    assert resp.status_code == 200
+    assert resp.headers.get("cache-control") == "no-store"
+
+
+# --- Rate limit (FIX 1): the unbounded full-account assembly is throttled per actor ---
+
+
+@pytest.fixture()
+def small_export_budget(monkeypatch: pytest.MonkeyPatch) -> int:
+    monkeypatch.setattr(settings, "export_rate_limit_max", 2)
+    return 2
+
+
+def test_export_is_throttled_over_the_budget(
+    world: World, client: TestClient, small_export_budget: int
+) -> None:
+    """Under the budget every export is a 200 that writes exactly one 'export_account'
+    event; over it the answer flips to 429 and writes NOTHING more — the cap bounds both
+    the O(n) work and the audited disclosure volume (at most the budget per actor)."""
+    tokens, patient_id = _register(client)
+    asyncio.run(_populate(world, patient_id))
+
+    for _ in range(small_export_budget):
+        assert client.get("/me/export", headers=_auth(tokens["access_token"])).status_code == 200
+
+    events = world.emr.audit._events  # type: ignore[attr-defined]
+    assert len([e for e in events if e.action == "export_account"]) == small_export_budget
+
+    over = client.get("/me/export", headers=_auth(tokens["access_token"]))
+    assert over.status_code == 429
+    assert over.json()["detail"] == RATE_LIMITED_DETAIL
+    # The 429 assembled and disclosed nothing: the export-event volume stays at the cap.
+    assert len([e for e in events if e.action == "export_account"]) == small_export_budget
+
+
+async def test_export_rate_limiter_trips_at_the_budget_on_a_fixed_now(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The limiter's window math, proven on an INJECTED fixed `now` (no wall clock —
+    docs/lessons.md 'No wall-clock in tests'): seeding exactly the budget of
+    'export_account' events inside the window flips `allow` from True to False, and an
+    event just outside the window does not count against the budget."""
+    monkeypatch.setattr(settings, "export_rate_limit_max", 3)
+    monkeypatch.setattr(settings, "export_rate_limit_window_seconds", 3600)
+
+    audit = InMemoryAuditEventRepository()
+    actor = uuid.uuid4()
+    now = datetime(2026, 7, 15, 12, 0, tzinfo=UTC)
+    window_start = now - timedelta(seconds=3600)
+
+    limiter = export_rate_limiter(audit)
+
+    async def _seed(occurred_at: datetime) -> None:
+        await audit.add(
+            AuditEvent(
+                actor_id=actor,
+                actor_role="patient",
+                action="export_account",
+                patient_id=None,
+                detail={},
+                occurred_at=occurred_at,
+            )
+        )
+
+    # An event OLDER than the window must not count.
+    await _seed(window_start - timedelta(seconds=1))
+    assert await limiter.allow(actor, now=now) is True
+
+    # Fill the budget with events inside the window; the last one exhausts it.
+    for _ in range(2):
+        await _seed(now)
+    assert await limiter.allow(actor, now=now) is True  # 2 in-window < 3
+    await _seed(now)
+    assert await limiter.allow(actor, now=now) is False  # 3 in-window == budget

@@ -25,8 +25,9 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
+from app.core.config import settings
 from app.models.audit import AuditEvent
 from app.models.observation import Observation
 from app.models.user import UserRole
@@ -50,17 +51,42 @@ from app.schemas.export import (
 )
 from app.services.capability import CapabilityService
 from app.services.clinic import ClinicService
+from app.services.rate_limit import SlidingWindowRateLimiter
 from app.services.trajectory import compute_patient_trajectory
 
-__all__ = ["ExportError", "PatientDataExportService"]
+__all__ = [
+    "RATE_LIMITED_DETAIL",
+    "ExportError",
+    "PatientDataExportService",
+    "export_rate_limiter",
+]
+
+# Over the export budget (ADR-0031, ADR-0017 pattern): friendly, PHI-free, and honest —
+# nothing was disclosed, come back when the window has slid. Surfaced verbatim by the UI.
+RATE_LIMITED_DETAIL = "Too many export requests right now — please try again in a little while."
+
+
+def export_rate_limiter(counter: AuditEventRepository) -> SlidingWindowRateLimiter:
+    """The settings-driven throttle on GET /me/export (ADR-0031), counting the
+    'export_account' audit events every successful export writes — one per disclosure.
+    Mirrors the invite limiter: each accepted export is exactly one audited event, so
+    the window count IS the disclosure count. Over-budget requests are refused BEFORE
+    the O(n) assembly and write nothing, so the cap bounds the work and the audited
+    disclosure volume alike (at most the window budget per actor)."""
+    return SlidingWindowRateLimiter(
+        counter=counter,
+        action="export_account",
+        max_events=settings.export_rate_limit_max,
+        window=timedelta(seconds=settings.export_rate_limit_window_seconds),
+    )
 
 
 class ExportError(Exception):
     """Export refusal the route layer maps to an HTTP response.
 
-    Raised only on nothing-written paths (the account is gone, or — defense in depth
-    behind `require_patient` — the principal is not a patient), so the resulting
-    HTTPException has no audit write to roll back.
+    Raised only on nothing-written paths (the account is gone, the principal is not a
+    patient — defense in depth behind `require_patient` — or the actor is over the
+    export budget), so the resulting HTTPException has no audit write to roll back.
     """
 
     def __init__(self, reason: str, status_code: int) -> None:
@@ -108,7 +134,7 @@ def _emr_connection_out(connection: ConnectionRecord) -> EmrConnectionOut:
 
 @dataclass
 class PatientDataExportService:
-    """Assembles one patient's complete record as an ExportOut (ADR-0031).
+    """Assembles one patient's current record as an ExportOut (ADR-0031).
 
     In Postgres mode every dependency is bound to the request-scoped session
     (app/api/deps.py); the in-memory twins serve the no-DATABASE_URL mode identically,
@@ -126,10 +152,12 @@ class PatientDataExportService:
     audit: AuditEventRepository = field(default_factory=InMemoryAuditEventRepository)
 
     async def export_patient_data(self, *, user_id: uuid.UUID) -> ExportOut:
-        """Build the complete export for the authenticated patient, auditing the read.
+        """Build the current export for the authenticated patient, auditing the read.
 
         Raises ExportError on the nothing-written paths: 401 when the account is gone
-        (the token outlived it), 403 for a non-patient principal (defense in depth).
+        (the token outlived it), 403 for a non-patient principal (defense in depth), and
+        429 over the export budget — the throttle fires BEFORE any assembly, so nothing
+        is read or written and the raise rolls nothing back.
         """
         user = await self.users.get_by_id(user_id)
         if user is None:
@@ -139,6 +167,13 @@ class PatientDataExportService:
 
         patient_id = user.patient_id
         now = datetime.now(UTC)
+
+        # Throttle BEFORE the O(n) assembly (ADR-0031): over the budget of audited
+        # exports in the window the answer is 429 regardless, so an export flood is
+        # capped in both work AND disclosure volume. Nothing has been read or written
+        # yet, so raising (-> HTTPException) rolls back nothing.
+        if not await export_rate_limiter(self.audit).allow(user.id, now=now):
+            raise ExportError(RATE_LIMITED_DETAIL, status_code=429)
 
         patient = await self.users.get_patient(patient_id)
         observations = await self.observations.list_for_patient(patient_id)

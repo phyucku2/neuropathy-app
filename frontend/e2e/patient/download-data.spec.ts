@@ -20,12 +20,20 @@ test.describe('Patient data export (Download my data)', () => {
     const button = page.getByRole('button', { name: 'Download my data' });
     await expect(button).toBeVisible();
 
-    // Clicking initiates a real file download (Blob + object URL). Web triggers both a
-    // JSON and a CSV; waiting on the first download event proves the path fired.
-    const [download] = await Promise.all([page.waitForEvent('download'), button.click()]);
-    expect(download.suggestedFilename()).toMatch(
-      /^neuropathy-export-\d{4}-\d{2}-\d{2}\.(json|csv)$/,
-    );
+    // Clicking initiates real file downloads (Blob + object URL). The web path fires
+    // BOTH a JSON and a CSV back-to-back in the SAME user gesture, so we attach the
+    // listener BEFORE the click and collect every `download` event — asserting only the
+    // first would let a regression that drops the CSV pass silently.
+    const filenames: string[] = [];
+    page.on('download', (download) => filenames.push(download.suggestedFilename()));
+    await button.click();
+
+    await expect.poll(() => filenames.length, { timeout: 5000 }).toBe(2);
+    const stem = /^neuropathy-export-\d{4}-\d{2}-\d{2}\./;
+    expect(filenames.every((name) => stem.test(name))).toBe(true);
+    // Both file kinds landed — the JSON (complete form) and the CSV (spreadsheet view).
+    expect(filenames.some((name) => name.endsWith('.json'))).toBe(true);
+    expect(filenames.some((name) => name.endsWith('.csv'))).toBe(true);
 
     // The mock backend really served exactly one export, and the success state shows.
     expect(api.dataExports).toBe(1);

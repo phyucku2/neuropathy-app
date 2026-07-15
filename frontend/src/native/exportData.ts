@@ -95,11 +95,47 @@ export interface FilesystemLike {
     directory: Directory;
     encoding: Encoding;
   }): Promise<{ uri: string }>;
+  deleteFile(options: { path: string; directory: Directory }): Promise<void>;
 }
 
 /** The slice of @capacitor/share the seam uses, injectable for unit tests. */
 export interface ShareLike {
   share(options: { title?: string; text?: string; url?: string }): Promise<unknown>;
+}
+
+/**
+ * Was a rejected `share.share(...)` the user simply dismissing the OS share sheet?
+ *
+ * @capacitor/share v6 REJECTS on cancellation (iOS surfaces "Share canceled"), which
+ * is NOT an error — the file was already written and the user just changed their mind.
+ * The exact rejection shape varies by platform, so match defensively on a `code` field
+ * or a message substring rather than an exact string. (This native branch is
+ * unverifiable locally — no Android SDK, the same boundary ADR-0031/ADR-0023 declare;
+ * on-device proof is `npx cap run android`.)
+ */
+function isShareCancellation(cause: unknown): boolean {
+  const code =
+    typeof cause === 'object' && cause !== null ? (cause as { code?: unknown }).code : undefined;
+  if (typeof code === 'string' && /cancel/i.test(code)) {
+    return true;
+  }
+  const message = cause instanceof Error ? cause.message : String(cause ?? '');
+  return /cancel/i.test(message);
+}
+
+/**
+ * Best-effort removal of the cache copy after the Share flow (data-at-rest hygiene:
+ * the dump is app-private, but there is no reason to leave the full PHI file lingering
+ * once the share sheet closes or is cancelled). A cleanup failure must NEVER surface as
+ * a user-facing error on an otherwise-successful export, so it is swallowed.
+ */
+async function deleteExportFile(filesystem: FilesystemLike, path: string): Promise<void> {
+  try {
+    await filesystem.deleteFile({ path, directory: Directory.Cache });
+  } catch {
+    // Swallow — the export already succeeded (or was cancelled); a failed cache
+    // delete is not something to alarm the patient about.
+  }
 }
 
 export interface SaveExportDeps {
@@ -141,14 +177,31 @@ export async function saveExport(
       directory: Directory.Cache,
       encoding: Encoding.UTF8,
     });
-    await share.share({
-      title: 'Your health data export',
-      text: 'Your exported health data',
-      url: written.uri,
-    });
+    try {
+      await share.share({
+        title: 'Your health data export',
+        text: 'Your exported health data',
+        url: written.uri,
+      });
+    } catch (cause) {
+      // A cancelled share sheet is a NON-error (the export succeeded; the user just
+      // dismissed it) — resolve normally. A genuine share/bridge failure still throws
+      // and the card renders it in its role=alert.
+      if (!isShareCancellation(cause)) {
+        throw cause;
+      }
+    } finally {
+      // Runs on success AND cancellation AND a real failure: the cache copy never
+      // outlives the share flow (best-effort; never throws — see deleteExportFile).
+      await deleteExportFile(filesystem, filename);
+    }
     return;
   }
 
+  // Web: two downloads (JSON + spreadsheet-friendly CSV) fired back-to-back in the
+  // SAME user gesture — browsers permit multiple downloads per click, so this must NOT
+  // be split across awaits/ticks or a later download would be blocked as not
+  // user-initiated. Kept as two files by design (no zip dependency, ADR-0031).
   download(new Blob([json], { type: 'application/json' }), `${stem}.json`);
   download(new Blob([observationsToCsv(data.observations)], { type: 'text/csv' }), `${stem}.csv`);
 }
