@@ -1,5 +1,14 @@
+import { readFileSync } from 'node:fs';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vitest/config';
+
+// App version comes from package.json at build time (single source of truth), injected
+// as the `__APP_VERSION__` global via `define` below so the About screen (ADR-0032) can
+// show it with no runtime data call. Read with fs to avoid a JSON import in the config's
+// module graph.
+const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8')) as {
+  version: string;
+};
 
 // The backend mounts its routes at the root (no /api prefix), so the dev server
 // proxies each API path prefix to the local FastAPI instance. At runtime the app
@@ -24,6 +33,33 @@ const API_PREFIXES = [
 
 export default defineConfig({
   plugins: [react()],
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        // Vendor split (ADR-0032): keep the big, rarely-changing libraries out of the
+        // route chunks. Just TWO buckets, deliberately — recharts (+ its d3 deps via
+        // victory-vendor) rides its own `charts` chunk loaded only when a charting route
+        // (Trends, clinician detail) lazy-loads, and EVERYTHING else in node_modules
+        // (React, react-dom, react-router and their shared deps) goes to one `vendor`
+        // chunk. Splitting React out into a THIRD chunk created a circular chunk
+        // (`vendor -> react -> vendor`, via react-router → @remix-run/router and
+        // react-is → react) that broke React at runtime; one vendor chunk is acyclic
+        // because no library imports recharts. Simple and correct over clever.
+        manualChunks(id) {
+          if (!id.includes('node_modules')) {
+            return undefined;
+          }
+          if (id.includes('/recharts/') || id.includes('/d3-') || id.includes('/victory-vendor/')) {
+            return 'charts';
+          }
+          return 'vendor';
+        },
+      },
+    },
+  },
   server: {
     proxy: Object.fromEntries(
       API_PREFIXES.map((prefix) => [prefix, { target: 'http://localhost:8000' }]),

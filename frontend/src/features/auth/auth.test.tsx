@@ -24,7 +24,9 @@ describe('auth screens', () => {
   it('signs in and lands on the trajectory home screen', async () => {
     const user = userEvent.setup();
     renderApp('/login', { authenticated: false });
-    await user.type(screen.getByLabelText('Email'), TEST_EMAIL);
+    // The route element is React.lazy (ADR-0032): await the first field so the lazy
+    // chunk has resolved past the Suspense fallback before we drive the form.
+    await user.type(await screen.findByLabelText('Email'), TEST_EMAIL);
     await user.type(screen.getByLabelText('Password'), TEST_PASSWORD);
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
     expect(await screen.findByText('Improving')).toBeInTheDocument();
@@ -33,7 +35,7 @@ describe('auth screens', () => {
   it('shows a friendly error for a wrong password', async () => {
     const user = userEvent.setup();
     renderApp('/login', { authenticated: false });
-    await user.type(screen.getByLabelText('Email'), TEST_EMAIL);
+    await user.type(await screen.findByLabelText('Email'), TEST_EMAIL);
     await user.type(screen.getByLabelText('Password'), 'not-the-one');
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
@@ -49,7 +51,7 @@ describe('auth screens', () => {
     );
     const user = userEvent.setup();
     renderApp('/login', { authenticated: false });
-    await user.type(screen.getByLabelText('Email'), TEST_EMAIL);
+    await user.type(await screen.findByLabelText('Email'), TEST_EMAIL);
     await user.type(screen.getByLabelText('Password'), TEST_PASSWORD);
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Account locked');
@@ -58,7 +60,7 @@ describe('auth screens', () => {
   it('registers a new account and lands home', async () => {
     const user = userEvent.setup();
     renderApp('/register', { authenticated: false });
-    await user.type(screen.getByLabelText('Your name'), 'Pat Example');
+    await user.type(await screen.findByLabelText('Your name'), 'Pat Example');
     await user.type(screen.getByLabelText('Email'), TEST_EMAIL);
     await user.type(screen.getByLabelText('Password'), TEST_PASSWORD);
     await user.click(screen.getByRole('button', { name: 'Create account' }));
@@ -68,7 +70,7 @@ describe('auth screens', () => {
   it('rejects a too-short password before calling the API', async () => {
     const user = userEvent.setup();
     renderApp('/register', { authenticated: false });
-    const passwordField = screen.getByLabelText('Password');
+    const passwordField = await screen.findByLabelText('Password');
     passwordField.removeAttribute('minlength'); // bypass native validation to test ours
     await user.type(screen.getByLabelText('Your name'), 'Pat Example');
     await user.type(screen.getByLabelText('Email'), TEST_EMAIL);
@@ -85,7 +87,7 @@ describe('auth screens', () => {
     );
     const user = userEvent.setup();
     renderApp('/register', { authenticated: false });
-    await user.type(screen.getByLabelText('Your name'), 'Pat Example');
+    await user.type(await screen.findByLabelText('Your name'), 'Pat Example');
     await user.type(screen.getByLabelText('Email'), TEST_EMAIL);
     await user.type(screen.getByLabelText('Password'), TEST_PASSWORD);
     await user.click(screen.getByRole('button', { name: 'Create account' }));
@@ -100,7 +102,7 @@ describe('auth screens', () => {
     );
     const user = userEvent.setup();
     renderApp('/login', { authenticated: false });
-    await user.type(screen.getByLabelText('Email'), TEST_EMAIL);
+    await user.type(await screen.findByLabelText('Email'), TEST_EMAIL);
     await user.type(screen.getByLabelText('Password'), TEST_PASSWORD);
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Profile unavailable');

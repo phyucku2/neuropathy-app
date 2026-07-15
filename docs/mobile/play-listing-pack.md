@@ -54,6 +54,10 @@ Cross-cutting answers:
 
 - [ ] App name, short (80) + full (4000) descriptions — non-diagnostic wording only
 - [ ] Privacy policy URL live (counsel-approved; draft: `docs/legal/privacy-policy-draft.md`)
+- [x] In-app **About + Privacy** screens exist (ADR-0032) — auth-less `/about` + `/privacy`,
+      reachable by a store reviewer and a logged-out user; the in-app Privacy screen is an
+      honest SUMMARY that points to the counsel-reviewed full policy URL above (it does not
+      replace the hosted policy the store listing requires)
 - [x] Icon 512×512 — `docs/store-assets/icon-512.png` (generated baseline mark; owner may
       swap in commissioned branding — see `docs/store-assets/README.md`)
 - [x] Feature graphic 1024×500 — `docs/store-assets/feature-graphic-1024x500.png`
