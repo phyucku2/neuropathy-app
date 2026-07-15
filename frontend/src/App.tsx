@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react';
 import { Navigate, Outlet, Route, Routes } from 'react-router-dom';
 import { useAuth } from './auth/AuthContext';
 import { AppShell } from './components/AppShell';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Loading } from './components/StatusMessages';
 // OfflineCheckInSync stays a static import (ADR-0030): it renders nothing, is always
 // mounted in the patient area, and isn't a route — code-splitting it would add a chunk
@@ -99,39 +100,46 @@ export function App() {
   // Native-only shell wiring (status bar, splash, hardware back). No-op on web (ADR-0025).
   useNativeShell();
   return (
-    <Suspense fallback={<Loading />}>
-      <Routes>
-        {/* Auth-less routes: a store reviewer and a logged-out patient must reach these,
+    // The ErrorBoundary sits ABOVE the Suspense (ADR-0032): Suspense only handles a lazy
+    // chunk's PENDING state, not a REJECTED import (flaky network, or a post-deploy
+    // stale-chunk 404 when a client holds an old index.html). A rejection throws past
+    // Suspense, so without this boundary the whole app white-screens. The fallback offers a
+    // reload, which re-fetches index.html and the current chunk names.
+    <ErrorBoundary>
+      <Suspense fallback={<Loading />}>
+        <Routes>
+          {/* Auth-less routes: a store reviewer and a logged-out patient must reach these,
             so /about and /privacy sit OUTSIDE RequireAuth alongside /login (ADR-0032). */}
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/register" element={<RegisterPage />} />
-        <Route path="/about" element={<AboutPage />} />
-        <Route path="/privacy" element={<PrivacyPage />} />
-        <Route element={<RequireAuth />}>
-          <Route element={<PatientArea />}>
-            <Route element={<AppShell />}>
-              <Route index element={<HomePage />} />
-              <Route path="trends" element={<TrendsPage />} />
-              <Route path="check-in" element={<CheckInPage />} />
-              <Route path="add" element={<AddDataPage />} />
-              <Route path="settings" element={<SettingsPage />} />
-              {/* The SMART redirect relay (ADR-0028): the EMR sends the patient's browser
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/about" element={<AboutPage />} />
+          <Route path="/privacy" element={<PrivacyPage />} />
+          <Route element={<RequireAuth />}>
+            <Route element={<PatientArea />}>
+              <Route element={<AppShell />}>
+                <Route index element={<HomePage />} />
+                <Route path="trends" element={<TrendsPage />} />
+                <Route path="check-in" element={<CheckInPage />} />
+                <Route path="add" element={<AddDataPage />} />
+                <Route path="settings" element={<SettingsPage />} />
+                {/* The SMART redirect relay (ADR-0028): the EMR sends the patient's browser
                 to /emr/callback?code=..&state=..; this authenticated route forwards
                 them to the bearer-only backend callback. On native, the App-Links /
                 custom-scheme handler (nativeShell appUrlOpen) routes here too. */}
-              <Route path="emr/callback" element={<EmrCallbackPage />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
+                <Route path="emr/callback" element={<EmrCallbackPage />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Route>
+            </Route>
+            <Route path="clinic" element={<ClinicianArea />}>
+              <Route element={<AppShell variant="clinician" />}>
+                <Route index element={<PanelPage />} />
+                <Route path="patients/:patientId" element={<PatientDetailPage />} />
+                <Route path="*" element={<Navigate to="/clinic" replace />} />
+              </Route>
             </Route>
           </Route>
-          <Route path="clinic" element={<ClinicianArea />}>
-            <Route element={<AppShell variant="clinician" />}>
-              <Route index element={<PanelPage />} />
-              <Route path="patients/:patientId" element={<PatientDetailPage />} />
-              <Route path="*" element={<Navigate to="/clinic" replace />} />
-            </Route>
-          </Route>
-        </Route>
-      </Routes>
-    </Suspense>
+        </Routes>
+      </Suspense>
+    </ErrorBoundary>
   );
 }

@@ -57,6 +57,23 @@ Two store-readiness gaps remained on the shipped SPA:
   the existing `Loading` component — a plain `role="status"` line — so a chunk
   resolving mid-navigation renders cleanly with **zero console errors** (the ADR-0022
   gate would catch a bad boundary).
+- **Top-level `ErrorBoundary`** (`frontend/src/components/ErrorBoundary.tsx`) wraps the
+  Suspense/Routes, ABOVE the Suspense. Suspense only handles a lazy chunk's **pending**
+  state, not a **rejected** `import()`. The important rejection is a **stale chunk after a
+  redeploy**: a client still holding the previous `index.html` navigates, the hashed chunk
+  name it asks for no longer exists, the request 404s, and the rejection throws **past**
+  Suspense — with no boundary that white-screens the whole app with an uncaught error (a
+  flaky network does the same). The boundary catches it and renders a calm, branded,
+  PHI-free fallback (reusing the `app-frame` / `status-bar` / `card` / `form-error`
+  `role="alert"` patterns, non-technical copy, **no** stack trace or `error.message`) with a
+  **Reload** button that calls `window.location.reload()` — a fresh `index.html` fetches the
+  **current** chunk names, which is exactly what recovers the post-deploy case.
+  `componentDidCatch` intentionally does **not** log (eslint `no-console` is an error and a
+  caught error can carry PHI, CLAUDE.md §5); a `TODO` marks the ADR-0021 error seam as the
+  future home for a scrubbed, PHI-free signal, left unwired. A real broken chunk can't be
+  served by the jsdom or Playwright harness (the E2E mock always serves a valid bundle), so
+  a **rejecting-`React.lazy` unit test** is the only place the lazy-rejection → fallback path
+  is provable; the throw-a-child tests cover the rest of the boundary logic.
 - **Vendor split** via `build.rollupOptions.output.manualChunks` — deliberately just
   **two buckets**: `recharts` (+ its d3 deps via `victory-vendor`) → a `charts` chunk
   loaded only when a charting route lazy-loads; **everything else** in `node_modules`
