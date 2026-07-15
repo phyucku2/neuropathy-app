@@ -118,7 +118,16 @@ export function getReminderState(): ReminderState {
  * The `schedule.on {hour, minute}` form is the plugin's cron-like repeating schedule
  * (Cap-6 `Schedule.on` in definitions.d.ts): Android computes the next matching
  * wall-clock trigger and re-registers the following one after each fire — a daily
- * repeat that also survives the fire itself. `allowWhileIdle` lets it fire in Doze.
+ * repeat that also survives the fire itself.
+ *
+ * HONEST DELIVERY LIMITS (ADR-0029): `allowWhileIdle` is requested but is
+ * best-effort only. Without the SCHEDULE_EXACT_ALARM permission, Android 12+
+ * schedules the first fire INEXACTLY (the OS may defer/batch it), and the plugin's
+ * post-fire re-registration of the `on` schedule uses a plain non-wakeup alarm that
+ * ignores `allowWhileIdle` — so from day 2 onward a dozing device may not show the
+ * nudge until it next wakes. Net: the reminder arrives AROUND the chosen time, not
+ * at it. Deliberately accepted for a daily wellness nudge; exact alarms are a
+ * recorded non-adoption in ADR-0029.
  */
 export async function enableReminder(
   hour: number,
@@ -161,6 +170,49 @@ export async function disableReminder(plugin: ReminderPlugin = LocalNotification
     return;
   }
   await plugin.cancel({ notifications: [{ id: REMINDER_NOTIFICATION_ID }] });
+}
+
+/**
+ * Best-effort reminder cleanup for ACCOUNT DELETION (the ADR-0027 danger-zone flow):
+ * cancel the scheduled notification and REMOVE the stored preference entirely.
+ * Unlike `disableReminder` (a user choice that keeps the chosen time for re-enable),
+ * deletion leaves nothing behind — the account is gone, so this device must not keep
+ * nudging for it, and the next signup on this device must not inherit the dead
+ * account's preference.
+ *
+ * NEVER throws: account deletion must never fail (or appear to fail) because a
+ * notification cancel faulted, so every error is swallowed. Plain LOGOUT deliberately
+ * does NOT call this — the reminder is a device preference with fixed PHI-free
+ * content (per-device semantics, ADR-0029), so it survives sign-out.
+ */
+export async function disableReminderSilently(
+  plugin: ReminderPlugin = LocalNotifications,
+): Promise<void> {
+  try {
+    localStorage.removeItem(REMINDER_PREF_KEY);
+    if (isNativePlatform()) {
+      await plugin.cancel({ notifications: [{ id: REMINDER_NOTIFICATION_ID }] });
+    }
+  } catch {
+    // Swallowed by design — this cleanup is best-effort and must never block deletion.
+  }
+}
+
+/**
+ * Whether the OS notification permission is currently granted — `checkPermissions`
+ * only, NEVER `requestPermissions`, so callers (e.g. the Settings card's mount probe
+ * against a stored "enabled" preference the OS no longer honors) can ask without
+ * ever popping a dialog. On web there is nothing to grant and no guidance to show,
+ * so it reports true without touching the plugin.
+ */
+export async function isReminderPermissionGranted(
+  plugin: ReminderPlugin = LocalNotifications,
+): Promise<boolean> {
+  if (!isNativePlatform()) {
+    return true;
+  }
+  const permission = await plugin.checkPermissions();
+  return permission.display === 'granted';
 }
 
 /**

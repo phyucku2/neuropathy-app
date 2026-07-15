@@ -14,22 +14,30 @@ vi.mock('../../native/reminders', () => ({
   getReminderState: vi.fn(() => ({ enabled: false, hour: 9, minute: 0 })),
   enableReminder: vi.fn(async () => 'scheduled' as const),
   disableReminder: vi.fn(async () => undefined),
+  isReminderPermissionGranted: vi.fn(async () => true),
 }));
 
 import { isNativePlatform } from '../../auth/platform';
-import { disableReminder, enableReminder, getReminderState } from '../../native/reminders';
+import {
+  disableReminder,
+  enableReminder,
+  getReminderState,
+  isReminderPermissionGranted,
+} from '../../native/reminders';
 import { ReminderCard } from './ReminderCard';
 
 const nativeMock = vi.mocked(isNativePlatform);
 const getStateMock = vi.mocked(getReminderState);
 const enableMock = vi.mocked(enableReminder);
 const disableMock = vi.mocked(disableReminder);
+const permissionMock = vi.mocked(isReminderPermissionGranted);
 
 beforeEach(() => {
   nativeMock.mockReset().mockReturnValue(true);
   getStateMock.mockReset().mockReturnValue({ enabled: false, hour: 9, minute: 0 });
   enableMock.mockReset().mockResolvedValue('scheduled');
   disableMock.mockReset().mockResolvedValue(undefined);
+  permissionMock.mockReset().mockResolvedValue(true);
 });
 
 describe('ReminderCard — web fallback', () => {
@@ -66,6 +74,29 @@ describe('ReminderCard — native', () => {
       'true',
     );
     expect(screen.getByLabelText('Reminder time')).toHaveValue('20:15');
+  });
+
+  it('mount with an enabled pref but revoked OS permission shows the settings guidance, not a clean On', async () => {
+    getStateMock.mockReturnValue({ enabled: true, hour: 9, minute: 0 });
+    permissionMock.mockResolvedValue(false);
+    render(<ReminderCard />);
+    // The probe checks (never requests) and surfaces the hint immediately.
+    const status = await screen.findByRole('status');
+    expect(status).toHaveTextContent(/Allow notifications in your phone’s system settings/);
+  });
+
+  it('mount with an enabled pref and granted permission stays a clean On (no hint)', async () => {
+    getStateMock.mockReturnValue({ enabled: true, hour: 20, minute: 15 });
+    render(<ReminderCard />);
+    await waitFor(() => {
+      expect(permissionMock).toHaveBeenCalledTimes(1);
+    });
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('does not probe the permission on mount while the reminder is off', () => {
+    render(<ReminderCard />);
+    expect(permissionMock).not.toHaveBeenCalled();
   });
 
   it('disables the toggle while the enable is pending', async () => {
@@ -121,6 +152,56 @@ describe('ReminderCard — native', () => {
     fireEvent.change(input, { target: { value: '07:45' } });
     expect(input).toHaveValue('07:45');
     expect(enableMock).not.toHaveBeenCalled();
+  });
+
+  it('a failed reschedule on time change keeps showing the OLD time (the one still firing) with the hint', async () => {
+    getStateMock.mockReturnValue({ enabled: true, hour: 9, minute: 0 });
+    enableMock.mockRejectedValue(new Error('bridge fault'));
+    render(<ReminderCard />);
+    const input = screen.getByLabelText('Reminder time');
+    fireEvent.change(input, { target: { value: '07:45' } });
+    const status = await screen.findByRole('status');
+    expect(status).toHaveTextContent('The reminder couldn’t be updated. Please try again.');
+    // The 09:00 alarm is what still exists — the card must keep saying so.
+    expect(input).toHaveValue('09:00');
+    expect(screen.getByText('On · every day at 09:00')).toBeInTheDocument();
+  });
+
+  it('a permission-denied reschedule on time change keeps the old time and shows the settings guidance', async () => {
+    getStateMock.mockReturnValue({ enabled: true, hour: 9, minute: 0 });
+    enableMock.mockResolvedValue('permission-denied');
+    render(<ReminderCard />);
+    const input = screen.getByLabelText('Reminder time');
+    fireEvent.change(input, { target: { value: '07:45' } });
+    const status = await screen.findByRole('status');
+    expect(status).toHaveTextContent(/Allow notifications in your phone’s system settings/);
+    expect(input).toHaveValue('09:00');
+  });
+
+  it('an empty time value while enabled is ignored — the old time stays shown, nothing is rescheduled', () => {
+    getStateMock.mockReturnValue({ enabled: true, hour: 9, minute: 0 });
+    render(<ReminderCard />);
+    const input = screen.getByLabelText('Reminder time');
+    fireEvent.change(input, { target: { value: '' } });
+    expect(input).toHaveValue('09:00');
+    expect(enableMock).not.toHaveBeenCalled();
+  });
+
+  it('toggling on with an empty time renders the pick-a-time hint instead of scheduling', async () => {
+    const user = userEvent.setup();
+    render(<ReminderCard />);
+    const input = screen.getByLabelText('Reminder time');
+    fireEvent.change(input, { target: { value: '' } });
+    expect(input).toHaveValue('');
+    await user.click(screen.getByRole('switch', { name: 'Daily check-in reminder' }));
+    const status = await screen.findByRole('status');
+    expect(status).toHaveTextContent('Pick a time first, then turn the reminder on.');
+    // Nothing was scheduled — schedule('') would have been a seam RangeError.
+    expect(enableMock).not.toHaveBeenCalled();
+    expect(screen.getByRole('switch', { name: 'Daily check-in reminder' })).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
   });
 
   it('toggling off cancels via the seam and shows Off', async () => {

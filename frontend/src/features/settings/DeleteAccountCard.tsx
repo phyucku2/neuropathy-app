@@ -17,6 +17,7 @@ import { ApiError, messageFor } from '../../api/client';
 import { deleteAccount } from '../../api/endpoints';
 import { useAuth } from '../../auth/AuthContext';
 import { ErrorNotice } from '../../components/StatusMessages';
+import { disableReminderSilently } from '../../native/reminders';
 
 export function DeleteAccountCard() {
   const { logout } = useAuth();
@@ -39,8 +40,15 @@ export function DeleteAccountCard() {
     setError(null);
     try {
       await deleteAccount(password);
-      // The account is gone: drop the dead session and land on the login screen,
-      // carrying a transient "deleted" confirmation via router state.
+      // The account is gone: silence this device's daily reminder — cancel the
+      // scheduled notification and clear the stored preference — so it never keeps
+      // nudging for a deleted account (ADR-0029 lifecycle). Best-effort by
+      // construction: disableReminderSilently never throws, so deletion can never
+      // fail because a notification cancel did. Plain logout deliberately KEEPS
+      // the preference (per-device semantics).
+      await disableReminderSilently();
+      // Drop the dead session and land on the login screen, carrying a transient
+      // "deleted" confirmation via router state.
       logout();
       navigate('/login', { replace: true, state: { accountDeleted: true } });
     } catch (cause) {

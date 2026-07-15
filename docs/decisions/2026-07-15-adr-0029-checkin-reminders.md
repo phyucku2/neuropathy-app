@@ -40,6 +40,32 @@ the device, deliberately NOT on the server:
 - **It is not PHI** — a boolean and a wall-clock time; losing it (app data clear)
   loses nothing but a preference the patient can re-set in two taps.
 
+### Preference lifecycle (logout, deletion, shared devices, revoked permission)
+
+The device-preference decision has lifecycle consequences; each is deliberate:
+
+- **Survives logout.** Signing out does NOT cancel the notification or clear the
+  preference — the reminder belongs to the phone, its content is fixed and PHI-free
+  (two constants, no name, no data), and a signed-out tap on it simply lands on the
+  login screen. Defensible per-device semantics: a patient who signs out tonight
+  and back in tomorrow keeps the habit nudge they configured.
+- **Cleared on account deletion.** The danger-zone flow (ADR-0027) calls the seam's
+  `disableReminderSilently()` on success — cancel the scheduled notification AND
+  remove the stored preference — so a deleted account never keeps nudging this
+  device and a future signup does not inherit a dead account's preference. It is
+  best-effort by construction (never throws, every error swallowed): deletion must
+  never fail because a notification cancel did.
+- **A second user on a shared device inherits it.** If patient A enabled the
+  reminder, logged out, and patient B signs up/in on the same device, B inherits an
+  enabled, PHI-free "Daily check-in" nudge until they change it in Settings.
+  Accepted and stated: the content discloses nothing about A, and B sees the
+  toggle honestly "On" with the time, two taps from off.
+- **Permission revoked after enabling.** The stored preference stays "on" (it is
+  the patient's intent), but nothing fires: the launch re-assert schedules nothing
+  (it only *checks* permission — never a launch prompt), and the Settings card
+  probes the permission on mount and renders the system-settings guidance
+  (`role="status"`) instead of a clean "On" state that nothing backs.
+
 ### Notification content is fixed and PHI-free — by construction
 
 The scheduled content is two constants and nothing else: title **"Daily check-in"**,
@@ -60,10 +86,22 @@ unit-tested off-device. `getReminderState()` / `enableReminder(hour, minute)` /
   repeating form (Cap-6 `Schedule.on`, definitions.d.ts) — Android computes the next
   wall-clock match and re-registers the following trigger after each fire, i.e. a
   daily repeat at local time (`repeats` belongs to the one-shot `at` form, not `on`;
-  pinned in a test comment the Style.Dark way). `allowWhileIdle: true` lets it fire
-  in Doze. One **fixed notification id** — re-scheduling replaces the pending alarm
-  (the Android implementation uses `FLAG_CANCEL_CURRENT`), so enable/re-enable/
-  time-change never stacks duplicates.
+  pinned in a test comment the Style.Dark way). One **fixed notification id** —
+  re-scheduling replaces the pending alarm (the Android implementation uses
+  `FLAG_CANCEL_CURRENT`), so enable/re-enable/time-change never stacks duplicates.
+- **Delivery is APPROXIMATE on modern Android — an honest limit, not a bug.**
+  `allowWhileIdle: true` is requested, but it does not buy what its name suggests:
+  without the `SCHEDULE_EXACT_ALARM` permission, Android 12+ treats the alarm as
+  **inexact** (the OS may defer and batch the first fire), and the plugin's
+  post-fire re-registration of the `on` schedule uses a **plain non-wakeup alarm
+  that ignores `allowWhileIdle`** (verified in the plugin's Android source) — so
+  from day 2 onward a device in Doze may not show the nudge until it next wakes.
+  Net: the reminder arrives *around* the chosen time, not *at* it.
+  **Deliberate non-adoption (optional follow-up):** the plugin supports the
+  exact-alarm settings flow plus the `SCHEDULE_EXACT_ALARM` manifest permission,
+  which would restore exactness — a daily wellness nudge does not justify asking
+  the patient for exact-alarm privileges, so this is recorded as a conscious
+  non-adoption for now, revisitable if approximate delivery proves inadequate.
 - **Permission-denied is a RESULT, not an error:** `enableReminder` returns
   `'permission-denied'` when the OS refuses (Android 13+ runtime permission); the
   card renders inline guidance (`role="status"`) pointing at the phone's system
@@ -89,17 +127,20 @@ and leaves the preference for the Settings card to explain.
 ## Verification boundary (honest)
 
 - **Verified here:** the seam's full decision table (exact schedule shape incl.
-  hour/minute + the repeating `on` form, cancel-on-disable, permission-denied,
-  re-assert paths, web no-ops, PHI-free constants) and the card (toggle, time
-  reschedule, pending states, denied guidance, web fallback) via injected/local-module
-  mocks; the web target unregressed — 212 unit tests (coverage ≥90 all four) and the
-  **32-spec** Playwright suite (new spec: the card's web fallback in the built
-  bundle), zero console errors; `cap sync` warning-free; prod audit + license +
-  secret scans clean.
+  hour/minute + the repeating `on` form, cancel-on-disable, deletion cleanup,
+  permission-denied, permission probe, re-assert paths, web no-ops, PHI-free
+  constants) and the card (toggle, time reschedule incl. failure keeping the old
+  time, empty-time guards, mount permission probe, pending states, denied guidance,
+  web fallback) via injected/local-module mocks; deletion-silences-the-reminder and
+  logout-keeps-it through the real delete-account flow; the web target unregressed —
+  unit tests (coverage ≥90 all four) and the **32-spec** Playwright suite (new spec:
+  the card's web fallback in the built bundle), zero console errors; `cap sync`
+  warning-free; prod audit + license + secret scans clean.
 - **Proven by CI:** the plugin compiles into the APK (`mobile` job).
-- **User's step (on-device only):** an actual notification arriving at the chosen
-  time, the Android 13+ permission prompt, and the reboot-survival behavior —
-  `npx cap run android`, enable the reminder, and let it fire.
+- **User's step (on-device only):** an actual notification arriving around the
+  chosen time (see the approximate-delivery limit above), the Android 13+ permission
+  prompt, and the reboot-survival behavior — `npx cap run android`, enable the
+  reminder, and let it fire.
 
 ## Alternatives considered
 
