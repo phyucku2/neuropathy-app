@@ -18,6 +18,9 @@ export const TEST_REFRESH_TOKEN = 'synthetic-refresh-token';
 export const TEST_EMAIL = 'pat.example@example.com';
 export const TEST_PASSWORD = 'synthetic-test-passphrase';
 
+/** The real backend's DELETE /auth/me wrong-password detail (ADR-0027), verbatim. */
+export const DELETE_WRONG_PASSWORD_DETAIL = "That password didn't match. Nothing was deleted.";
+
 export const ME: MeOut = {
   user_id: '11111111-1111-4111-8111-111111111111',
   email: TEST_EMAIL,

@@ -52,6 +52,7 @@ def _reset_process_singletons() -> None:
     deps._default_emr_service.cache_clear()
     deps._default_clinic_service.cache_clear()
     deps._default_capability_service.cache_clear()
+    deps._default_account_deletion_service.cache_clear()
     deps._process_jwt_secret.cache_clear()
     deps._process_secret_store.cache_clear()
     deps._process_pending_auth.cache_clear()
@@ -299,6 +300,17 @@ def test_db_mode_services_are_request_scoped_but_share_process_state() -> None:
     assert isinstance(capability_a.connections, PostgresClinicConnectionRepository)
     assert isinstance(capability_a.audit, PostgresAuditEventRepository)
 
+    deletion_a = deps.get_account_deletion_service(session)
+    deletion_b = deps.get_account_deletion_service(session)
+    assert deletion_a is not deletion_b  # request-scoped construction
+    assert isinstance(deletion_a.users, PostgresUserRepository)
+    assert isinstance(deletion_a.observations, PostgresObservationRepository)
+    assert isinstance(deletion_a.audit, PostgresAuditEventRepository)
+    assert isinstance(deletion_a.pending_auth, PostgresPendingAuthStore)
+    # No SECRET_STORE_KEY here: deletion purges tokens from the SAME fail-closed
+    # process vault EMR requests use — wherever the tokens live is where they die.
+    assert deletion_a.secret_store is deps.get_emr_service(session).secret_store
+
 
 def test_db_mode_uses_the_configured_jwt_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "jwt_secret", "configured-secret")
@@ -359,3 +371,16 @@ def test_without_a_session_the_cached_singletons_serve() -> None:
     capability = deps.get_capability_service()
     assert capability.connections is clinic.connections
     assert capability.audit is clinic.audit
+    # Account deletion (ADR-0027) destroys data from the SAME stores every feature
+    # wrote into — users, EMR connections/tokens, clinic connections, toggles,
+    # observations — and audits into the same log.
+    deletion = deps.get_account_deletion_service()
+    assert deletion is deps.get_account_deletion_service()
+    assert deletion.users is deps.get_auth_service().users
+    assert deletion.emr_connections is deps.get_emr_service().connections
+    assert deletion.pending_auth is deps._process_pending_auth()
+    assert deletion.secret_store is deps.get_emr_service().secret_store
+    assert deletion.clinic_connections is clinic.connections
+    assert deletion.patient_capabilities is capability.patient_capabilities
+    assert deletion.observations is clinic.observations
+    assert deletion.audit is clinic.audit

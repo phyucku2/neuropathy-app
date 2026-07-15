@@ -46,6 +46,23 @@ class EmrConnectionRepository(Protocol):
         """Persist the current state of an existing connection."""
         ...
 
+    async def list_for_patient(self, patient_id: uuid.UUID) -> list[ConnectionRecord]:
+        """All of one patient's EMR connections, every status.
+
+        Account deletion (ADR-0027) reads this to find the token refs to purge from
+        the vault and the connection ids whose pending-auth rows must go first.
+        """
+        ...
+
+    async def delete_for_patient(self, patient_id: uuid.UUID) -> None:
+        """Destroy every EMR connection row for one patient (ADR-0027).
+
+        Callers own the FK order: pending_auth rows referencing these connections are
+        deleted BEFORE this, and vaulted secrets are purged via SecretStore.delete —
+        this removes only the connection rows themselves.
+        """
+        ...
+
 
 class InMemoryEmrConnectionRepository:
     """Dict-backed store for unit tests and DB-less development."""
@@ -61,3 +78,11 @@ class InMemoryEmrConnectionRepository:
 
     async def update(self, connection: ConnectionRecord) -> None:
         self._connections[connection.id] = connection
+
+    async def list_for_patient(self, patient_id: uuid.UUID) -> list[ConnectionRecord]:
+        return [c for c in self._connections.values() if c.patient_id == patient_id]
+
+    async def delete_for_patient(self, patient_id: uuid.UUID) -> None:
+        self._connections = {
+            cid: c for cid, c in self._connections.items() if c.patient_id != patient_id
+        }

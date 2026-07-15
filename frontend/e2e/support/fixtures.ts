@@ -15,7 +15,7 @@
 import { expect, test as base } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { installApiMocks, REFRESH_TOKEN_KEY, SYNTHETIC_REFRESH_TOKEN } from './mock-api';
-import type { Scenario } from './mock-api';
+import type { MockApiState, Scenario } from './mock-api';
 
 /**
  * Console-error allowlist — narrow and documented.
@@ -86,12 +86,13 @@ export { expect };
  * refresh token in sessionStorage, GET /auth/me 401s (no access token yet), the
  * client refreshes once, and /auth/me returns the account — the REAL restore path.
  */
-export async function signedInApp(page: Page, scenario: Scenario = {}): Promise<void> {
-  await installApiMocks(page, scenario);
+export async function signedInApp(page: Page, scenario: Scenario = {}): Promise<MockApiState> {
+  const state = await installApiMocks(page, scenario);
   await page.addInitScript(
     ([key, token]) => {
       window.sessionStorage.setItem(key, token);
     },
     [REFRESH_TOKEN_KEY, SYNTHETIC_REFRESH_TOKEN] as const,
   );
+  return state;
 }

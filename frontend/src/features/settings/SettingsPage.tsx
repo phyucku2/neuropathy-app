@@ -14,6 +14,7 @@ import { ErrorNotice, Loading } from '../../components/StatusMessages';
 import { formatDayYear } from '../../lib/format';
 import { useApi } from '../../lib/useApi';
 import { ConnectionRow } from './ConnectionRow';
+import { DeleteAccountCard } from './DeleteAccountCard';
 
 const CAPABILITY_ICONS: Record<string, { glyph: string; color: string }> = {
   ingest_biomech: { glyph: '◔', color: 'var(--color-brand-blue)' },
@@ -182,6 +183,7 @@ export function SettingsPage() {
       </p>
       <CapabilitiesCard />
       <ConnectionsCard />
+      <DeleteAccountCard />
     </div>
   );
 }

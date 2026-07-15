@@ -37,10 +37,15 @@ Cross-cutting answers:
 - **Encryption in transit:** Yes — TLS only (`allowMixedContent:false`, no cleartext).
 - **Encryption at rest (device):** refresh token in Android Keystore-backed secure storage
   (ADR-0024); `allowBackup=false` so app data is excluded from OS backups (ADR-0023).
-- **Deletion mechanism:** **[verify before submission]** Play requires a user-visible
-  account/data deletion path for apps that collect user data. The API has revocation and
-  deletion seams, but a patient-facing "delete my account and data" flow is NOT yet shipped —
-  this is a REQUIRED pre-submission work item (tracked on the roadmap).
+- **Deletion mechanism:** **SHIPPED** (ADR-0027). In-app: Settings → Danger zone →
+  "Delete my account" (password re-entry + acknowledgment + two-tap confirm). API:
+  `DELETE /auth/me`. Deletes the account and ALL health data transactionally (EMR
+  connections + vaulted tokens, clinic connections, toggles, observations, the patient
+  record); PHI-free audit events are retained anonymized (regulatory retention —
+  disclose this retention in the form's deletion follow-up and the privacy policy).
+  **[verify at submission]** the form's "deletion request" URL/steps point at this flow
+  in the shipped build; if Play requires a web deletion-request URL for
+  logged-out users, that page is a submission-time work item (the API is ready for it).
 - **Data sharing:** none to third parties. The optional AI narrative runs behind a
   BAA-gated seam (ADR-0011) and is OFF by default — if enabled in production with a vendor,
   the form's "service providers" answer and the privacy policy MUST be updated first.
@@ -61,7 +66,10 @@ Cross-cutting answers:
 - [ ] Internal-testing tester list (≤100 emails)
 - [ ] Demo/review account (synthetic)
 - [ ] versionCode bumped; signed AAB from the release workflow
-- [ ] Account/data **deletion flow shipped and linked** (hard Play requirement — see §2)
+- [x] Account/data **deletion flow shipped** (hard Play requirement — see §2; ADR-0027:
+      Settings → Danger zone → `DELETE /auth/me`)
+- [ ] Deletion flow **linked in the Data Safety form** at submission (steps/URL — see §2
+      [verify at submission])
 
 ## 4. Known gaps before PRODUCTION (not internal testing)
 
@@ -69,5 +77,6 @@ Cross-cutting answers:
    (deploy per `docs/ops/`, Wave 1 infra). The bundled `config.js` must carry the production
    API base URL at build time for the store artifact. **[verify the built AAB's config]**
 2. **HIPAA validation + BAAs** (`docs/compliance/`) before any real patient data.
-3. **Account/data deletion flow** (Play hard requirement; also good HIPAA hygiene).
+3. ~~Account/data deletion flow~~ **shipped** (ADR-0027, see §2) — only the Data Safety
+   form linkage remains at submission.
 4. **Counsel-approved privacy policy** at a public URL.

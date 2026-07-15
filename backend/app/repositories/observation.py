@@ -57,6 +57,15 @@ class ObservationRepository(Protocol):
         """Total analyzable records (pagination totals without loading rows)."""
         ...
 
+    async def delete_for_patient(self, patient_id: uuid.UUID) -> None:
+        """Destroy EVERY observation row for one patient — all statuses, superseded
+        rows included (ADR-0027 account deletion: the append-only/ALCOA retention
+        posture yields to the patient's right to erase their record). Implementations
+        own the self-referencing supersede FK: superseding rows (or the revises_id
+        values) must go with — never before — their targets.
+        """
+        ...
+
 
 class InMemoryObservationRepository:
     """List-backed store for unit tests and DB-less development."""
@@ -109,3 +118,7 @@ class InMemoryObservationRepository:
 
     async def count_for_patient(self, patient_id: uuid.UUID, code: str | None = None) -> int:
         return len(await self.list_for_patient(patient_id, code=code))
+
+    async def delete_for_patient(self, patient_id: uuid.UUID) -> None:
+        # Every row for the patient goes at once — supersede chains fall together.
+        self._observations = [o for o in self._observations if o.patient_id != patient_id]

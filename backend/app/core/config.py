@@ -74,6 +74,15 @@ class Settings(BaseSettings):
     invite_rate_limit_max: int = 20
     invite_rate_limit_window_seconds: int = 3600
 
+    # Account-deletion password throttle (ADR-0027): failed fresh re-auth attempts on
+    # DELETE /auth/me are audited ('account_delete_denied') and capped per actor — at
+    # most delete_account_rate_limit_max failures per sliding window. Over the budget
+    # the endpoint answers 429 BEFORE the Argon2id verify even runs, so the limiter
+    # caps both the password oracle and its CPU cost; the cap equally bounds the
+    # denial audit volume (no log-flood primitive).
+    delete_account_rate_limit_max: int = 5
+    delete_account_rate_limit_window_seconds: int = 900
+
     # Bootstrap-denial audit cap (ADR-0017): failed attempts on the UNAUTHENTICATED
     # provisioning gate are audited, but at most bootstrap_denied_audit_max rows per
     # sliding window — beyond the cap the 403 is unchanged and only the audit write is

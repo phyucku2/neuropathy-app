@@ -29,6 +29,13 @@ class RefreshIn(BaseModel):
     refresh_token: str
 
 
+class DeleteAccountIn(BaseModel):
+    """DELETE /auth/me requires fresh password re-authentication (ADR-0027): a bearer
+    token alone — which can be stolen — must never be able to destroy an account."""
+
+    password: str
+
+
 class AccessTokenOut(BaseModel):
     access_token: str
     token_type: str = "bearer"

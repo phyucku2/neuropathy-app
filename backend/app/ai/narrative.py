@@ -230,8 +230,25 @@ class NarrativeCache:
         while len(self._entries) > self._max:
             self._entries.popitem(last=False)
 
+    def clear(self) -> None:
+        """Drop every cached narrative and in-flight marker.
+
+        Account deletion (ADR-0027) invalidates through here: keys are content
+        hashes of (facts, model), not patient ids, so one patient's entries cannot
+        be purged selectively — the whole cache goes and repopulates on demand.
+        """
+        self._entries.clear()
+        self._pending.clear()
+
 
 NARRATIVE_CACHE = NarrativeCache()
+
+
+def clear_narrative_cache() -> None:
+    """Invalidate the process-level narrative cache — the seam account deletion
+    (ADR-0027) calls so no narrative derived from a deleted patient's trajectory is
+    served afterwards, without reaching into the cache's internals."""
+    NARRATIVE_CACHE.clear()
 
 
 async def narrate_into_cache(

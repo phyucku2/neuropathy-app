@@ -1,8 +1,8 @@
 import { useState, type FormEvent } from 'react';
-import { Link, Navigate, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { ApiError } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
-import { ErrorNotice } from '../../components/StatusMessages';
+import { ErrorNotice, SuccessNotice } from '../../components/StatusMessages';
 
 function friendlyLoginError(error: unknown): string {
   if (error instanceof ApiError && error.status === 401) {
@@ -17,10 +17,16 @@ function friendlyLoginError(error: unknown): string {
 export function LoginPage() {
   const { status, login } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Transient confirmation after account deletion (ADR-0027): router state only —
+  // no new route, and a reload or any navigation naturally clears it.
+  const accountDeleted =
+    (location.state as { accountDeleted?: boolean } | null)?.accountDeleted === true;
 
   if (status === 'authenticated') {
     return <Navigate to="/" replace />;
@@ -45,6 +51,7 @@ export function LoginPage() {
       <div className="card">
         <h1>Welcome back</h1>
         <p className="muted">Sign in to see your trends.</p>
+        {accountDeleted && <SuccessNotice>Your account and data were deleted.</SuccessNotice>}
         {error !== null && <ErrorNotice>{error}</ErrorNotice>}
         <form
           onSubmit={(event) => {

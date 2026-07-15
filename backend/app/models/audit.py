@@ -39,8 +39,15 @@ class AuditEvent(UUIDPrimaryKey, Base):
     action: Mapped[str] = mapped_column(
         String(64), nullable=False
     )  # e.g. read_observation, toggle_capability
+    # ON DELETE SET NULL (migration 0006, ADR-0027): audit events are RETAINED under
+    # regulatory retention when a patient account is deleted — they are PHI-free by
+    # contract, so history survives as anonymous events instead of blocking (or being
+    # cascaded away with) the deletion.
     patient_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("patient.id"), nullable=True, index=True
+        UUID(as_uuid=True),
+        ForeignKey("patient.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
 
     # Context: what was accessed/changed (ids, before/after for toggles). No secrets, no

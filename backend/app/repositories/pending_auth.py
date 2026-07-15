@@ -48,6 +48,15 @@ class PendingAuthStore(Protocol):
         consumed, or expired (expired entries are purged, never honored)."""
         ...
 
+    async def delete_for_connections(self, connection_ids: list[uuid.UUID]) -> None:
+        """Destroy every pending handshake pointing at the given connections.
+
+        Account deletion (ADR-0027) calls this before the emr_connection rows go —
+        pending_auth.connection_id references them, so these rows must fall first.
+        An empty id list is a quiet no-op.
+        """
+        ...
+
 
 class InMemoryPendingAuthStore:
     """Dict-backed store for unit tests, DB-less development, and single-process
@@ -69,3 +78,11 @@ class InMemoryPendingAuthStore:
             return None
         pending, expires_at = entry
         return pending if expires_at > now else None
+
+    async def delete_for_connections(self, connection_ids: list[uuid.UUID]) -> None:
+        wanted = set(connection_ids)
+        self._pending = {
+            state: entry
+            for state, entry in self._pending.items()
+            if entry[0].connection_id not in wanted
+        }

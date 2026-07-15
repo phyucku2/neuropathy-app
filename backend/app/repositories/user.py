@@ -131,6 +131,16 @@ class UserRepository(Protocol):
         """
         ...
 
+    async def delete_with_patient(self, *, user_id: uuid.UUID, patient_id: uuid.UUID) -> None:
+        """Destroy the auth identity AND its linked Patient clinical record — the
+        mirror of `add`, which creates both together (ADR-0027 account deletion).
+
+        Callers own the FK order: every table referencing the patient row must already
+        be empty (or, for audit_event, detach via ON DELETE SET NULL — migration
+        0006). The patient row is the LAST thing account deletion destroys.
+        """
+        ...
+
 
 class InMemoryUserRepository:
     """Dict-backed store for unit tests and DB-less development."""
@@ -197,3 +207,9 @@ class InMemoryUserRepository:
         user.active = False
         user.disabled_at = disabled_at
         return OpsDeactivateResult(OpsDeactivateOutcome.deactivated, user)
+
+    async def delete_with_patient(self, *, user_id: uuid.UUID, patient_id: uuid.UUID) -> None:
+        user = self._by_id.pop(user_id, None)
+        if user is not None:
+            self._by_email.pop(user.email, None)
+        self.patients.pop(patient_id, None)
