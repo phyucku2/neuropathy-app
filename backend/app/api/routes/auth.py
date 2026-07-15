@@ -3,7 +3,8 @@ patient account & data deletion flow (ADR-0027): DELETE /auth/me."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
+from fastapi.responses import JSONResponse
 
 from app.api.deps import AccountDeletionDep, AuthDep, CurrentUserDep, PatientUserDep
 from app.core.security import AuthError
@@ -62,20 +63,32 @@ async def refresh(body: RefreshIn, auth: AuthDep) -> AccessTokenOut:
 @router.delete("/me", status_code=204)
 async def delete_me(
     body: DeleteAccountIn, current: PatientUserDep, service: AccountDeletionDep
-) -> None:
+) -> Response:
     """Delete the authenticated PATIENT account and all its data (ADR-0027).
 
     Patient role only — require_patient answers 403 for clinician/ops principals.
     The body's password is fresh re-authentication (a stolen bearer token alone must
-    not destroy an account); a mismatch is 403 and deletes nothing. Deliberately NO
-    require_capability gate: like revocation (ADR-0013), deletion must never be
-    blockable by a toggle or kill switch. Transactional: one PHI-free audit event +
-    every delete commit together, or the whole request rolls back.
+    not destroy an account); a mismatch is 403 and deletes nothing, and failed
+    attempts are throttled — over the per-actor budget the answer is 429 before the
+    password is even verified. Deliberately NO require_capability gate: like
+    revocation (ADR-0013), deletion must never be blockable by a toggle or kill
+    switch. Transactional: one PHI-free audit event + every delete commit together,
+    or the whole request rolls back.
+
+    The wrong-password refusal is RETURNED by the service and rendered here rather
+    than raised: its bounded 'account_delete_denied' audit event must commit with
+    the request transaction, and a raised HTTPException would roll it back
+    (docs/lessons.md "return don't raise") — the throttle would then never trip.
     """
     try:
-        await service.delete_patient_account(user_id=current.user_id, password=body.password)
+        denied = await service.delete_patient_account(
+            user_id=current.user_id, password=body.password
+        )
     except AccountDeletionError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.reason) from exc
+    if denied is not None:
+        return JSONResponse(status_code=denied.status_code, content={"detail": denied.reason})
+    return Response(status_code=204)
 
 
 @router.get("/me", response_model=MeOut)

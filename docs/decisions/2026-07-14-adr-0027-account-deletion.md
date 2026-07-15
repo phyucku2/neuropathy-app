@@ -29,11 +29,22 @@ their accounts are provisioned and are deprovisioned by ops, not self-deleted).
    asking — a stolen token alone must never be able to destroy an account. A mismatch
    answers 403 with a friendly, verbatim-shown detail ("That password didn't match.
    Nothing was deleted.") — the caller is already authenticated, so this reveals
-   nothing about other accounts. Nothing is written before the verify, so the refusal
-   raise is safe under the request-transaction rule (docs/lessons.md "return don't
-   raise" applies only when an audit row must survive the denial; deletion refusals
-   are deliberately not audited — an unbounded per-request audit write on a
-   password-guessing surface would be the ADR-0017 log-flood primitive again).
+   nothing about other accounts. **Failed attempts are audited and throttled**
+   (review finding — this endpoint is a password oracle whose success is
+   destruction): each wrong password writes one bounded, PHI-free
+   `account_delete_denied` event (config values only, never password material), and
+   the ADR-0017 sliding-window limiter — keyed on the authenticated actor, counting
+   exactly those events (`DELETE_ACCOUNT_RATE_LIMIT_MAX` per window, default 5 per
+   15 minutes) — answers 429 over the budget BEFORE the Argon2id verify runs, so
+   the cap bounds both the oracle and its CPU cost. The log-flood concern that
+   originally argued against auditing these refusals is answered by the cap
+   itself: over-budget attempts write nothing, so the denial volume can never
+   exceed the window budget per actor. Because that denial event must COMMIT with
+   the request, the wrong-password refusal is *returned* by the service and
+   rendered by the route, never raised (docs/lessons.md "return don't raise"); the
+   nothing-written refusals (missing account, wrong role, over-budget 429) still
+   raise safely. A correct password under the budget is never throttled — only
+   failures count.
 2. **Transactional and never blockable.** The whole deletion runs in the one
    request-scoped transaction (commit or nothing). The route carries NO
    `require_capability` gate: like revocation (ADR-0013), the way OUT is never
@@ -44,14 +55,23 @@ their accounts are provisioned and are deprovisioned by ops, not self-deleted).
    row counts only (emr_connections / vault_secrets / clinic_connections /
    patient_capabilities) — references and counts, never values, per the audit
    contract.
-4. **FK-safe destruction order, patient row last:** pending_auth rows for the
-   patient's EMR connections → the vaulted OAuth secrets for those connections —
-   through the SAME `SecretStore.delete` seam ADR-0017 revocation uses, never a
-   second crypto path → emr_connection rows → clinic_connection rows (ending any
-   live consent) → patient_capability rows → observation rows (the self-referencing
-   supersede FK is cleared first — `revises_id` NULLed for the patient, then one
-   DELETE takes the whole chain; supersession never crosses patients) → the app_user
-   row → the patient row LAST.
+4. **FK-safe destruction order, patient row last — vault purge after every DB row
+   delete:** pending_auth rows for the patient's EMR connections → emr_connection
+   rows (their `token_ref`s are collected first) → clinic_connection rows (ending
+   any live consent) → patient_capability rows → observation rows (the
+   self-referencing supersede FK is cleared first — `revises_id` NULLed for the
+   patient, then one DELETE takes the whole chain; supersession never crosses
+   patients) → the app_user row → the patient row LAST → and only then the vaulted
+   OAuth secrets, through the SAME `SecretStore.delete` seam ADR-0017 revocation
+   uses, never a second crypto path. The purge runs last (review finding) because
+   with the keyed Postgres vault it shares the request transaction anyway
+   (atomicity unchanged), but with the keyless in-memory vault the delete is
+   process-memory and non-transactional — purging before the row deletes would let
+   a mid-request DB failure roll the rows back while the vault entry stayed gone,
+   orphaning `emr_connection.token_ref`; purging last means such a failure rolls
+   back to a fully intact account. The process-level AI narrative cache is cleared
+   in the same pass (it is keyed by trajectory content, not patient id, so it
+   cannot be purged selectively; it repopulates on demand).
 5. **Audit retention: `audit_event.patient_id` becomes ON DELETE SET NULL**
    (files-only migration 0006, model updated for autogenerate parity). Audit events
    are PHI-free by contract, so they are RETAINED under regulatory retention and the
@@ -90,7 +110,13 @@ reload naturally clears it.
 Unit + live-Postgres integration suites cover: every table's rows destroyed
 (counted 0 across app_user, patient, emr_connection, pending_auth,
 clinic_connection, patient_capability, observation; vault ciphertext row gone);
-wrong password → 403 + nothing deleted + no audit event; clinician/ops → 403;
+wrong password → 403 + nothing deleted + exactly one committed
+`account_delete_denied` event; the throttle in both storage modes (under-budget
+failures 403 + audited, over-budget 429 without ever reaching the Argon2id verify,
+correct password under the budget still deletes, denial rows capped at the
+budget); the vault-purge ordering (SecretStore.delete fires after the last row
+delete; a simulated DB failure after the row deletes leaves the keyless vault
+intact); the narrative cache emptied by a deletion; clinician/ops → 403;
 post-deletion login/refresh/me/second-delete → 401; audit rows retained with
 patient_id NULL (FK behavior also proven in isolation); another patient's data and
 non-anonymized audit trail untouched; migration 0006 down/up with autogenerate
@@ -100,6 +126,28 @@ deletion. NOT verified here: the Play Data Safety form linkage (submission-time,
 user-side) and any server-side EMR-token *revocation at the EHR* (we delete our
 copies; upstream grant revocation at the vendor is the patient's portal action —
 same posture as ADR-0017 revoke).
+
+## Residual risks
+
+- **The deletion promise requires the KEYED vault (`SECRET_STORE_KEY` set).** With
+  the key configured, EMR OAuth tokens live only as ciphertext rows in the
+  database's `secret` table, and the deletion transaction destroys them for every
+  worker at once. Keyless mode is a **non-production degraded mode**: each worker
+  process holds its own in-memory vault, so DELETE /auth/me purges only the worker
+  that served the request — copies of the patient's EMR tokens in *sibling
+  workers'* memory survive until process restart (they are unreachable through the
+  API, since the emr_connection rows are gone, but the material still exists in
+  RAM). Production deployments MUST set `SECRET_STORE_KEY`
+  (`docs/compliance/hipaa-ops-checklist.md`, encryption-at-rest item); deps.py
+  already logs a warning when DB mode boots without it.
+- **An IN-FLIGHT background narration can outlive the deletion.** The deletion
+  clears the AI narrative cache, but a narration scheduled (FastAPI
+  BackgroundTasks) by a trajectory request that started *before* the deletion can
+  complete *after* it and re-insert its result — a seconds-wide window, on a
+  feature that is off by default and BAA-gated (`ai_narrative`, ADR-0011/0020),
+  caching a validated rephrasing rather than raw PHI. Accepted as residual;
+  revisit if narration ever becomes durable (a queue or table instead of
+  process-memory).
 
 ## Options considered
 

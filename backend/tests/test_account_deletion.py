@@ -18,6 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
 
+from app.ai.narrative import NARRATIVE_CACHE
 from app.api.deps import (
     get_account_deletion_service,
     get_auth_service,
@@ -25,14 +26,20 @@ from app.api.deps import (
     get_clinic_service,
     get_emr_service,
 )
+from app.core.config import settings
 from app.emr.service import EmrService, InMemorySecretStore
 from app.main import app
+from app.models.audit import AuditEvent
 from app.models.capability import Actor
 from app.models.clinic import Clinic
 from app.models.connection import ClinicConnection, ConnectionStatus, Initiator
 from app.models.observation import DataOrigin, Observation, ObservationStatus, SourceType
+from app.repositories.audit import InMemoryAuditEventRepository
+from app.repositories.emr_connection import ConnectionRecord
 from app.repositories.patient_capability import InMemoryPatientCapabilityRepository
+from app.repositories.user import InMemoryUserRepository
 from app.services.account_deletion import (
+    RATE_LIMITED_DETAIL,
     WRONG_PASSWORD_DETAIL,
     AccountDeletionError,
     AccountDeletionService,
@@ -255,10 +262,17 @@ def test_wrong_password_is_403_and_deletes_nothing(world: World, client: TestCli
     )
     assert login.status_code == 200
     assert len(asyncio.run(_surviving_row_counts(world, patient_id))) == 4
-    # No audit event either — nothing happened to the record (the refusal wrote
-    # nothing that could need committing, so raising is safe here).
+    # No deletion event — nothing happened to the record. The refusal itself IS
+    # audited (one bounded, PHI-free 'account_delete_denied' row: config only, no
+    # password material), because the throttle counts exactly those events.
     events = world.emr.audit._events  # type: ignore[attr-defined]
     assert [e for e in events if e.action == "delete_account"] == []
+    denials = [e for e in events if e.action == "account_delete_denied"]
+    assert len(denials) == 1
+    assert denials[0].detail == {
+        "limit": settings.delete_account_rate_limit_max,
+        "window_seconds": settings.delete_account_rate_limit_window_seconds,
+    }
 
 
 async def _surviving_row_counts(world: World, patient_id_str: str) -> list[int]:
@@ -388,8 +402,6 @@ def test_deleting_one_patient_leaves_every_other_patient_untouched(
 async def test_delete_with_patient_is_a_quiet_noop_for_an_unknown_user() -> None:
     """The in-memory repo mirrors DELETE ... WHERE semantics: nothing to remove is
     not an error (Postgres twin: zero-row DELETE)."""
-    from app.repositories.user import InMemoryUserRepository
-
     repo = InMemoryUserRepository()
     await repo.delete_with_patient(user_id=uuid.uuid4(), patient_id=uuid.uuid4())
 
@@ -397,7 +409,9 @@ async def test_delete_with_patient_is_a_quiet_noop_for_an_unknown_user() -> None
 async def test_service_answers_401_when_the_account_is_already_gone() -> None:
     service = AccountDeletionService()
     with pytest.raises(AccountDeletionError) as excinfo:
-        await service.delete_patient_account(user_id=uuid.uuid4(), password="anything-at-all")
+        # SYNTHETIC_ constant, not a quoted literal — keeps the secret scan
+        # meaningful (docs/lessons.md).
+        await service.delete_patient_account(user_id=uuid.uuid4(), password=SYNTHETIC_PASSWORD)
     assert excinfo.value.status_code == 401
 
 
@@ -438,3 +452,195 @@ async def test_pending_auth_delete_for_connections_is_scoped_and_noop_on_empty()
     await store.delete_for_connections([drop_id])
     assert await store.consume("drop-state", now=now) is None
     assert await store.consume("keep-state", now=now) is not None
+
+
+# --- Vault purge ordering (review finding): secrets die AFTER every DB row delete ---
+
+
+class _OrderRecordingSecretStore(InMemorySecretStore):
+    """InMemorySecretStore that records when its delete seam fires."""
+
+    def __init__(self, calls: list[str]) -> None:
+        super().__init__()
+        self._calls = calls
+
+    async def delete(self, ref: str) -> None:
+        self._calls.append("secret_store.delete")
+        await super().delete(ref)
+
+
+class _OrderRecordingUsers(InMemoryUserRepository):
+    """User repo that records the LAST row delete of the flow (user + patient)."""
+
+    def __init__(self, calls: list[str]) -> None:
+        super().__init__()
+        self._calls = calls
+
+    async def delete_with_patient(self, *, user_id: uuid.UUID, patient_id: uuid.UUID) -> None:
+        self._calls.append("users.delete_with_patient")
+        await super().delete_with_patient(user_id=user_id, patient_id=patient_id)
+
+
+class _DetachFailsAudit(InMemoryAuditEventRepository):
+    """Audit repo whose detach step blows up — a synthetic DB failure that fires only
+    after every row delete has already run."""
+
+    async def detach_patient(self, patient_id: uuid.UUID) -> None:
+        raise RuntimeError("synthetic DB failure after the row deletes")
+
+
+async def _service_with_vaulted_connection(
+    service: AccountDeletionService,
+) -> tuple[uuid.UUID, str]:
+    """Register a patient on the service's stores and give them an EMR connection
+    whose tokens are vaulted; returns (user_id, secret_ref)."""
+    auth = AuthService(users=service.users)
+    user = await auth.register_patient(
+        email="order@example.com", password=SYNTHETIC_PASSWORD, display_name="Pat"
+    )
+    assert user.patient_id is not None
+    ref = await service.secret_store.put({"access_token": "synthetic-ehr-access"})
+    await service.emr_connections.add(
+        ConnectionRecord(
+            id=uuid.uuid4(),
+            patient_id=user.patient_id,
+            fhir_base=FHIR_BASE,
+            provider_name="Synthetic Health",
+            token_ref=ref,
+        )
+    )
+    return user.id, ref
+
+
+async def test_vault_purge_runs_after_every_db_row_delete() -> None:
+    """The purge-ordering contract (review finding): the SecretStore delete fires
+    strictly AFTER the last DB row delete (user + patient), so a keyless in-memory
+    vault can never lose an entry that a rolled-back transaction still references."""
+    calls: list[str] = []
+    service = AccountDeletionService(
+        users=_OrderRecordingUsers(calls), secret_store=_OrderRecordingSecretStore(calls)
+    )
+    user_id, ref = await _service_with_vaulted_connection(service)
+
+    assert (
+        await service.delete_patient_account(user_id=user_id, password=SYNTHETIC_PASSWORD) is None
+    )
+
+    assert calls == ["users.delete_with_patient", "secret_store.delete"]
+    assert await service.secret_store.get(ref) is None  # ...and the purge did happen
+
+
+async def test_db_failure_after_the_row_deletes_leaves_the_keyless_vault_intact() -> None:
+    """The rationale behind the ordering: with the NON-transactional keyless vault, a
+    DB failure after the row deletes (which all roll back) must leave the secret in
+    place — a fully intact account, never an orphaned token_ref at a purged entry."""
+    service = AccountDeletionService(audit=_DetachFailsAudit())
+    user_id, ref = await _service_with_vaulted_connection(service)
+
+    with pytest.raises(RuntimeError, match="synthetic DB failure"):
+        await service.delete_patient_account(user_id=user_id, password=SYNTHETIC_PASSWORD)
+
+    assert await service.secret_store.get(ref) is not None  # vault untouched
+
+
+# --- Failed-password throttle (review finding): the destruction oracle is bounded ---
+
+
+@pytest.fixture()
+def small_budget(monkeypatch: pytest.MonkeyPatch) -> int:
+    monkeypatch.setattr(settings, "delete_account_rate_limit_max", 3)
+    return 3
+
+
+def test_wrong_password_attempts_are_audited_then_throttled(
+    world: World, client: TestClient, small_budget: int
+) -> None:
+    """Under the budget every wrong password is a 403 with one bounded PHI-free
+    denial event; over it the answer flips to 429 and writes NOTHING more — the cap
+    is also the audit-flood bound (at most the window budget of rows per actor)."""
+    tokens, patient_id = _register(client)
+
+    for _ in range(small_budget):
+        resp = _delete(client, tokens["access_token"], "not-the-password")
+        assert resp.status_code == 403
+        assert resp.json()["detail"] == WRONG_PASSWORD_DETAIL
+
+    events = world.emr.audit._events  # type: ignore[attr-defined]
+    assert len([e for e in events if e.action == "account_delete_denied"]) == small_budget
+
+    over = _delete(client, tokens["access_token"], "not-the-password")
+    assert over.status_code == 429
+    assert over.json()["detail"] == RATE_LIMITED_DETAIL
+    # The 429 wrote no further audit rows: the denial volume is capped at the budget.
+    assert len([e for e in events if e.action == "account_delete_denied"]) == small_budget
+    # Nothing was deleted along the way.
+    assert client.get("/auth/me", headers=_auth(tokens["access_token"])).status_code == 200
+    assert [e for e in events if e.action == "delete_account"] == []
+
+
+def test_over_the_budget_the_argon2_verify_never_runs(
+    world: World, client: TestClient, small_budget: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The limiter fires BEFORE the password verify, so over the budget even the
+    CORRECT password answers 429 without spending Argon2id CPU on the attacker."""
+    tokens, _ = _register(client)
+    me = client.get("/auth/me", headers=_auth(tokens["access_token"]))
+    user_id = uuid.UUID(me.json()["user_id"])
+
+    async def _seed_denials() -> None:
+        for _ in range(small_budget):
+            await world.emr.audit.add(
+                AuditEvent(
+                    actor_id=user_id,
+                    actor_role="patient",
+                    action="account_delete_denied",
+                    patient_id=None,
+                    detail={},
+                )
+            )
+
+    asyncio.run(_seed_denials())
+
+    def _must_not_run(password_hash: str, password: str) -> bool:
+        raise AssertionError("verify_password must not run over the budget")
+
+    monkeypatch.setattr("app.services.account_deletion.verify_password", _must_not_run)
+    resp = _delete(client, tokens["access_token"], SYNTHETIC_PASSWORD)
+    assert resp.status_code == 429
+    assert resp.json()["detail"] == RATE_LIMITED_DETAIL
+
+
+def test_correct_password_still_deletes_inside_an_open_window(
+    world: World, client: TestClient, small_budget: int
+) -> None:
+    """A real owner who fumbled the password a couple of times is NOT locked out:
+    under the budget the correct password deletes normally — only failures count."""
+    tokens, patient_id = _register(client)
+    for _ in range(small_budget - 1):
+        assert _delete(client, tokens["access_token"], "not-the-password").status_code == 403
+
+    assert _delete(client, tokens["access_token"], SYNTHETIC_PASSWORD).status_code == 204
+    asyncio.run(_assert_everything_gone(world, patient_id))
+    # The earlier denial rows are retained — anonymized by the patient-row detach.
+    events = world.emr.audit._events  # type: ignore[attr-defined]
+    denials = [e for e in events if e.action == "account_delete_denied"]
+    assert len(denials) == small_budget - 1
+    assert all(e.patient_id is None for e in denials)
+
+
+# --- Narrative cache invalidation (review finding): no cached narrative outlives ---
+
+
+def test_deletion_clears_the_ai_narrative_cache(world: World, client: TestClient) -> None:
+    """The process-level narrative cache is keyed by trajectory content, not patient
+    id, so deletion clears it wholesale via the clear_narrative_cache seam."""
+    tokens, _ = _register(client)
+    NARRATIVE_CACHE.finish("synthetic-key", "A cached narrative derived from PHI.")
+    assert NARRATIVE_CACHE.lookup("synthetic-key") == (True, "A cached narrative derived from PHI.")
+    try:
+        assert _delete(client, tokens["access_token"], SYNTHETIC_PASSWORD).status_code == 204
+        assert NARRATIVE_CACHE.lookup("synthetic-key") == (False, None)
+        assert NARRATIVE_CACHE._entries == {}  # noqa: SLF001 — the whole cache is gone
+        assert NARRATIVE_CACHE._pending == set()  # noqa: SLF001
+    finally:
+        NARRATIVE_CACHE.clear()  # test isolation, same as test_ai_narrative's fixture

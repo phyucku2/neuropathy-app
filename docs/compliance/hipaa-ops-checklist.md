@@ -39,7 +39,7 @@ Legend: ✅ implemented in-app · ◑ partial / enabling only · ☐ **[CE]** co
 | Access control — unique user ID | ✅ | Every principal is a unique account (patient/clinician/ops); JWT-based auth (ADR-0010/0019). |
 | Access control — emergency access | ☐ [CE] | Break-glass procedure is an org decision. |
 | Automatic logoff | ◑ | Short-lived access tokens with refresh (ADR-0010); UI/session inactivity timeout is a client/[CE] policy. |
-| Encryption at rest | ✅◑ | EMR OAuth tokens encrypted at rest in the DB token vault (Fernet, fail-closed — ADR-0017). **Full-database/disk encryption is a hosting concern [CE]** (enable at the storage layer). |
+| Encryption at rest | ✅◑ | EMR OAuth tokens encrypted at rest in the DB token vault (Fernet, fail-closed — ADR-0017). **`SECRET_STORE_KEY` must be set in production: the ADR-0027 account-deletion promise depends on the keyed vault — keyless mode leaves EMR tokens in sibling workers' memory until restart (ADR-0027 residual risks).** **Full-database/disk encryption is a hosting concern [CE]** (enable at the storage layer). |
 | Encryption in transit | ◑ [CE] | App speaks HTTP behind a TLS-terminating gateway; **TLS is deployed by the covered entity** (ADR-0018 draws the staging/prod boundary — staging has no TLS). |
 | Audit controls | ✅ | **Audit logging on PHI reads AND writes**, values never logged — counts/references only (CLAUDE.md §5; ADR-0012/0014/0017). Structured request logs and metrics are **PHI-free by construction** (ADR-0018/0021). |
 | Integrity (ALCOA+, tamper-evidence) | ✅ | Research-grade, append-only/immutable data with corrections-as-new-records and full provenance (ADR-0006). |

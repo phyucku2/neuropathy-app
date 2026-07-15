@@ -319,6 +319,54 @@ def test_wrong_password_is_403_and_the_transaction_deletes_nothing(vault_db: str
             )
             == 0
         )
+        # The refusal itself IS audited — one bounded 'account_delete_denied' row,
+        # COMMITTED despite the 403 (the denial is returned, not raised, so the
+        # request transaction commits the event the throttle counts).
+        assert (
+            asyncio.run(
+                _scalar(
+                    vault_db,
+                    "SELECT count(*) FROM audit_event "
+                    "WHERE actor_id = :actor AND action = 'account_delete_denied'",
+                    {"actor": user_id},
+                )
+            )
+            == 1
+        )
+
+
+def test_failed_password_throttle_answers_429_over_the_committed_budget(
+    vault_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Dual-store parity for the DELETE /auth/me throttle: the denial rows commit,
+    the sliding-window count reads them back across requests, and over the budget
+    even the CORRECT password answers 429 — while the row volume stays capped."""
+    monkeypatch.setattr(settings, "delete_account_rate_limit_max", 2)
+    email = f"throttle-{uuid.uuid4().hex[:12]}@example.com"
+    with TestClient(create_app()) as client:
+        tokens, user_id, _ = _register(client, email)
+
+        for _ in range(2):
+            assert _delete(client, tokens["access_token"], "not-the-password").status_code == 403
+        over = _delete(client, tokens["access_token"], "not-the-password")
+        assert over.status_code == 429
+        assert "Nothing was deleted" in over.json()["detail"]
+        # Correct password inside the exhausted window: still 429 (the limiter fires
+        # before the Argon2id verify), and the account survives untouched.
+        assert _delete(client, tokens["access_token"], SYNTHETIC_PASSWORD).status_code == 429
+        me = client.get("/auth/me", headers=_auth_header(tokens["access_token"]))
+        assert me.status_code == 200
+
+        # The audit volume is bounded by the budget: exactly 2 denial rows, no more.
+        denials = asyncio.run(
+            _scalar(
+                vault_db,
+                "SELECT count(*) FROM audit_event "
+                "WHERE actor_id = :actor AND action = 'account_delete_denied'",
+                {"actor": user_id},
+            )
+        )
+        assert denials == 2
 
 
 def test_clinician_and_ops_roles_cannot_reach_the_deletion_flow(
