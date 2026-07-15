@@ -21,6 +21,10 @@ export default tseslint.config(
       // Node build tooling (store-asset generators): console output and process.exit are
       // their job; they are not part of the browser app's TS program (ADR-0026 assets).
       'scripts',
+      // Demo capture tooling (Playwright capture spec + HTML generator): Node/test globals
+      // and console output are their job; not part of the browser app's TS program. The
+      // captured PNGs and generated HTML live outside src and are not linted.
+      'demo',
     ],
   },
   js.configs.recommended,
