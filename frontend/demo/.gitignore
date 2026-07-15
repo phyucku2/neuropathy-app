@@ -1,1 +1,5 @@
 shots/
+# The interactive single-file app demo build is large + regenerable (see app/README.md).
+app/dist/
+# Throwaway Playwright verifier.
+app/verify.mjs
