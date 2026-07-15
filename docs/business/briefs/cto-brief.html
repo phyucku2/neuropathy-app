@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Neuropathy Platform — CTO Technical Brief</title>
+    <style>
+      :root {
+        --ink: #12232e; --muted: #4a5b66; --faint: #7a8a94;
+        --teal: #0e7c86; --teal-dark: #0a5c64; --teal-wash: #e7f3f4;
+        --amber-wash: #fdf4e3; --amber-line: #d9a441;
+        --line: #d7e0e3; --green: #1f8a52;
+      }
+      * { box-sizing: border-box; }
+      html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        color: var(--ink); font-size: 9.6pt; line-height: 1.46; }
+      @page { size: Letter; margin: 15mm 14mm; }
+      h1,h2,h3 { line-height: 1.2; margin: 0; }
+      p { margin: 0 0 7px; }
+      .cover { border-top: 6px solid var(--teal); padding-top: 16px; margin-bottom: 12px; }
+      .eyebrow { text-transform: uppercase; letter-spacing: .14em; font-size: 7.5pt; font-weight: 700; color: var(--teal); margin-bottom: 8px; }
+      .cover h1 { font-size: 20pt; margin-bottom: 6px; }
+      .cover .sub { font-size: 10.5pt; color: var(--muted); max-width: 54em; }
+      .meta { margin-top: 9px; font-size: 8pt; color: var(--faint); display: flex; gap: 18px; flex-wrap: wrap; }
+      h2.section { font-size: 11.5pt; color: var(--teal-dark); margin: 16px 0 4px; padding-bottom: 4px; border-bottom: 2px solid var(--teal-wash); }
+      ul { margin: 0 0 8px; padding-left: 20px; }
+      li { margin-bottom: 3px; }
+      table { width: 100%; border-collapse: collapse; margin: 6px 0 10px; font-size: 8.7pt; }
+      th, td { text-align: left; padding: 4px 7px; border-bottom: 1px solid var(--line); vertical-align: top; }
+      th { color: var(--faint); font-size: 7.5pt; text-transform: uppercase; letter-spacing: .05em; }
+      .callout { border: 1px solid var(--line); border-left: 4px solid var(--teal); background: var(--teal-wash);
+        border-radius: 6px; padding: 8px 12px; margin: 8px 0; font-size: 9pt; break-inside: avoid; }
+      .callout.amber { border-left-color: var(--amber-line); background: var(--amber-wash); }
+      .page-break { break-before: page; }
+      .avoid-break { break-inside: avoid; }
+      code { background: #f0f4f5; border-radius: 3px; padding: 0 4px; font-size: 8.5pt; }
+      .arch { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 8.2pt; line-height: 1.35;
+        background: #f6f9fa; border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px;
+        white-space: pre; overflow-x: auto; margin: 6px 0 10px; }
+      .foot { margin-top: 14px; padding-top: 7px; border-top: 1px solid var(--line); font-size: 7.4pt; color: var(--faint); }
+    </style>
+  </head>
+  <body>
+    <div class="cover">
+      <div class="eyebrow">CTO Technical Brief · Internal · Confidential</div>
+      <h1>Neuropathy Care Platform — Technical Brief</h1>
+      <div class="sub">
+        Architecture, stack, security model, quality system, and an honest account of technical
+        debt and risk — written for a technical leader doing diligence or taking ownership.
+        Everything described is merged, reviewed, and reproducible from the repository
+        (26 ADRs are the decision log; <code>docs/roadmap-status.md</code> is the status board).
+      </div>
+      <div class="meta">
+        <span><b>As of:</b> July 15, 2026 · 28 merged PRs</span>
+        <span><b>State:</b> code-complete for Play internal testing; pre-deployment; synthetic data only</span>
+      </div>
+    </div>
+
+    <h2 class="section">1 · System architecture</h2>
+    <div class="arch">┌────────────────────────  Clients (one codebase)  ────────────────────────┐
+│  Web SPA (React 18 + TS strict, Vite)      Android (Capacitor 6 shell)    │
+│  sessionStorage refresh token              Keystore token + biometric gate │
+└────────────┬──────────────────────────────────────┬───────────────────────┘
+             │ HTTPS (TLS-only, runtime /config.js API base)
+┌────────────▼──────────────────────────────────────▼───────────────────────┐
+│  FastAPI (async) — middleware onion:                                      │
+│  RequestLogging → Metrics → ErrorReporting → upload guard → routes        │
+│  Auth (Argon2id + JWT) · Capability enforcement · PHI-free audit          │
+│  ┌──────────────┐ ┌──────────────┐ ┌───────────────┐ ┌─────────────────┐  │
+│  │ ADL check-ins│ │ BioMech PDF  │ │ SMART on FHIR │ │ Trajectory      │  │
+│  │ (supersede)  │ │ parser       │ │ OAuth/PKCE    │ │ engine (determ.)│  │
+│  └──────────────┘ └──────────────┘ └───────┬───────┘ └─────────────────┘  │
+│         AI narrative seam (BAA-gated, off-request-path, OFF by default)   │
+└────────────┬───────────────────────────────┼──────────────────────────────┘
+             │                               │ encrypted token vault
+┌────────────▼───────────────┐   ┌───────────▼──────────────┐
+│ PostgreSQL (SQLAlchemy 2.0 │   │ Secret store (Fernet,    │
+│ async, Alembic ×6, request-│   │ SECRET_STORE_KEY; delete │
+│ scoped transactions)       │   │ on revoke &amp; on account   │
+│ + full in-memory twin      │   │ deletion)                │
+└────────────────────────────┘   └──────────────────────────┘</div>
+    <ul>
+      <li><b>Single SPA, two targets.</b> The Android app is the same built bundle in a Capacitor shell — no second codebase. Platform differences are isolated behind three seams: <code>platform.ts</code> (one <code>isNativePlatform()</code>), <code>refreshTokenBackend.ts</code> (sessionStorage vs Keystore), <code>nativeShell.ts</code> (status bar/splash/back/App-Links). Everything else is platform-blind.</li>
+      <li><b>Dual persistence by design.</b> Every repository has a Postgres implementation and an in-memory twin with test-pinned parity — the app boots with no database for demos and fast tests, and the integration suite runs the same tests against live Postgres.</li>
+      <li><b>Runtime config, not build config.</b> The frontend reads its API base from <code>/config.js</code> at boot (container entrypoint rewrites it per environment) — one image, any environment.</li>
+    </ul>
+
+    <h2 class="section">2 · Stack &amp; rationale</h2>
+    <table class="avoid-break">
+      <thead><tr><th>Layer</th><th>Choice</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>API</td><td>Python 3.12 · FastAPI async · Pydantic v2</td><td>Typed contracts end-to-end; async fits the EMR I/O profile; mypy --strict enforced</td></tr>
+        <tr><td>DB</td><td>PostgreSQL 16 · SQLAlchemy 2.0 async · Alembic (files-only)</td><td>Transactions around every request; migrations reviewed as code, never auto-run</td></tr>
+        <tr><td>Frontend</td><td>React 18 · TypeScript strict · Vite · Recharts</td><td>Small dependency surface; zero-warning ESLint incl. jsx-a11y; no analytics/ad SDKs at all</td></tr>
+        <tr><td>Mobile</td><td>Capacitor 6 (Android-first)</td><td>Store presence + OS secure storage without forking the UI; ADR-0023 records the native-rebuild trigger (device/BLE integration)</td></tr>
+        <tr><td>Interop</td><td>FHIR R4 · LOINC · SMART on FHIR OAuth/PKCE</td><td>Patient-authorized EMR import; PKCE public client, no client secrets anywhere</td></tr>
+        <tr><td>AI</td><td>Narrative layer behind a vendor-agnostic, BAA-gated seam</td><td>Off by default; deterministic 200s regardless; PHI never leaves without the gate</td></tr>
+      </tbody>
+    </table>
+
+    <h2 class="section">3 · Security model (the part to scrutinize)</h2>
+    <ul>
+      <li><b>AuthN</b> — Argon2id password hashing; short-lived JWT access token (memory-only on every platform, never persisted); refresh token: web = sessionStorage (tab-scoped, ADR-0015 documents the XSS tradeoff and why httpOnly cookies were rejected — no cookie/CSRF surface at all); native = Android Keystore-backed encrypted storage, revealed only after a biometric/device-credential gate that <b>fails closed</b> on gate errors.</li>
+      <li><b>AuthZ</b> — role separation (patient / clinician / ops) with per-operator ops identities (the bootstrap token self-retires); clinician reads pass a single consent predicate (<code>_may_read_patient</code>) so panel, detail, and capability writes can't disagree; patient-held consent (share-with-clinic) is structurally outside clinician authority.</li>
+      <li><b>Server-enforced consent</b> — capabilities gate every write path server-side (UI state is advisory); revocation and account deletion are never blockable by any toggle or kill switch — enforced by tests, not convention.</li>
+      <li><b>Secrets</b> — EMR OAuth tokens in a Fernet-encrypted vault keyed by <code>SECRET_STORE_KEY</code>, deleted on revoke and on account deletion (ordered last so a mid-transaction failure can't orphan connections); repo-level: keystore-proof .gitignore, CI secret scanner that also catches Google API keys and gradle signing passwords, third-party CI actions SHA-pinned.</li>
+      <li><b>Destruction</b> — account deletion: password re-auth (rate-limited 5/15min with bounded PHI-free denial audits), single transaction, FK-safe order across all 7+ stores, audit history retained anonymously via <code>ON DELETE SET NULL</code>.</li>
+      <li><b>PHI hygiene</b> — logs and metrics are PHI-free by construction (route templates not raw paths; whitelisted event fields); audit covers reads and writes; Android <code>allowBackup=false</code>; no cleartext traffic.</li>
+    </ul>
+
+    <h2 class="section">4 · Quality system (how changes ship)</h2>
+    <ul>
+      <li><b>Process</b> — one portion = one PR. Implementation → two independent adversarial reviews (security/privacy + correctness, prompted to find concrete failure scenarios, verified per-finding) → fixes with regression tests → merge. Review findings are real: they've caught a permanent-lockout TOCTOU, an OAuth-code-leaking nginx log, a biometric fail-open, a WebView status-bar contrast bug, citation errors in compliance docs.</li>
+      <li><b>Gates (all blocking)</b> — backend: ruff, mypy --strict, pytest <b>100% coverage including live-Postgres integration + migration up/down</b>. Frontend: strict tsc, zero-warning ESLint, Prettier, 157 unit tests ≥90% coverage (deterministic — file-serial after a contention flake was diagnosed), production build. <b>31 Playwright specs drive the real built bundle in Chromium</b> with a zero-console-error gate that is itself self-tested (proven to fail on a real error). Android: APK assemble job. Plus dependency audit, license allowlist, secret scan, Docker builds.</li>
+      <li><b>Docs as code</b> — 26 ADRs; a lessons log of preventive rules (each added the day its mistake happened); runbooks for deploy, backup/restore, incident response, Play release, EMR registration.</li>
+    </ul>
+
+    <h2 class="section page-break">5 · CI/CD &amp; release path</h2>
+    <table class="avoid-break">
+      <thead><tr><th>Pipeline</th><th>What it proves</th></tr></thead>
+      <tbody>
+        <tr><td><code>ci.yml</code> — 6 jobs on every PR</td><td>backend · frontend · browser E2E · Android debug APK (artifact) · security/license scans · Docker image builds</td></tr>
+        <tr><td><code>release-android.yml</code> — manual</td><td>Signed AAB with the upload key from CI secrets (keystore materialized in temp, shredded always); unsigned smoke AAB without secrets</td></tr>
+        <tr><td>Play path</td><td>Play App Signing (Google escrows the app key; we hold only an upload key) → internal testing → production, gated per the runbook</td></tr>
+      </tbody>
+    </table>
+
+    <h2 class="section">6 · Technical debt &amp; known limitations (honest list)</h2>
+    <table class="avoid-break">
+      <thead><tr><th>Item</th><th>Impact</th><th>Mitigation / plan</th></tr></thead>
+      <tbody>
+        <tr><td>No deployed environment yet</td><td>Everything runs in CI/dev; no staging/prod URL</td><td>AWS EC2+RDS selected (free self-serve BAA); deploy portion is next in backlog; compose + runbooks carry over</td></tr>
+        <tr><td>Keyless secret-store mode is degraded</td><td>Without <code>SECRET_STORE_KEY</code>, vault is per-process memory — EMR tokens in sibling workers survive deletion until restart</td><td>Documented non-production mode (ADR-0027 + HIPAA checklist); keyed mode is fully transactional</td></tr>
+        <tr><td>In-flight AI narration race</td><td>A narration scheduled pre-deletion can complete seconds after it</td><td>Cache flushed at deletion; residual documented; narrative is off-by-default + BAA-gated; revisit if narration becomes durable</td></tr>
+        <tr><td>Single shared web bundle is ~590KB JS</td><td>Vite chunk-size warning; fine for pilot, not optimized</td><td>Code-splitting when performance work is scheduled; not a correctness risk</td></tr>
+        <tr><td>Frontend unit suite runs file-serial</td><td>~Few seconds slower CI</td><td>Deliberate: eliminated a 27% parallel-worker flake; documented in lessons</td></tr>
+        <tr><td>E2E console-error allowlist is status-pinned</td><td>New designed 4xx statuses need an allowlist edit</td><td>By design — a bare regex once masked 500s; the gate self-tests</td></tr>
+        <tr><td>No horizontal-scale session story needed yet</td><td>JWTs are stateless; rate limiters are audit-table-backed (multi-worker-safe); in-memory stores are dev-only</td><td>Postgres is the only stateful service; scale-out is standard</td></tr>
+        <tr><td>assetlinks.json needs the release cert</td><td>Android App-Links (EMR OAuth return) can't be finalized until the upload keystore exists</td><td>Template committed; custom-scheme fallback works meanwhile</td></tr>
+        <tr><td>Epic/Oracle production enrollment untested</td><td>Sandbox-first; production programs have review lead times</td><td>Registration runbook maps both; smoke test planned when client IDs arrive</td></tr>
+      </tbody>
+    </table>
+
+    <h2 class="section">7 · Scale &amp; cost posture</h2>
+    <ul>
+      <li><b>Pilot topology</b> — 1 small app node (gunicorn/UvicornWorker, Prometheus multiprocess-safe) + managed Postgres ≈ <b>$55–110/mo on AWS</b> with a $0 self-serve BAA. Nothing in the architecture assumes a single node except the documented keyless dev mode.</li>
+      <li><b>Hot paths are boring</b> — reads are per-patient indexed queries; the trajectory engine is deterministic in-process compute; the only external I/O is EMR pulls (async) and the optional AI call (off request path). No queues/workers needed until ingestion volume demands them.</li>
+      <li><b>Observability from day one</b> — PHI-free metrics with alert rules written, request-ID-correlated logs, error seam ready for a self-hosted collector.</li>
+    </ul>
+
+    <h2 class="section">8 · Technical roadmap (engineering view)</h2>
+    <table class="avoid-break">
+      <thead><tr><th>#</th><th>Work</th><th>Readiness</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td><b>Wave 3 (in flight):</b> EMR connect UI, per-provider client IDs, scope trim, authenticated callback relay, App-Links native return</td><td>Implementation running; review loop next</td></tr>
+        <tr><td>2</td><td><b>AWS deploy portion:</b> infra scripts + production runbook (TLS/ACM, Secrets Manager, RDS, backups, scrape)</td><td>Spec'd by the comparison doc; buildable now</td></tr>
+        <tr><td>3</td><td><b>Sandbox smoke → production EMR enrollment</b></td><td>Needs owner's free sandbox registrations, then a deployed origin</td></tr>
+        <tr><td>4</td><td><b>Wave 4 RTM evidence features</b> (adherence counter, time ledger, episode events, billing-consent scope, evidence export)</td><td>Design-gated on the professional sign-off packet + FDA/SaMD determination — deliberately not started</td></tr>
+        <tr><td>5</td><td><b>iOS platform</b> — add-platform on the existing Capacitor architecture</td><td>Blocked on owner's Apple DUNS/ID switch</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout avoid-break">
+      <b>CTO bottom line:</b> a small, strictly-typed, heavily-gated codebase with security decisions
+      written down and tested, not implied. The deliberate constraints — synthetic data only,
+      consent enforced server-side, PHI-free telemetry, files-only migrations, one-portion-one-PR —
+      mean the risky work ahead (real PHI, billing evidence, production EMR) lands on rails that
+      already exist. The biggest genuine risks are external: the FDA/SaMD determination and the
+      compliance sign-offs, both already packaged for professional review.
+    </div>
+
+    <div class="foot">
+      Neuropathy Care Platform · CTO technical brief · July 15, 2026 · Confidential ·
+      Source of truth: the repository (26 ADRs, docs/roadmap-status.md, docs/lessons.md).
+    </div>
+  </body>
+</html>

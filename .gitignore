@@ -38,3 +38,9 @@ node_modules/
 dist/
 build/
 *.log
+
+# Regenerable brief PDFs (source is the .html next to them)
+docs/business/briefs/*.pdf
+
+# Backend virtualenv created by the SessionStart hook
+backend/.venv/

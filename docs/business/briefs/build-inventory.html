@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Neuropathy Platform — Complete Build Inventory &amp; To-Do</title>
+    <style>
+      :root {
+        --ink: #12232e; --muted: #4a5b66; --faint: #7a8a94;
+        --teal: #0e7c86; --teal-dark: #0a5c64; --teal-wash: #e7f3f4;
+        --amber-wash: #fdf4e3; --amber-line: #d9a441;
+        --line: #d7e0e3; --green: #1f8a52; --paper: #fff;
+      }
+      * { box-sizing: border-box; }
+      html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        color: var(--ink); font-size: 9.8pt; line-height: 1.48; background: var(--paper); }
+      @page { size: Letter; margin: 15mm 14mm; }
+      h1,h2,h3 { line-height: 1.2; margin: 0; }
+      p { margin: 0 0 7px; }
+      .cover { border-top: 6px solid var(--teal); padding-top: 16px; margin-bottom: 14px; }
+      .eyebrow { text-transform: uppercase; letter-spacing: .14em; font-size: 7.5pt; font-weight: 700; color: var(--teal); margin-bottom: 8px; }
+      .cover h1 { font-size: 21pt; letter-spacing: -.01em; margin-bottom: 6px; }
+      .cover .sub { font-size: 10.5pt; color: var(--muted); max-width: 52em; }
+      .meta { margin-top: 10px; font-size: 8pt; color: var(--faint); display: flex; gap: 18px; flex-wrap: wrap; }
+      .meta b { color: var(--muted); }
+      h2.section { font-size: 12pt; color: var(--teal-dark); margin: 18px 0 4px; padding-bottom: 4px; border-bottom: 2px solid var(--teal-wash); }
+      h3.sub { font-size: 10pt; margin: 10px 0 3px; color: var(--ink); }
+      ul { margin: 0 0 8px; padding-left: 20px; }
+      li { margin-bottom: 3px; }
+      li b { color: var(--ink); }
+      .lead { color: var(--muted); margin-bottom: 8px; }
+      table { width: 100%; border-collapse: collapse; margin: 6px 0 10px; font-size: 8.8pt; }
+      th, td { text-align: left; padding: 4px 7px; border-bottom: 1px solid var(--line); vertical-align: top; }
+      th { color: var(--faint); font-size: 7.6pt; text-transform: uppercase; letter-spacing: .05em; }
+      td.st { white-space: nowrap; font-weight: 700; }
+      .ok { color: var(--green); } .wip { color: var(--teal-dark); } .todo { color: var(--faint); }
+      .callout { border: 1px solid var(--line); border-left: 4px solid var(--teal); background: var(--teal-wash);
+        border-radius: 6px; padding: 8px 12px; margin: 8px 0; font-size: 9pt; break-inside: avoid; }
+      .callout.amber { border-left-color: var(--amber-line); background: var(--amber-wash); }
+      .page-break { break-before: page; }
+      .avoid-break { break-inside: avoid; }
+      .foot { margin-top: 16px; padding-top: 7px; border-top: 1px solid var(--line); font-size: 7.4pt; color: var(--faint); }
+      code { background: #f0f4f5; border-radius: 3px; padding: 0 4px; font-size: 8.6pt; }
+    </style>
+  </head>
+  <body>
+    <div class="cover">
+      <div class="eyebrow">Build Inventory &amp; To-Do · Internal · Confidential</div>
+      <h1>Neuropathy Care Platform — What We've Built</h1>
+      <div class="sub">
+        A complete, feature-level inventory of the shipped product as of July 15, 2026, followed by
+        the full to-do list — split into what's in flight, what only the owner can do, and what's
+        gated on external sign-offs. Everything listed as shipped is merged to <code>main</code>,
+        adversarially reviewed, and covered by the automated quality gates.
+      </div>
+      <div class="meta">
+        <span><b>Owner/IP:</b> Founder · publisher: Advanced Health and Wellness Group</span>
+        <span><b>Licensee:</b> BioMech Health (billed separately, per owner decision 2026-07-14)</span>
+        <span><b>Repo state:</b> 28 merged PRs · 26 ADRs · Waves 1–2 complete</span>
+      </div>
+    </div>
+
+    <h2 class="section">1 · The product in one paragraph</h2>
+    <p>
+      A privacy-by-design digital health platform that fuses three independent data streams —
+      <b>patient-reported daily function</b> (walking, stairs, balance-confidence check-ins),
+      <b>lab results pulled from the patient's own EMR</b> (SMART on FHIR), and <b>objective
+      balance/gait measurements from BioMech reports</b> — into one explainable trajectory of how a
+      person's neuropathy is trending (improving / stable / declining, with the named signals and
+      confidence behind it). Patients own their data and the sharing switch; clinicians get a
+      consent-gated panel. Deliberately <b>non-diagnostic</b>. Runs as a web app and a native
+      Android app from a single codebase.
+    </p>
+
+    <h2 class="section">2 · Patient app — features</h2>
+    <ul>
+      <li><b>Accounts &amp; sign-in</b> — email registration/login, Argon2id password hashing, JWT access/refresh sessions; access token memory-only; session restore on reload.</li>
+      <li><b>Home trajectory view</b> — the explainable hero: direction, confidence, the specific signals driving it, and honest "not enough data" states; plain-language AI narrative available behind a business-associate gate (off by default).</li>
+      <li><b>Daily check-in (ADL)</b> — 0–4 ratings for walking, stairs, balance confidence; keyboard-accessible; same-day re-submission supersedes cleanly with a visible notice.</li>
+      <li><b>Trends</b> — per-metric line charts with axis/unit summaries, better/worse judgments (direction-of-better aware), unit-change and insufficient-data guards.</li>
+      <li><b>Add data</b> — BioMech balance/gait PDF upload parsed into research-grade observations, with parser warnings surfaced as plain text; size caps enforced before the body is read.</li>
+      <li><b>EMR connection</b> — SMART on FHIR OAuth/PKCE patient-authorized lab import (backend complete since V1; the patient-facing connect UI is the portion building right now).</li>
+      <li><b>Sources (consent center)</b> — server-enforced feature toggles the patient controls: data ingestion, EMR connect, AI narrative, share-with-clinic; optimistic UI with verbatim server messages on conflicts; clinic-managed toggles clearly labeled — but <b>share-with-clinic always stays patient-held</b>, even when a clinic manages other toggles.</li>
+      <li><b>Clinic connections</b> — approve/decline clinic invitations; disconnect with two-tap confirm; data flow stops immediately.</li>
+      <li><b>Account &amp; data deletion</b> — password-confirmed, rate-limited, transactional destruction of every patient-owned record including EMR token vault entries; PHI-free audit trail retained anonymously; never blockable by any toggle. (The hard Google Play requirement — shipped.)</li>
+    </ul>
+
+    <h2 class="section">3 · Clinician app — features</h2>
+    <ul>
+      <li><b>Consent-gated panel</b> — only patients who granted access appear; invitations are rate-limited and non-enumerating (you can't probe who has an account).</li>
+      <li><b>Patient detail</b> — shared trajectory with prominent non-diagnostic framing; cross-source trend table (BioMech + labs + ADL in one view, "not judged" where data is thin); paginated raw observations.</li>
+      <li><b>Features tab (capability orders)</b> — clinicians can manage clinic-managed toggles with expiry dates ("orders" pattern, renewals as explicit re-enables); patient-held consent renders read-only — proven in a real browser by the E2E suite.</li>
+      <li><b>Privacy screens</b> — neutral "Patient not found" for anything not consented (404-over-403: no existence leaks).</li>
+    </ul>
+
+    <h2 class="section">4 · Mobile (Android) — shipped</h2>
+    <ul>
+      <li><b>Native app via Capacitor</b> — the same verified SPA in a native shell; package id <code>com.ahwg.neuropathy</code> (publisher-confirmed, permanent at first Play upload); CI builds an installable APK on every PR.</li>
+      <li><b>Security posture beyond web</b> — refresh token in the Android Keystore (encrypted at rest), biometric/device-credential unlock before a persisted session is revealed (fails closed on gate errors), <code>allowBackup=false</code> (no PHI in device backups), TLS-only.</li>
+      <li><b>Native shell</b> — branded status bar/splash, safe-area handling, hardware back button; splash-hang guarded.</li>
+      <li><b>Play release machinery</b> — upload-key signing (Play App Signing), one-click signed-AAB workflow, real icon/splash/feature graphic/5 store screenshots (script-generated), Data-Safety form pre-drafted from the actual data flows, privacy-policy scaffold, full release runbook.</li>
+      <li><b>iOS</b> — deliberately deferred until the owner's Apple DUNS/ID switch; the Capacitor architecture makes it an add-platform step, not a rebuild.</li>
+    </ul>
+
+    <h2 class="section">5 · Platform &amp; backend — features</h2>
+    <ul>
+      <li><b>API</b> — async FastAPI; standards-based intake (FHIR R4 / LOINC labs with reference ranges); explainable deterministic trajectory engine; BioMech PDF ingestion; capability enforcement server-side on every write path.</li>
+      <li><b>Data layer</b> — PostgreSQL with SQLAlchemy 2.0 async, Alembic migrations (6, files-only discipline), request-scoped transactions; a full in-memory twin of every store so the app runs without a database for demos/tests (parity pinned by tests).</li>
+      <li><b>Security</b> — per-operator ops identities (no shared bootstrap tokens in steady state), encrypted EMR-token vault with delete-on-revoke, invitation rate limiting, deletion-attempt rate limiting, PHI-free audit log on reads and writes, secret scanning + dependency audits + license allowlists blocking in CI.</li>
+      <li><b>AI narrative layer</b> — validated, off the request path, BAA-gated and off by default; PHI never leaves without the gate; disclosure audited.</li>
+      <li><b>Observability &amp; ops</b> — PHI-free Prometheus metrics, request-ID-correlated structured logging, optional PHI-scrubbing error reporting seam, health/readiness endpoints, tested Postgres backup drill, deploy + restore runbooks, staging docker-compose, hardened multi-stage container images (built in CI).</li>
+      <li><b>Compliance pack</b> — HIPAA ops checklist, BAA inventory, incident-response runbook — with honest "covered-entity's responsibility" boundaries.</li>
+    </ul>
+
+    <h2 class="section">6 · Engineering quality system</h2>
+    <ul>
+      <li><b>Every portion ships through</b>: implementation → two independent adversarial reviews (security/privacy + correctness) → per-finding fixes with regression tests → full gates → merge. 26 ADRs record every decision; a lessons log turns each mistake into a preventive rule.</li>
+      <li><b>Gates (all blocking in CI)</b>: backend ruff + mypy-strict + pytest with <b>100% coverage including live-Postgres integration tests</b>; frontend strict TS + zero-warning ESLint + Prettier + 157 unit tests (≥90% coverage) + production build; <b>31 real-browser Playwright specs</b> against the built bundle with a self-checked zero-console-error gate; Android APK compile job; security/license scans; Docker builds.</li>
+    </ul>
+
+    <h2 class="section">7 · Business &amp; strategy assets (docs, merged)</h2>
+    <ul>
+      <li><b>Fundraising brief</b> (PDF, delivered) — built-today vs roadmap-complete, honest status for diligence.</li>
+      <li><b>Reimbursed-apps comparison</b> — 9 products reviewed with verified billing codes and FDA statuses; key finding: billing-verified RTM products all hold at least an FDA listing for their software → <b>our SaMD status is the gating question</b>.</li>
+      <li><b>Reimbursement sign-off packet</b> — the document your certified coder + compliance counsel + regulatory consultant sign; records the "BioMech is billed separately" scope decision; independently fact-checked (4 citation defects caught and fixed before it reaches a professional).</li>
+      <li><b>EMR sandbox registration runbook</b> — Epic + Oracle Health signup steps, exact scopes, redirect strategy.</li>
+      <li><b>Deploy-target comparison</b> — AWS EC2+RDS recommended (~$55–110/mo pilot, free self-serve BAA) vs Aptible (~$620) vs Atlantic.Net (~$552).</li>
+    </ul>
+
+    <h2 class="section page-break">8 · TO-DO — in flight right now</h2>
+    <table class="avoid-break">
+      <thead><tr><th>Item</th><th>Status</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td><b>Wave 3: EMR connect UI + native OAuth return</b> — provider picker, system-browser authorize, authenticated callback relay, App-Links handler, per-provider client IDs, scope trim</td><td class="st wip">Building</td><td>Implementation agent running; then the standard two-review loop → PR</td></tr>
+      </tbody>
+    </table>
+
+    <h2 class="section">9 · TO-DO — owner-side (only you can do these)</h2>
+    <table class="avoid-break">
+      <thead><tr><th>Item</th><th>Blocker/lead time</th><th>Where documented</th></tr></thead>
+      <tbody>
+        <tr><td><b>Play Console org account</b> for Advanced Health and Wellness Group ($25)</td><td>DUNS verification — your ~1–2 week wait</td><td>play-release-runbook §0</td></tr>
+        <tr><td><b>Generate the upload keystore</b> + add the 4 GitHub signing secrets</td><td>None — one command, 10 minutes</td><td>play-release-runbook §1–3</td></tr>
+        <tr><td><b>Epic + Oracle sandbox developer registrations</b> (free; independent of DUNS)</td><td>None — start anytime; client IDs drop into config</td><td>emr/sandbox-registration-runbook</td></tr>
+        <tr><td><b>Counsel review of the privacy policy draft</b></td><td>External legal</td><td>docs/legal/privacy-policy-draft.md</td></tr>
+        <tr><td><b>Hand the sign-off packet</b> to a certified coder + compliance counsel + regulatory consultant (the FDA/SaMD question)</td><td>External professional review — gates the whole Wave 4 build</td><td>product/reimbursement-signoff-packet.md</td></tr>
+        <tr><td><b>AWS account + BAA</b> (self-serve, free) when ready to deploy</td><td>None</td><td>ops/deploy-target-comparison.md</td></tr>
+        <tr><td><b>On-device smoke test</b> — <code>npx cap run android</code> or install the CI APK artifact; eyeball biometric unlock + shell</td><td>None — any Android phone</td><td>CI artifact: android-debug-apk</td></tr>
+        <tr><td><b>Apple DUNS/ID switch</b> → unlocks the iOS platform work</td><td>Your existing Apple process</td><td>roadmap Wave 2 note</td></tr>
+      </tbody>
+    </table>
+
+    <h2 class="section">10 · TO-DO — development backlog (in order)</h2>
+    <table class="avoid-break">
+      <thead><tr><th>#</th><th>Portion</th><th>Gated on</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td><b>AWS deploy portion</b> — ready-to-run EC2+RDS infra scripts + production runbook (TLS, secrets, backups, metrics scrape)</td><td>Nothing (buildable now; execution needs your AWS account)</td></tr>
+        <tr><td>2</td><td><b>Sandbox smoke test</b> — real Epic/Oracle round-trip through the new connect UI</td><td>Your sandbox client IDs (item in §9)</td></tr>
+        <tr><td>3</td><td><b>Production EMR enrollment</b> — Epic/Oracle production listing per vendor programs</td><td>Deployed backend with stable HTTPS origin + sandbox smoke passing</td></tr>
+        <tr><td>4</td><td><b>Wave 4: RTM reimbursement features</b> — adherence counter, interactive-time ledger, episode/setup events, billing-consent scope, PHI-safe evidence export</td><td><b>Professional sign-off packet approved</b> + FDA/SaMD determination — do not build before</td></tr>
+        <tr><td>5</td><td><b>iOS platform</b> — add-platform + App Store release prep (mirrors Android)</td><td>Your Apple DUNS/ID switch</td></tr>
+        <tr><td>6</td><td>Nice-to-haves parked: BioMech live API ingestion (when they publish docs), tablet store screenshots, commissioned branding to replace the baseline icon</td><td>External dependencies / discretionary</td></tr>
+      </tbody>
+    </table>
+
+    <h2 class="section">11 · Production go-live gates (real patient data)</h2>
+    <div class="callout amber avoid-break">
+      Before ANY real PHI: deployed backend on a BAA-signed host (AWS BAA is self-serve) ·
+      HIPAA ops checklist executed and validated · BAAs signed per the inventory (incl. the AI
+      vendor if narrative is enabled) · counsel-approved privacy policy live · Play Data-Safety
+      form re-verified against the shipped build. The app has processed <b>synthetic data only</b>
+      to date, is <b>not FDA-cleared</b>, and reimbursement features remain design-gated on
+      professional sign-off. These statements are the same ones in the fundraising brief —
+      consistency is deliberate.
+    </div>
+
+    <div class="callout avoid-break">
+      <b>Bottom line:</b> the product is code-complete for a Play internal-testing release today.
+      The critical path to real users runs through your DUNS → Play account, the keystore, a
+      deployed backend, and the compliance sign-offs — all external to the codebase, all
+      documented with runbooks.
+    </div>
+
+    <div class="foot">
+      Neuropathy Care Platform · Build inventory &amp; to-do · July 15, 2026 · Confidential.
+      Source of truth: docs/roadmap-status.md + 26 ADRs in the repository.
+    </div>
+  </body>
+</html>

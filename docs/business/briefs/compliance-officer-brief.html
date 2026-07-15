@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Neuropathy Platform — Compliance Officer Brief (Reimbursement)</title>
+    <style>
+      :root {
+        --ink: #12232e; --muted: #4a5b66; --faint: #7a8a94;
+        --teal: #0e7c86; --teal-dark: #0a5c64; --teal-wash: #e7f3f4;
+        --amber-wash: #fdf4e3; --amber-line: #d9a441;
+        --line: #d7e0e3; --green: #1f8a52;
+      }
+      * { box-sizing: border-box; }
+      html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        color: var(--ink); font-size: 9.8pt; line-height: 1.48; }
+      @page { size: Letter; margin: 15mm 14mm; }
+      h1,h2 { line-height: 1.2; margin: 0; }
+      p { margin: 0 0 7px; }
+      .cover { border-top: 6px solid var(--teal); padding-top: 16px; margin-bottom: 12px; }
+      .eyebrow { text-transform: uppercase; letter-spacing: .14em; font-size: 7.5pt; font-weight: 700; color: var(--teal); margin-bottom: 8px; }
+      .cover h1 { font-size: 19pt; margin-bottom: 6px; }
+      .cover .sub { font-size: 10.5pt; color: var(--muted); max-width: 54em; }
+      .meta { margin-top: 9px; font-size: 8pt; color: var(--faint); display: flex; gap: 18px; flex-wrap: wrap; }
+      h2.section { font-size: 11.5pt; color: var(--teal-dark); margin: 16px 0 4px; padding-bottom: 4px; border-bottom: 2px solid var(--teal-wash); }
+      ul { margin: 0 0 8px; padding-left: 20px; }
+      li { margin-bottom: 3px; }
+      table { width: 100%; border-collapse: collapse; margin: 6px 0 10px; font-size: 8.8pt; }
+      th, td { text-align: left; padding: 4px 7px; border-bottom: 1px solid var(--line); vertical-align: top; }
+      th { color: var(--faint); font-size: 7.6pt; text-transform: uppercase; letter-spacing: .05em; }
+      .callout { border: 1px solid var(--line); border-left: 4px solid var(--teal); background: var(--teal-wash);
+        border-radius: 6px; padding: 8px 12px; margin: 8px 0; font-size: 9pt; break-inside: avoid; }
+      .callout.amber { border-left-color: var(--amber-line); background: var(--amber-wash); }
+      .page-break { break-before: page; }
+      .avoid-break { break-inside: avoid; }
+      code { background: #f0f4f5; border-radius: 3px; padding: 0 4px; font-size: 8.6pt; }
+      .foot { margin-top: 14px; padding-top: 7px; border-top: 1px solid var(--line); font-size: 7.4pt; color: var(--faint); }
+    </style>
+  </head>
+  <body>
+    <div class="cover">
+      <div class="eyebrow">Compliance Officer Brief · Reimbursement Initiative · Confidential</div>
+      <h1>Orientation for the Reimbursement Compliance Review</h1>
+      <div class="sub">
+        This brief orients the reviewing compliance professional before opening the formal
+        <b>sign-off packet</b> (<code>docs/product/reimbursement-signoff-packet.md</code>). It
+        summarizes the product, the decisions requested, the evidence that exists, and the open
+        risks — so the credentialed review is fast and focused. It is prepared by the engineering
+        side and is <b>not billing, coding, or legal advice</b>; every determination below is
+        yours to make, not ours to assert.
+      </div>
+      <div class="meta">
+        <span><b>Requesting owner:</b> Advanced Health and Wellness Group (IP holder)</span>
+        <span><b>Prepared:</b> July 15, 2026</span>
+        <span><b>Review object:</b> the sign-off packet + the reimbursed-apps comparison</span>
+      </div>
+    </div>
+
+    <h2 class="section">1 · What the product is, in compliance terms</h2>
+    <ul>
+      <li>A <b>non-diagnostic</b> tracking and decision-support platform for neuropathy patients: patient-reported daily function (ADL check-ins), lab results imported from the patient's EMR with the patient's OAuth consent (SMART on FHIR), and balance/gait metrics parsed from BioMech assessment reports — fused into an explainable trend (direction, confidence, named signals).</li>
+      <li><b>Posture: enabler, not biller.</b> The intended model is that a servicing clinic — a covered entity — would bill; the platform would capture and evidence. The platform holder does not submit claims.</li>
+      <li><b>Recorded owner decision (2026-07-14): "BioMech is billed separately for now."</b> BioMech's own device/assessment billing is outside this initiative's scope. Consequence: the live device-status question attaches primarily to <b>this software</b> (SaMD analysis), with the BioMech hardware relevant only as a data-provenance dependency. Revisit trigger recorded if the relationship changes.</li>
+      <li>Status honestly stated: synthetic data only to date; not FDA-cleared or -listed; HIPAA-aligned architecture pending formal validation; no reimbursement-specific features have been built — <b>the build is deliberately blocked on your sign-off.</b></li>
+    </ul>
+
+    <h2 class="section">2 · The three decisions the packet asks of you (D1–D3)</h2>
+    <table class="avoid-break">
+      <thead><tr><th>#</th><th>Decision requested</th><th>What hangs on it</th></tr></thead>
+      <tbody>
+        <tr><td><b>D1</b></td><td>Approve / reject / modify the <b>RTM-first feature build</b> (adherence counter, interactive-time ledger, episode/setup events, billing-consent scope, PHI-safe evidence export)</td><td>Whether Wave 4 development starts at all, and in what shape</td></tr>
+        <tr><td><b>D2</b></td><td>Route and resolve the <b>FDA device-status question</b> — specifically whether this software qualifies as (or must become) a §201(h) device / SaMD for RTM's device-based codes, likely with a regulatory consultant</td><td>RTM device-supply codes are unavailable without a qualifying device; the market evidence (below) suggests at least an FDA listing is the norm</td></tr>
+        <tr><td><b>D3</b></td><td>Approve the <b>billing-consent model</b> — a distinct, revocable patient consent scope for billing-evidence use, separate from care-sharing consent</td><td>The consent architecture Wave 4 would implement</td></tr>
+      </tbody>
+    </table>
+    <p>The packet expresses every claims-related statement as an <b>assertion for your validation (A1–A8)</b>, never as a conclusion.</p>
+
+    <h2 class="section">3 · Regulatory landscape snapshot (all citations in the packet)</h2>
+    <ul>
+      <li><b>The device requirement:</b> CMS requires RTM/RPM data to come from a "medical device as defined by the FDA" (§201(h); CY2022 PFS final rule, 86 FR 65115). Whether/how that determination is adjudicated is <b>explicitly labeled an inference for your confirmation</b> in the packet — we found no CMS statement assigning it, which is precisely why D2 routes to a regulatory professional.</li>
+      <li><b>2026 code changes</b> (new lower-threshold RTM/RPM codes) are summarized with primary-source citations; the proposed Wave 4 capture is parameterized so day-count/minute thresholds are configuration, not code.</li>
+      <li><b>Market evidence</b> (9 products reviewed, vendor/FDA-database verified): every product with <b>vendor-documented RTM billing and an objective data stream holds at least an FDA listing for its own software</b>; the closest balance-measurement comparable (Sway Medical, 510(k)-cleared twice) monetizes through point-in-time testing codes rather than RTM; the pure software-led RTM cohort (Limber, Exer, OneStep) is our structural comparable set — per the owner's BioMech decision.</li>
+    </ul>
+
+    <h2 class="section">4 · Evidence &amp; controls that already exist (verifiable in the repo)</h2>
+    <table class="avoid-break">
+      <thead><tr><th>Control</th><th>State</th></tr></thead>
+      <tbody>
+        <tr><td>PHI-free audit log on reads and writes; audit history survives account deletion anonymously (regulatory retention by design)</td><td>Shipped, tested</td></tr>
+        <tr><td>Server-enforced, revocable patient consent per data stream; patient-held share-with-clinic that clinicians cannot override; revocation and deletion never blockable</td><td>Shipped, tested</td></tr>
+        <tr><td>Data provenance: every observation carries its source (self-report vs BioMech report vs EMR lab) — the raw material for RTM's self-report/device distinctions</td><td>Shipped</td></tr>
+        <tr><td>Account &amp; data deletion with password re-auth and rate limiting (Google Play requirement; HIPAA hygiene)</td><td>Shipped, reviewed</td></tr>
+        <tr><td>HIPAA ops checklist, BAA inventory, incident-response runbook (honest covered-entity boundaries)</td><td>Documented; validation pending</td></tr>
+        <tr><td>AI narrative behind an off-by-default, BAA-gated seam; PHI-free telemetry throughout</td><td>Shipped, tested</td></tr>
+        <tr><td>Adherence counter, interactive-time ledger, billing-consent scope, evidence export</td><td><b>Not built — awaiting your D1/D3</b></td></tr>
+      </tbody>
+    </table>
+
+    <h2 class="section">5 · Open risks needing your judgment</h2>
+    <ul>
+      <li><b>FDA/SaMD status (D2)</b> — the gating unknown. The packet lays out the factual inputs a regulatory consultant needs; the comparison shows the market's answer-shape.</li>
+      <li><b>Incident-to / general-supervision questions</b> for any clinic operating model, and the 2026 code-family selection — assertion set A1–A8 is where the CPC's red pen belongs.</li>
+      <li><b>No deployed environment / no BAAs yet</b> — the compliance pack defines the gates; nothing processes real PHI today, so your review is prospective, not remedial.</li>
+      <li><b>What we do NOT ask:</b> no one is asked to bless current billing (there is none), and nothing in the product coaches a clinic to bill — the docs are explicit that enablement ≠ authorization.</li>
+    </ul>
+
+    <h2 class="section">6 · Suggested review sequence (≈2–3 hours of material)</h2>
+    <table class="avoid-break">
+      <thead><tr><th>Step</th><th>Document</th><th>Focus</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>This brief</td><td>Orientation (you are here)</td></tr>
+        <tr><td>2</td><td><code>reimbursement-signoff-packet.md</code></td><td>The review object: D1–D3, assertions A1–A8, the §201(h) section, the sign-off sheet</td></tr>
+        <tr><td>3</td><td><code>reimbursed-apps-comparison.md</code></td><td>Market/FDA evidence backing the risk framing (independently fact-checked; unverifiable claims labeled)</td></tr>
+        <tr><td>4</td><td><code>reimbursement-analysis.md</code> + <code>reimbursement-operations.md</code></td><td>The underlying code mapping and operational playbook, if depth is wanted</td></tr>
+        <tr><td>5</td><td><code>docs/compliance/</code></td><td>HIPAA ops checklist, BAA inventory, incident-response — the go-live gates</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout amber avoid-break">
+      <b>Standing rule encoded in the project:</b> Wave 4 (reimbursement-enabling features) does not
+      begin until the signed packet comes back. Your "reject" or "modify" is as actionable to the
+      engineering side as an "approve" — the capture design is parameterized precisely so your
+      corrections are configuration, not rework.
+    </div>
+
+    <div class="callout avoid-break">
+      <b>Contact &amp; artifacts:</b> all referenced documents live in the repository under
+      <code>docs/product/</code> and <code>docs/compliance/</code>; the sign-off sheet is the last
+      section of the packet (name / credential / date / decision per D1–D3). Engineering questions
+      surfaced during review can be answered with repo pointers on request.
+    </div>
+
+    <div class="foot">
+      Neuropathy Care Platform · Compliance officer brief (reimbursement) · July 15, 2026 ·
+      Confidential · Prepared by engineering as orientation only — not billing, coding, or legal
+      advice; all determinations rest with the credentialed reviewers.
+    </div>
+  </body>
+</html>

@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Neuropathy Platform — Product &amp; Technology Brief</title>
+    <style>
+      :root {
+        --ink: #12232e;
+        --muted: #4a5b66;
+        --faint: #7a8a94;
+        --teal: #0e7c86;
+        --teal-dark: #0a5c64;
+        --teal-wash: #e7f3f4;
+        --amber-wash: #fdf4e3;
+        --amber-line: #d9a441;
+        --line: #d7e0e3;
+        --green: #1f8a52;
+        --paper: #ffffff;
+      }
+      * { box-sizing: border-box; }
+      html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      body {
+        margin: 0;
+        font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        color: var(--ink);
+        font-size: 10.5pt;
+        line-height: 1.5;
+        background: var(--paper);
+      }
+      @page {
+        size: Letter;
+        margin: 16mm 15mm 15mm 15mm;
+      }
+      h1, h2, h3 { line-height: 1.2; margin: 0; }
+      p { margin: 0 0 8px; }
+      .page { padding: 0; }
+      .page-break { break-before: page; }
+      .avoid-break { break-inside: avoid; }
+
+      /* Cover */
+      .cover {
+        border-top: 6px solid var(--teal);
+        padding-top: 18px;
+        margin-bottom: 20px;
+      }
+      .eyebrow {
+        text-transform: uppercase;
+        letter-spacing: 0.14em;
+        font-size: 8pt;
+        font-weight: 700;
+        color: var(--teal);
+        margin-bottom: 10px;
+      }
+      .cover h1 { font-size: 25pt; letter-spacing: -0.01em; margin-bottom: 8px; }
+      .cover .sub { font-size: 12pt; color: var(--muted); max-width: 46em; }
+      .cover .meta {
+        margin-top: 16px; font-size: 8.5pt; color: var(--faint);
+        display: flex; gap: 22px; flex-wrap: wrap;
+      }
+      .cover .meta b { color: var(--muted); font-weight: 600; }
+
+      h2.section {
+        font-size: 13pt;
+        color: var(--teal-dark);
+        margin: 22px 0 4px;
+        padding-bottom: 5px;
+        border-bottom: 2px solid var(--teal-wash);
+      }
+      h2.section .n {
+        display: inline-block; width: 1.5em; color: var(--teal); font-weight: 800;
+      }
+      .lead { color: var(--muted); margin-bottom: 10px; }
+
+      /* Two-column built vs vision */
+      .split { display: flex; gap: 14px; margin-top: 8px; }
+      .col {
+        flex: 1; border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
+      }
+      .col-head {
+        padding: 7px 12px; font-weight: 700; font-size: 9.5pt; color: #fff;
+      }
+      .col-head.now { background: var(--teal); }
+      .col-head.next { background: #6b7d87; }
+      .col ul { margin: 0; padding: 9px 12px 11px 26px; }
+      .col li { margin-bottom: 5px; font-size: 9.3pt; }
+      .col li::marker { color: var(--teal); }
+
+      .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; margin-top: 6px; }
+      .cap { break-inside: avoid; }
+      .cap h3 { font-size: 10pt; color: var(--ink); margin-bottom: 1px; }
+      .cap p { font-size: 9pt; color: var(--muted); margin: 0; }
+
+      .pill {
+        display: inline-block; font-size: 7.5pt; font-weight: 700; letter-spacing: 0.03em;
+        text-transform: uppercase; padding: 1px 6px; border-radius: 999px; vertical-align: middle;
+        margin-left: 6px;
+      }
+      .pill.live { background: #e4f4ea; color: var(--green); }
+      .pill.wip { background: var(--teal-wash); color: var(--teal-dark); }
+      .pill.plan { background: #eef1f3; color: var(--faint); }
+
+      table.roadmap { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 9pt; }
+      table.roadmap th, table.roadmap td {
+        text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top;
+      }
+      table.roadmap th { color: var(--faint); font-size: 8pt; text-transform: uppercase; letter-spacing: 0.05em; }
+      table.roadmap td.st { white-space: nowrap; font-weight: 700; }
+
+      .callout {
+        border: 1px solid var(--line); border-left: 4px solid var(--teal);
+        background: var(--teal-wash); border-radius: 6px; padding: 10px 13px; margin-top: 10px;
+        font-size: 9.3pt;
+      }
+      .callout.amber { border-left-color: var(--amber-line); background: var(--amber-wash); }
+      .callout h3 { font-size: 9.5pt; margin-bottom: 3px; color: var(--ink); }
+
+      .metrics { display: flex; gap: 10px; margin-top: 8px; }
+      .metric {
+        flex: 1; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; text-align: center;
+      }
+      .metric .v { font-size: 17pt; font-weight: 800; color: var(--teal-dark); line-height: 1; }
+      .metric .l { font-size: 8pt; color: var(--muted); margin-top: 4px; }
+
+      .foot {
+        margin-top: 18px; padding-top: 8px; border-top: 1px solid var(--line);
+        font-size: 7.6pt; color: var(--faint); line-height: 1.45;
+      }
+      .disc {
+        margin-top: 12px; font-size: 8pt; color: var(--muted);
+        border: 1px dashed var(--line); border-radius: 6px; padding: 9px 12px;
+      }
+      .disc b { color: var(--ink); }
+      a { color: var(--teal-dark); text-decoration: none; }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="cover">
+        <div class="eyebrow">Product &amp; Technology Brief · Confidential</div>
+        <h1>Neuropathy Care Platform</h1>
+        <div class="sub">
+          A privacy-by-design digital health platform that turns a patient's day-to-day function,
+          lab and EMR data, and objective balance/gait measurement into one explainable view of how
+          their neuropathy is trending — with a consent-gated window for their clinician.
+        </div>
+        <div class="meta">
+          <span><b>Prepared for:</b> grant &amp; investor discussions</span>
+          <span><b>IP owner:</b> Founder (independently owned)</span>
+          <span><b>Commercial licensee:</b> BioMech Health</span>
+          <span><b>Date:</b> July 2026</span>
+        </div>
+      </div>
+
+      <p class="lead">
+        The platform is built and running as a hardened, deployable web application today. This brief
+        states plainly <b>what exists and works now</b> versus <b>what the funded roadmap adds</b>, and
+        is explicit about regulatory and reimbursement status so the picture is one you can stand behind
+        in diligence.
+      </p>
+
+      <div class="metrics">
+        <div class="metric"><div class="v">V1 + 5</div><div class="l">Core product shipped, plus a 5-part production-readiness wave — all merged</div></div>
+        <div class="metric"><div class="v">3</div><div class="l">Independent data streams fused: patient-reported, lab/EMR, device</div></div>
+        <div class="metric"><div class="v">Reg-grade</div><div class="l">Adversarial review, 100% backend test coverage, real-browser UI verification</div></div>
+      </div>
+
+      <h2 class="section"><span class="n">1</span>The problem &amp; the approach</h2>
+      <p class="lead">
+        Peripheral neuropathy is common, progressive, and hard to track between visits. The signals that
+        matter — how steady someone is on their feet, how they manage stairs and daily activities, and
+        how their labs move — live in different places and rarely come together into a picture a patient
+        or clinician can act on. Care decisions often rest on sporadic, subjective snapshots.
+      </p>
+      <p>
+        This platform brings those signals into one place and, critically, explains its output rather than
+        issuing a black-box score. It fuses three independent streams — <b>patient-reported daily function
+        (ADL check-ins)</b>, <b>labs pulled from the patient's own EMR via SMART on FHIR</b>, and
+        <b>objective balance/gait measurement from BioMech reports</b> — into a transparent trajectory
+        (improving / stable / declining) with the specific signals and confidence behind it. It is a
+        tracking and decision-support tool, deliberately <b>non-diagnostic</b>.
+      </p>
+
+      <h2 class="section"><span class="n">2</span>Built and working today <span class="pill live">Live</span></h2>
+      <p class="lead">
+        Every item below is implemented, tested, and merged. To date the system runs on synthetic data
+        (no real patient data has been processed) — the architecture, flows, and safeguards are real and
+        exercised end-to-end.
+      </p>
+      <div class="grid2">
+        <div class="cap"><h3>Explainable trajectory engine</h3><p>Deterministic direction + confidence + the named signals driving it — no black box, non-diagnostic by design.</p></div>
+        <div class="cap"><h3>Patient daily check-ins (ADL)</h3><p>Fast walking / stairs / balance-confidence capture with same-day revision handling.</p></div>
+        <div class="cap"><h3>Lab intake (FHIR / LOINC)</h3><p>Standards-based lab ingestion with reference ranges, ready for clinical vocabularies.</p></div>
+        <div class="cap"><h3>EMR patient pull (SMART on FHIR)</h3><p>OAuth/PKCE patient-authorized import — the patient connects their own record.</p></div>
+        <div class="cap"><h3>BioMech report ingest</h3><p>Balance/gait PDF reports parsed into research-grade, comparable observations.</p></div>
+        <div class="cap"><h3>Consent-gated clinician view</h3><p>Panel, cross-source trend table, invitations — with a neutral privacy screen and patient-held consent.</p></div>
+        <div class="cap"><h3>AI narrative layer</h3><p>Plain-language summaries, validated and off the request path, gated behind a business-associate boundary.</p></div>
+        <div class="cap"><h3>Server-enforced feature consent</h3><p>Patients and clinics control data sources; the patient always holds the share-with-clinic switch.</p></div>
+        <div class="cap"><h3>Patient &amp; clinician web apps</h3><p>Accessible, mobile-width patient UI and a clinician surface, both verified in a real browser.</p></div>
+        <div class="cap"><h3>Production-ready operations</h3><p>Containerized deploy, health/readiness, PHI-free logging &amp; metrics, backup drill, incident-response runbook.</p></div>
+      </div>
+
+      <div class="callout avoid-break">
+        <h3>Engineering built to a regulated-software bar</h3>
+        Every change ships through an adversarial multi-reviewer process (security/privacy + correctness),
+        with 100% backend test coverage including live-database integration tests, real-browser end-to-end
+        verification of the UI, and a written decision record (ADR) for each architectural choice. Privacy
+        is designed in: protected health information never enters logs or metrics, and access is
+        consent-gated and audited. This is the kind of discipline diligence and compliance reviews look for.
+      </div>
+
+      <h2 class="section page-break"><span class="n">3</span>What completing the roadmap adds</h2>
+      <p class="lead">
+        Three waves remain. The contrast below is the heart of this brief: a solid, working core today,
+        and a clear, sequenced path to a market-ready, multi-platform, potentially reimbursable product.
+      </p>
+
+      <div class="split avoid-break">
+        <div class="col">
+          <div class="col-head now">Today — working core</div>
+          <ul>
+            <li>Deployable web platform (patient + clinician)</li>
+            <li>Three fused data streams, explainable output</li>
+            <li>Patient-authorized EMR connection (sandbox)</li>
+            <li>Consent, privacy, and audit built in</li>
+            <li>Production operations &amp; monitoring</li>
+            <li>Runs on synthetic data; pre-clinical</li>
+          </ul>
+        </div>
+        <div class="col">
+          <div class="col-head next">On roadmap completion</div>
+          <ul>
+            <li>Native <b>mobile apps</b> (Android first, then iOS) with biometric-locked, OS-secured sessions</li>
+            <li><b>Live EMR connectivity</b> to major systems (Epic / Oracle Health) via production registration</li>
+            <li>A <b>Remote Therapeutic Monitoring (RTM) reimbursement pathway</b> — capture &amp; evidence export that could let a clinic pursue coverage</li>
+            <li>Broader clinical validation footing and real-world data readiness</li>
+          </ul>
+        </div>
+      </div>
+
+      <table class="roadmap avoid-break">
+        <thead>
+          <tr><th>Wave</th><th>What it delivers</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>Core V1</b></td>
+            <td>The full platform above — data fusion, trajectory, patient &amp; clinician apps, AI narrative, consent.</td>
+            <td class="st" style="color:var(--green)">Shipped</td>
+          </tr>
+          <tr>
+            <td><b>Wave 1</b><br>Production readiness</td>
+            <td>Deployment/infra, real operator identities, enforced consent controls, observability &amp; compliance pack, browser-verified UIs.</td>
+            <td class="st" style="color:var(--green)">Shipped</td>
+          </tr>
+          <tr>
+            <td><b>Wave 2</b><br>Mobile apps</td>
+            <td>Native Android app (in progress now), then iOS; biometric unlock and OS-secured token storage. Same codebase, app-store presence.</td>
+            <td class="st" style="color:var(--teal-dark)">In progress</td>
+          </tr>
+          <tr>
+            <td><b>Wave 3</b><br>EMR registrations</td>
+            <td>Production enrollment with major EMR vendors so clinics connect real patient records, not just sandboxes.</td>
+            <td class="st" style="color:var(--faint)">Planned</td>
+          </tr>
+          <tr>
+            <td><b>Wave 4</b><br>Reimbursement enablement</td>
+            <td>Capture, adherence, and evidence-export features that could enable a covered clinic to pursue an RTM claim — pending compliance sign-off.</td>
+            <td class="st" style="color:var(--faint)">Planned</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2 class="section"><span class="n">4</span>Why it can matter commercially</h2>
+      <div class="grid2">
+        <div class="cap"><h3>A large, underserved population</h3><p>Peripheral neuropathy is highly prevalent — notably among people with diabetes — and existing tools rarely track functional decline between visits. (Founder to validate market sizing for the target segment.)</p></div>
+        <div class="cap"><h3>A reimbursement thesis, stated honestly</h3><p>The device + self-report streams map naturally to Remote Therapeutic Monitoring. The clinic bills; the platform enables the capture and evidence. This is a pathway to validate, not a guarantee.</p></div>
+        <div class="cap"><h3>Objective + subjective, together</h3><p>Pairing patient-reported function with objective balance/gait measurement is a differentiator over survey-only or wearable-only approaches.</p></div>
+        <div class="cap"><h3>Built for the compliance conversation</h3><p>Privacy-by-design, consent-gated access, and documented operations shorten the path through security review and payer/provider diligence.</p></div>
+      </div>
+
+      <div class="callout amber avoid-break">
+        <h3>Honest status &amp; what funding de-risks</h3>
+        The platform is <b>pre-clinical and pre-revenue</b>: it has run on synthetic data only, is
+        <b>not FDA-cleared</b>, and its HIPAA-aligned architecture still needs formal compliance validation
+        and executed business-associate agreements before handling real patient data. The reimbursement
+        pathway is a researched <b>thesis pending review by a certified professional coder and
+        compliance/legal counsel</b>, and a determination of the data source's regulatory (device) status.
+        Funding is what moves these from "designed for" to "validated": clinical piloting, formal
+        compliance certification, production EMR enrollment, and the reimbursement validation work.
+      </div>
+
+      <h2 class="section"><span class="n">5</span>The ask</h2>
+      <p>
+        We are seeking grant funding and/or investment to complete Waves 2–4 and stand up the validation
+        work above: finish the native mobile apps, secure production EMR connectivity, run a clinical pilot
+        on real (consented) data, complete formal HIPAA compliance and BAAs, and fund the professional
+        coding + legal review that would turn the reimbursement thesis into an actionable pathway. We would
+        welcome the chance to walk through the working product and the technical detail behind any section
+        of this brief.
+      </p>
+
+      <div class="disc">
+        <b>Disclaimer.</b> This document is a product and technology brief prepared for informational
+        discussion with prospective grantors and investors. It is <b>not</b> an offer or solicitation to
+        sell securities, <b>not</b> medical advice, and <b>not</b> billing, coding, or legal advice.
+        Statements about the roadmap, market, and reimbursement describe intended plans and researched
+        possibilities, not commitments or guarantees, and depend on validation, regulatory, and compliance
+        steps that are not yet complete. The platform has processed synthetic data only, is not FDA-cleared,
+        and is not certified as HIPAA-compliant. Any market references are illustrative context to be
+        independently verified. Reimbursement outcomes depend on payer rules and covered-entity billing and
+        cannot be assured.
+      </div>
+
+      <div class="foot">
+        Neuropathy Care Platform · Confidential product &amp; technology brief · July 2026 · IP independently
+        owned, licensed to BioMech Health. Prepared to accompany a live product walkthrough.
+      </div>
+    </div>
+  </body>
+</html>
