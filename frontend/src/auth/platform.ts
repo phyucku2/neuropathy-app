@@ -11,3 +11,10 @@ import { Capacitor } from '@capacitor/core';
 export function isNativePlatform(): boolean {
   return Capacitor.isNativePlatform();
 }
+
+/** The concrete platform: 'ios' | 'android' | 'web'. Used to route health-store reads
+ * (iOS → Apple Health, Android → Health Connect). Centralised here for the same
+ * test-mockability reason as `isNativePlatform`. */
+export function getPlatform(): string {
+  return Capacitor.getPlatform();
+}
