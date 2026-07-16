@@ -17,7 +17,9 @@ How the number is built:
   false alarm). With no domain present the score is `None`.
 - The **30-day delta** fits each sub-measure's series the same deterministic way
   the engine fits a line, evaluates the composite at `as_of` and ~30 days prior,
-  and applies the engine's noise threshold so wobble is not called a trend. The
+  and gates the direction with a fixed absolute point floor on the bounded 0-100
+  index (``MEANINGFUL_ABSOLUTE_POINTS``) so wobble is not called a trend — and,
+  crucially, a real move is never masked just because the score is high. The
   composite's own delta is the single source of truth for direction — card colour
   and arrow are both driven by it, so they can never contradict (a real defect the
   ADR retires by removing the multi-signal vote from this surface).
@@ -36,7 +38,6 @@ from app.schemas.trajectory import ConfidenceLevel, Direction
 from app.trajectory.directionality import Polarity, polarity_for
 from app.trajectory.points import ObservationPoint
 from app.trajectory.stats import (
-    MEANINGFUL_RELATIVE_CHANGE,
     MIN_POINTS,
     MIN_SPAN_DAYS,
     SECONDS_PER_DAY,
@@ -45,6 +46,19 @@ from app.trajectory.stats import (
 
 # Weights are LOCKED by the owner (ADR-0034 §1); symptom-forward on purpose.
 DELTA_WINDOW_DAYS = 30.0
+
+# The composite is a bounded 0-100 index, so its 30-day direction is gated by a FIXED
+# ABSOLUTE point floor — NOT a relative-change / _series_scale test on the [now, prior]
+# pair. A relative gate scales the "meaningful" bar with the current score's magnitude
+# (~5% of the score), so the same real move reads as noise near 100 but a trend near 10 —
+# masking a genuine decline for healthier patients, the exact harm ADR-0034 §3 warns
+# against. A fixed floor is magnitude-independent and symmetric: a +N and a -N move of the
+# same size classify identically at every baseline. A change of >= this many points on the
+# 0-100 index is "meaningful"; below it the direction is steady. This is an **illustrative
+# v1 threshold, pending clinical validation** (consistent with the ADR's honesty about its
+# illustrative, physician-signed config). Only the DIRECTION classification uses the floor;
+# the displayed `score_delta_30d` remains the true rounded composite delta.
+MEANINGFUL_ABSOLUTE_POINTS = 3.0
 
 
 class Domain(enum.StrEnum):
@@ -184,13 +198,6 @@ def _composite(domain_values: dict[Domain, list[float]]) -> float | None:
     return weighted / total_weight
 
 
-def _series_scale(values: list[float]) -> float:
-    """The magnitude a change is compared against — mirrors stats._series_scale."""
-    mean = sum(values) / len(values)
-    spread = max(values) - min(values)
-    return max(abs(mean), spread, 1e-9)
-
-
 def _confidence(
     present_domains: set[Domain], domain_age_days: dict[Domain, float]
 ) -> tuple[ConfidenceLevel, bool]:
@@ -243,13 +250,13 @@ def compute_index(
     composite_prior = _composite(prior_values)
     assert composite_prior is not None  # same present domains as composite_now (narrowing)
     raw_delta = composite_now - composite_prior
-    relative = raw_delta / _series_scale([composite_now, composite_now - raw_delta])
-    if abs(relative) <= MEANINGFUL_RELATIVE_CHANGE:
-        delta = 0
-    else:
-        delta = round(raw_delta)
-        if delta == 0:  # meaningful but sub-1pt — keep the sign so arrow/colour agree
-            delta = 1 if raw_delta > 0 else -1
+    # Gate the direction with a FIXED absolute point floor on the bounded 0-100 index, so
+    # a genuine decline is never masked at a high baseline (nor a wobble called a trend at
+    # a low one). Symmetric in sign and independent of the current score's magnitude. The
+    # displayed integer stays the TRUE rounded delta; only the direction uses the floor.
+    # A meaningful move is >= 3 points, so its rounded value is never 0 — arrow, colour,
+    # and word always agree in sign.
+    delta = 0 if abs(raw_delta) < MEANINGFUL_ABSOLUTE_POINTS else round(raw_delta)
 
     direction = (
         Direction.improving if delta > 0 else Direction.declining if delta < 0 else Direction.stable

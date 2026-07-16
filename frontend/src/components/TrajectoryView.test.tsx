@@ -22,7 +22,6 @@ const BASE: Trajectory = {
   score_delta_30d: 7,
   as_of: '2026-07-12',
   confidence_level: 'high',
-  direction_word: 'improving',
   data_is_stale: false,
 };
 
@@ -55,7 +54,6 @@ describe('TrajectoryHero — Neuropathy Status Index card', () => {
     hero({
       score: 61,
       score_delta_30d: -6,
-      direction_word: 'declining',
       confidence_level: 'medium',
     });
     const region = screen.getByRole('region', { name: /Your 30 day score/ });
@@ -67,7 +65,7 @@ describe('TrajectoryHero — Neuropathy Status Index card', () => {
   });
 
   it('renders a ZERO delta as steady with the → glyph (never colour alone)', () => {
-    hero({ score: 70, score_delta_30d: 0, direction_word: 'stable' });
+    hero({ score: 70, score_delta_30d: 0 });
     const region = screen.getByRole('region', { name: /Your 30 day score/ });
     expect(region).toHaveClass('traj', 'stable');
     expect(screen.getByText('→')).toBeInTheDocument();
@@ -88,7 +86,6 @@ describe('TrajectoryHero — Neuropathy Status Index card', () => {
       score_delta_30d: null,
       as_of: null,
       confidence_level: null,
-      direction_word: null,
     });
     const region = screen.getByRole('region', { name: /Your 30 day score: not enough data yet/ });
     expect(region).toHaveClass('traj', 'insufficient_data');

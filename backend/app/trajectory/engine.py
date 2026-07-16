@@ -346,6 +346,5 @@ def compute_trajectory(points: list[ObservationPoint], now: datetime) -> Traject
         score_delta_30d=index.score_delta_30d,
         as_of=index.as_of,
         confidence_level=index.confidence_level,
-        direction_word=index.direction,
         data_is_stale=index.data_is_stale,
     )

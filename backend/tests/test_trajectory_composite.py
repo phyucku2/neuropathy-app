@@ -150,6 +150,78 @@ def test_rising_balance_raises_the_score_and_reads_improving() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Direction is gated by a FIXED absolute point floor on the 0-100 index — NOT a
+# relative-change test that scales with the score's magnitude. A ~5-point move must
+# classify the SAME at a high baseline as at a low one (never masked when healthy).
+# ---------------------------------------------------------------------------
+
+
+def _one_domain_at(now_value: float, prior_value: float) -> list[ObservationPoint]:
+    """A single-measure balance series whose fitted composite moves now<-prior.
+
+    Balance is a 0-100, higher-is-better function measure, so the one-domain composite
+    equals the balance value: a clean lever to place the composite at any 30-day endpoints.
+    A 4-point straight line over ~30 days makes now/prior the exact endpoints.
+    """
+    return _series(
+        "biomech_balance_score",
+        [
+            prior_value,
+            prior_value + (now_value - prior_value) / 3,
+            now_value - (now_value - prior_value) / 3,
+            now_value,
+        ],
+        source="biomech",
+        newest_days_ago=0,
+        step_days=10,
+    )
+
+
+def test_five_point_decline_at_high_baseline_reads_declining_not_masked() -> None:
+    # The reviewer's probe: a genuine ~5-point decline near the top of the scale. A
+    # relative gate (~5% of ~95 = ~4.75) would swallow this and render stable/0 — the
+    # exact "mask a decline for healthier patients" harm ADR-0034 §3 warns against.
+    index = _index(_one_domain_at(now_value=95.0, prior_value=100.0))
+
+    assert index.score_delta_30d is not None and index.score_delta_30d < 0
+    assert index.direction is Direction.declining
+
+
+def test_five_point_decline_at_low_baseline_also_reads_declining() -> None:
+    # The SAME 5-point move at a low baseline — magnitude-independent, so also declining.
+    index = _index(_one_domain_at(now_value=15.0, prior_value=20.0))
+
+    assert index.score_delta_30d is not None and index.score_delta_30d < 0
+    assert index.direction is Direction.declining
+
+
+def test_five_point_rise_at_high_baseline_reads_improving() -> None:
+    index = _index(_one_domain_at(now_value=95.0, prior_value=90.0))
+
+    assert index.score_delta_30d is not None and index.score_delta_30d > 0
+    assert index.direction is Direction.improving
+
+
+def test_sub_threshold_wobble_reads_steady_at_high_and_low_baselines() -> None:
+    # A ~1-2 point wobble is below the fixed floor at BOTH baselines -> steady, delta 0.
+    for now_value, prior_value in ((98.0, 100.0), (10.0, 12.0), (99.0, 100.0), (11.0, 10.0)):
+        index = _index(_one_domain_at(now_value=now_value, prior_value=prior_value))
+        assert index.score_delta_30d == 0, (now_value, prior_value)
+        assert index.direction is Direction.stable, (now_value, prior_value)
+
+
+def test_direction_is_magnitude_independent_symmetric() -> None:
+    # A +5 and a -5 move of equal size classify with equal magnitude / opposite sign,
+    # at any baseline — the floor is symmetric and does not scale with the score.
+    up = _index(_one_domain_at(now_value=100.0, prior_value=95.0))
+    down = _index(_one_domain_at(now_value=95.0, prior_value=100.0))
+    assert up.score_delta_30d is not None and down.score_delta_30d is not None
+    assert up.score_delta_30d == -down.score_delta_30d
+    assert up.direction is Direction.improving
+    assert down.direction is Direction.declining
+
+
+# ---------------------------------------------------------------------------
 # Confidence: coverage + recency only (never adherence/health)
 # ---------------------------------------------------------------------------
 

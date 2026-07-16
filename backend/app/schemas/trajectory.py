@@ -71,10 +71,10 @@ class Trajectory(BaseModel):
     confidence_level: ConfidenceLevel | None = Field(
         default=None, description="High/Medium/Low from domain coverage + data recency."
     )
-    direction_word: Direction | None = Field(
-        default=None,
-        description="The composite's OWN direction (improving/stable/declining); card SSoT.",
-    )
+    # Direction is derived SOLELY from `score_delta_30d` (its sign) on every surface —
+    # the composite delta is the single source of truth (ADR-0034 §4). No separate
+    # direction field ships on the contract: a second "direction" could only ever
+    # contradict the delta for some future client.
     data_is_stale: bool = Field(
         default=False,
         description="True when a contributing domain is materially old — the UI says so.",

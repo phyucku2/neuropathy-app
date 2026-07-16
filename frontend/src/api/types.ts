@@ -76,7 +76,6 @@ export interface Trajectory {
   score_delta_30d: number | null;
   as_of: string | null;
   confidence_level: ConfidenceLevel | null;
-  direction_word: Direction | null;
   data_is_stale: boolean;
 }
 

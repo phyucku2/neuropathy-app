@@ -115,7 +115,6 @@ export const TRAJECTORY_IMPROVING: Trajectory = {
   score_delta_30d: 7,
   as_of: '2026-07-12',
   confidence_level: 'high',
-  direction_word: 'improving',
   data_is_stale: false,
 };
 
@@ -146,7 +145,6 @@ export const TRAJECTORY_DECLINING: Trajectory = {
   score_delta_30d: -6,
   as_of: '2026-07-11',
   confidence_level: 'medium',
-  direction_word: 'declining',
   data_is_stale: false,
 };
 
@@ -162,7 +160,6 @@ export const TRAJECTORY_INSUFFICIENT: Trajectory = {
   score_delta_30d: null,
   as_of: null,
   confidence_level: null,
-  direction_word: null,
   data_is_stale: false,
 };
 
