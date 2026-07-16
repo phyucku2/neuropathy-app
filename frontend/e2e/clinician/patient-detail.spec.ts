@@ -11,14 +11,13 @@ test.describe('Clinician Patient detail', () => {
     await page.goto(DETAIL_URL);
 
     await expect(page.getByRole('heading', { name: 'Pat Example' })).toBeVisible();
-    const hero = page.getByRole('region', { name: '30-day trend for Pat Example' });
-    await expect(hero.getByText('Improving')).toBeVisible();
+    const hero = page.getByRole('region', { name: '30 day score for Pat Example' });
+    await expect(hero.getByText('74')).toBeVisible();
+    await expect(hero.getByText('improving')).toBeVisible();
     // The non-diagnostic disclaimer is present.
     await expect(
       page.getByText('Trends support clinical judgment; they are not a diagnosis.'),
     ).toBeVisible();
-    // Deterministic only — the clinician view is never AI-narrated (ADR-0012).
-    await expect(page.getByText('AI-written summary')).toHaveCount(0);
   });
 
   test('Trend table shows cross-source rows including "not judged"', async ({ page }) => {

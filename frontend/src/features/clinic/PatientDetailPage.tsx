@@ -69,8 +69,8 @@ function TrajectoryTab({
     <div>
       <TrajectoryHero
         trajectory={trajectory}
-        eyebrow="30-day trend"
-        ariaLabel={`30-day trend for ${displayName}`}
+        eyebrow="30 Day Score"
+        ariaLabel={`30 day score for ${displayName}`}
       />
       <NonDiagnosticNote />
       {trajectory.signals.length > 0 && (

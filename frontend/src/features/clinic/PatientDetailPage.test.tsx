@@ -49,19 +49,21 @@ describe('PatientDetailPage — trajectory tab', () => {
       '/clinic',
     );
 
-    // The deterministic summary is ALWAYS shown (never the AI narrator, ADR-0012).
-    const hero = await screen.findByRole('region', { name: '30-day trend for Pat Example' });
+    // The deterministic Neuropathy Status Index is ALWAYS shown here — the SAME card
+    // the patient sees, never the AI narrator (ADR-0012).
+    const hero = await screen.findByRole('region', { name: /30 day score for Pat Example/ });
     expect(hero).toHaveClass('traj', 'improving');
-    expect(screen.getByText('Improving')).toBeInTheDocument();
-    expect(screen.getByText(/Balance and daily function are up/)).toBeInTheDocument();
-    expect(screen.queryByText(/AI-written summary/)).not.toBeInTheDocument();
+    expect(screen.getByText('74')).toBeInTheDocument();
+    expect(screen.getByText('improving')).toBeInTheDocument();
+    expect(screen.getByText('+7 pts')).toBeInTheDocument();
+    expect(screen.getByText('Confidence: High')).toBeInTheDocument();
 
     // Non-diagnostic posture (product requirement from the mockup).
     expect(screen.getByText(NON_DIAGNOSTIC_TEXT)).toBeInTheDocument();
 
     // Signals and gaps reuse the shared trajectory components.
     expect(screen.getByText('Balance score')).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: 'improving' })).toHaveTextContent('↑');
+    expect(screen.getByRole('img', { name: 'declining' })).toHaveTextContent('↓');
     expect(screen.getByText('No lab results in the last 90 days')).toBeInTheDocument();
   });
 

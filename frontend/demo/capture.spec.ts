@@ -4,7 +4,12 @@ import { fileURLToPath } from 'node:url';
 import { test } from '@playwright/test';
 import { installApiMocks } from '../e2e/support/mock-api';
 import { signedInApp } from '../e2e/support/fixtures';
-import { CLINICIAN_ME, PANEL_PATIENT_ID, TRAJECTORY_DECLINING } from '../e2e/support/mock-api';
+import {
+  CAPABILITIES_SYMPTOMS_ON,
+  CLINICIAN_ME,
+  PANEL_PATIENT_ID,
+  TRAJECTORY_DECLINING,
+} from '../e2e/support/mock-api';
 
 /**
  * Captures a real screenshot of each major screen of the BUILT app, served from the
@@ -36,14 +41,14 @@ test('capture — patient login', async ({ page }) => {
 test('capture — patient home (improving trend)', async ({ page }) => {
   await signedInApp(page);
   await page.goto('/');
-  await page.getByRole('region', { name: 'Your 30-day trend' }).waitFor();
+  await page.getByRole('region', { name: 'Your 30 day score' }).waitFor();
   await shot(page, '02-home-improving');
 });
 
 test('capture — patient home (declining trend)', async ({ page }) => {
   await signedInApp(page, { trajectory: TRAJECTORY_DECLINING });
   await page.goto('/');
-  await page.getByRole('region', { name: 'Your 30-day trend' }).waitFor();
+  await page.getByRole('region', { name: 'Your 30 day score' }).waitFor();
   await shot(page, '03-home-declining');
 });
 
@@ -55,7 +60,9 @@ test('capture — trends', async ({ page }) => {
 });
 
 test('capture — daily check-in', async ({ page }) => {
-  await signedInApp(page);
+  // Symptom capture ON so the demo check-in shows all three domains' inputs
+  // (function questions + pain + numbness), matching the full 3-domain NSI card.
+  await signedInApp(page, { capabilities: CAPABILITIES_SYMPTOMS_ON });
   await page.goto('/check-in');
   await page.waitForLoadState('networkidle');
   await shot(page, '05-checkin');

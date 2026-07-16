@@ -26,7 +26,7 @@ describe('role-aware routing', () => {
   it('routes a patient away from the clinician area', async () => {
     renderApp('/clinic');
     // The default /auth/me is the patient account: back to the patient home.
-    expect(await screen.findByText('Improving')).toBeInTheDocument();
+    expect(await screen.findByText('30 Day Score')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Your panel' })).not.toBeInTheDocument();
   });
 

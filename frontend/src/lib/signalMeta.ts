@@ -45,6 +45,10 @@ const REGISTRY: Record<string, SignalMeta> = {
   adl_stairs: { polarity: 'higher_is_better', label: 'Stairs' },
   adl_balance_confidence: { polarity: 'higher_is_better', label: 'Balance confidence' },
   adl_daily_score: { polarity: 'higher_is_better', label: 'Daily function score' },
+  // Symptom check-in (ADR-0034) — higher raw = worse, so lower is better. Distinct
+  // labels from the lab-side "pain" so the self-reported symptom never renders twice.
+  symptom_pain: { polarity: 'lower_is_better', label: 'nerve pain' },
+  symptom_numbness: { polarity: 'lower_is_better', label: 'numbness or tingling' },
   // BioMech report metrics (ADR-0014).
   biomech_balance_score: { polarity: 'higher_is_better', label: 'Balance score' },
   biomech_sway_velocity: { polarity: 'lower_is_better', label: 'Sway velocity' },
