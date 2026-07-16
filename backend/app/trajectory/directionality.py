@@ -66,6 +66,17 @@ _BIOMECH_GAIT_SPEED = SignalInfo(Polarity.higher_is_better, "walking speed")
 _BIOMECH_CADENCE = SignalInfo(Polarity.unknown, "steps per minute")
 _BIOMECH_STEP_LENGTH = SignalInfo(Polarity.unknown, "step length")
 _BIOMECH_STEP_SYMMETRY = SignalInfo(Polarity.higher_is_better, "walking symmetry")
+# Wearable/phone mobility metrics (source='wearable', ADR-0035 Phase 1). Polarity is the
+# clinical direction (which way is better); measurement FIDELITY is separate and lives in
+# each observation's quality (app/ingestion/wearable.py) — reliable for speed/step-length,
+# advisory for asymmetry/double-support (verified 2026-07-16).
+_WEARABLE_WALKING_SPEED = SignalInfo(Polarity.higher_is_better, "walking speed")
+_WEARABLE_STEP_LENGTH = SignalInfo(Polarity.higher_is_better, "step length")
+_WEARABLE_STEPS = SignalInfo(Polarity.higher_is_better, "daily steps")
+_WEARABLE_DISTANCE = SignalInfo(Polarity.higher_is_better, "walking distance")
+_WEARABLE_ASYMMETRY = SignalInfo(Polarity.lower_is_better, "walking asymmetry")
+_WEARABLE_DOUBLE_SUPPORT = SignalInfo(Polarity.lower_is_better, "double-support time")
+_WEARABLE_STEADINESS = SignalInfo(Polarity.higher_is_better, "walking steadiness")
 
 _REGISTRY: dict[str, SignalInfo] = {
     # Labs — LOINC codes first, then friendly keys.
@@ -110,6 +121,14 @@ _REGISTRY: dict[str, SignalInfo] = {
     "biomech_cadence": _BIOMECH_CADENCE,
     "biomech_step_length": _BIOMECH_STEP_LENGTH,
     "biomech_step_time_symmetry": _BIOMECH_STEP_SYMMETRY,
+    # Wearable/phone mobility (source='wearable', ADR-0035). Codes match schemas/wearable.py.
+    "wearable_walking_speed": _WEARABLE_WALKING_SPEED,
+    "wearable_step_length": _WEARABLE_STEP_LENGTH,
+    "wearable_steps": _WEARABLE_STEPS,
+    "wearable_walking_distance": _WEARABLE_DISTANCE,
+    "wearable_walking_asymmetry": _WEARABLE_ASYMMETRY,
+    "wearable_double_support": _WEARABLE_DOUBLE_SUPPORT,
+    "wearable_walking_steadiness": _WEARABLE_STEADINESS,
 }
 
 

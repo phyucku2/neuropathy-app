@@ -106,6 +106,15 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         default=False,
         enforced=True,
     ),
+    # Wearable/phone mobility import (ADR-0035 Phase 1). OPT-IN (default off): health-store
+    # data is PHI, so nothing is imported until the patient turns it on. enforced=True — the
+    # /wearable route only persists rows when it is on (enforced-flag honesty, ADR-0013).
+    CapabilitySpec(
+        key="ingest_wearable",
+        name="Wearable health data (phone & watch)",
+        default=False,
+        enforced=True,
+    ),
     CapabilitySpec(
         key="emr_connect", name="Medical record connection", default=True, enforced=True
     ),

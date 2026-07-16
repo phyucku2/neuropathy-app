@@ -185,10 +185,12 @@ def test_b2c_patient_sees_registry_defaults(client: TestClient) -> None:
     for state in states.values():
         assert state["managed_by"] == "patient"
         assert state["expires_at"] is None
-    # Back-compat keys default ON (absence of a row = default). `ingest_symptoms` is the
-    # one opt-in key (ADR-0034 Phase 1): default OFF until the owner turns it on.
+    # Back-compat keys default ON (absence of a row = default). The opt-in keys default OFF
+    # until the owner turns them on: `ingest_symptoms` (ADR-0034 Phase 1) and
+    # `ingest_wearable` (ADR-0035 Phase 1 — health-store data is PHI).
+    opt_in = {"ingest_symptoms", "ingest_wearable"}
     for key, state in states.items():
-        expected = key != "ingest_symptoms"
+        expected = key not in opt_in
         assert state["active"] is expected, key
 
 

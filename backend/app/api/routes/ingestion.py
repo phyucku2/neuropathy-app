@@ -38,6 +38,11 @@ from app.ingestion.adl import (
     symptom_check_in_to_observations,
 )
 from app.ingestion.labs import lab_import_key, lab_result_to_observation
+from app.ingestion.wearable import (
+    WearableValueError,
+    wearable_import_key,
+    wearable_sample_to_observation,
+)
 from app.models.audit import AuditEvent
 from app.models.observation import DataOrigin, Observation
 from app.repositories.observation import ObservationRepository
@@ -50,6 +55,7 @@ from app.schemas.ingestion import (
     ObservationPage,
 )
 from app.schemas.lab import LabStatus
+from app.schemas.wearable import WearableImportIn, WearableImportOut
 
 router = APIRouter(tags=["ingestion"])
 
@@ -120,6 +126,68 @@ async def import_labs(
         )
     )
     return LabImportOut(imported=imported, skipped=skipped)
+
+
+@router.post(
+    "/wearable",
+    response_model=WearableImportOut,
+    dependencies=[Depends(require_capability("ingest_wearable"))],
+)
+async def import_wearable(
+    body: WearableImportIn, current: PatientUserDep, service: EmrServiceDep
+) -> WearableImportOut:
+    """Import a batch of phone/watch mobility samples as research-grade rows (ADR-0035).
+
+    Gated by the opt-in `ingest_wearable` capability (default off) — health-store data is
+    PHI, so nothing is imported until the patient turns it on. Idempotent: each sample is
+    keyed by its platform UUID (or content identity), so re-syncing the same day skips rows
+    already on file. A value outside its metric's range is rejected for the whole batch
+    (422) — research-grade: never coerce or partially store a nonsensical measurement.
+    """
+    assert current.patient_id is not None  # guaranteed by require_patient
+    keys = [wearable_import_key(sample) for sample in body.samples]
+    # Build every row first, so a single bad value fails the batch BEFORE any write (a
+    # partial import would leave the analyzable dataset in a half-synced state).
+    prepared: list[tuple[str, Observation]] = []
+    seen: set[str] = set()
+    for sample, key in zip(body.samples, keys, strict=True):
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            row = wearable_sample_to_observation(
+                sample, patient_id=current.patient_id, import_key=key
+            )
+        except WearableValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        prepared.append((key, row))
+    # ONE existence probe for the whole batch (indexed column), not N queries.
+    on_file = await service.observations.existing_import_keys(
+        current.patient_id, [key for key, _ in prepared]
+    )
+    imported = 0
+    for key, row in prepared:
+        if key in on_file:
+            continue
+        await service.observations.add(row)
+        imported += 1
+    skipped = len(body.samples) - imported
+    # PHI write — one audit event for the batch, counts + platforms only, never values.
+    await service.audit.add(
+        AuditEvent(
+            actor_id=current.user_id,
+            actor_role=current.role.value,
+            action="import_wearable",
+            patient_id=current.patient_id,
+            detail={
+                "received": len(body.samples),
+                "imported": imported,
+                "skipped": skipped,
+                "platforms": sorted({sample.platform.value for sample in body.samples}),
+            },
+        )
+    )
+    return WearableImportOut(imported=imported, skipped=skipped)
 
 
 async def _current_same_day_rows(
