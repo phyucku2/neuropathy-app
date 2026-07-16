@@ -67,8 +67,8 @@ Tiers: **Strong** (leads the field) · **Moderate** · **Emerging** · **Not-yet
 | **Frequency / Responsiveness** | **Strong** (design) | A **daily curve** vs. everyone else's episodic snapshot — the biggest structural advantage for trend detection. *But* responsiveness/MCID are **unproven** for our index. |
 | **Multimodal fusion** | **Strong** (design) | A single composite fusing all streams — the differentiating **gap** (none surfaced in the landscape). *Novelty not yet systematically confirmed.* |
 | **Measurement rigor** | **Not-yet-established** | v1 uses **hand-set weights**, `validated_instrument: false`, no reliability/validity/responsiveness study. This is the honest weak point — comparators *are* validated; we are not, yet. |
-| **Burden** | Moderate | Daily symptoms + daily BioMech gait+balance is **heavier** than a periodic questionnaire. Mitigated by **passive** watch ADLs (zero burden) and future **CAT/IRT** on symptoms, but the daily clinical test is real burden. |
-| **Real-world validity** | Moderate→Strong (conditional) | It *has* a real-world tier (phone/watch ADL) — most measures are clinic/recall only. **Conditional on** phone-gait accuracy holding in a DPN population (currently unverified) and leaning on the reliable metrics (speed/step-length). |
+| **Burden** | Moderate | Daily symptoms + daily BioMech gait+balance is **heavier** than a periodic questionnaire. Mitigated by *planned* **passive** phone/watch ADLs (zero burden) and *future* **CAT/IRT** on symptoms (both design direction per ADR-0035 / feasibility doc), but the daily clinical test is real burden. |
+| **Real-world validity** | Moderate→Strong (conditional) | It *has* a real-world tier in the design (self-reported ADL today; phone/watch per ADR-0035) — most measures are clinic/recall only. **Conditional on** phone-gait accuracy holding in a DPN population (currently unverified) and leaning on the reliable metrics (speed/step-length). |
 
 ### Overall verdict — *leading on design, pending on validation*
 

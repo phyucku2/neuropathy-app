@@ -19,7 +19,9 @@ three kinds of signal into one explainable, patient-owned picture:
 
 - **Patient-reported function & symptoms** — a short daily check-in (walking, stairs, balance
   confidence; and, behind a feature toggle, validated-aligned pain and numbness items).
-- **Objective measures** — balance/gait metrics parsed from BioMech assessment reports.
+- **Objective measures** — balance/gait metrics from BioMech assessment reports (the V1 PDF
+  parser targets an assumed export format; ingesting real BioMech reports is pending an
+  API-first rebuild — see `../product/biomech-data-streams.md` §3).
 - **Labs** — imported from the patient's EMR via SMART-on-FHIR with the patient's consent.
 
 The headline surface is the **Neuropathy Status Index** — a composite 0–100 score with a
@@ -137,8 +139,8 @@ Roughly chronological; each item is one or more merged PRs with its ADRs.
 ## 6. Decision records & the brainstorm protocol
 
 Every non-trivial choice is an **ADR** (33+ in [`../decisions/`](../decisions/)) — the durable
-"why," including the ones that reversed a prior decision (ADR-0034 supersedes ADR-0033's
-function-only score). Anything product-shaped goes through a **mandatory brainstorming
+"why," including the ones that reversed a prior decision (ADR-0034 replaced the earlier
+function-only "30 Day Score" design — which was never recorded as its own ADR). Anything product-shaped goes through a **mandatory brainstorming
 protocol** (CLAUDE.md §6) that applies 17 stakeholder lenses (physician, patient, BioMech,
 HIPAA, SOC 2, FDA/legal, accessibility, reimbursement, data science, clinical validation, …)
 and is captured as a dated file in [`../brainstorm/`](../brainstorm/). The clinical-grade score

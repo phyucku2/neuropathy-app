@@ -17,8 +17,8 @@ actually moves in daily life). The owner's direction sharpens the real-world tie
 > **The phone is the base; the watch is a good-to-have option.** And we need to bridge to
 > both **Apple Health** and **Android Health**.
 
-Today our "ADLs" are the **self-reported** 0–4 check-in items (`adl_walking/stairs/
-balance_confidence`, ADR-0006). This ADR moves the ADL tier toward **sensor-derived
+Today our "ADLs" are the **self-reported** 0–4 check-in items (`adl_walking`, `adl_stairs`,
+`adl_balance_confidence`, ADR-0006). This ADR moves the ADL tier toward **sensor-derived
 real-world function** imported from the platform health stores, with self-report as the
 fallback where sensing isn't available.
 
@@ -123,8 +123,9 @@ the phase that adds them, not before.
   Health Connect plugin, permissions/consent UI, import steps/distance/speed/active-minutes
   → ADL **volume** signals.
 - **Phase 3 — add iOS + HealthKit.** Add the Capacitor **iOS platform** (not present today)
-  and the HealthKit plugin to unlock the **gait-quality mobility metrics** (the
-  BioMech-parallel set) — the strongest form of "phone as base."
+  and the HealthKit plugin to unlock the iOS mobility metrics — reliably **speed +
+  step-length** (the true BioMech parallel, per §Context), with asymmetry/double-support/
+  steadiness as **advisory** — the strongest form of "phone as base."
 - **Phase 4 — watch-optional enhancements.** HR/HRV, cardio fitness, continuous sampling
   where a paired watch is present.
 

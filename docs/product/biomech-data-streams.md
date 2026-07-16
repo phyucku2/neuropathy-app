@@ -22,8 +22,10 @@ materials received from the owner (company deck + live Balance/Gait test reports
   **once daily: one gait test + one balance test.** This is the high-value case: a genuine
   **daily functional measurement stream**, not a gamified engagement score.
 - **Two tiers, and both matter (owner's framing).** BioMech is the **clinical tier**
-  (structured, device-grade gait/balance). Our **ADLs are the real-world tier**, sourced
-  from a **wearable (watch)** — passive, continuous, ecological function. The product's
+  (structured, device-grade gait/balance). Our **ADLs are the real-world tier** — the
+  **target design** sources them from the **phone (base) + watch (optional)** health store
+  (ADR-0035; today ADLs are the self-reported check-in items) — passive, continuous,
+  ecological function. The product's
   outcome story for the **aging population** is proving a patient improves in **both**:
   clinical scores (BioMech) *and* real-world ADL scores (watch). Clinical gain that shows
   up in daily living is the payer/value-based-care argument (falls avoided, aging in
@@ -157,8 +159,9 @@ bundled into this review.
 Streams 1–8 are **BioMech (clinical tier)**; stream 9 is **ours (real-world tier)** — the
 two sources the outcome story pairs. Our research-grade `Observation` model already
 accommodates all of this without a schema change: new `code`s per metric,
-`origin=device_measured` (BioMech/API) or `device_measured` from the watch, the **test
-condition** as a coded qualifier in `code`/`quality`, and BioMech's **% Normal** stored
+`origin=device_measured` for both the BioMech API feed and the wearable health stream
+(`source=wearable`, ADR-0035), the **test condition** as a coded qualifier in
+`code`/`quality`, and BioMech's **% Normal** stored
 alongside the raw value. Streams 3 and 5 are the neuropathy-differentiating clinical
 signals; stream 9 is what proves the clinical gain reached daily life.
 

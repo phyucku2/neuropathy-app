@@ -19,7 +19,7 @@ review findings fixed), **Merged** (on `main`).
 | AI narrative layer — validated, BAA-gated, off-request-path (ADR-0011) | ✅ | ✅ | ✅ |
 | Clinician surface — consent-gated panel/views, invitations (ADR-0012) | ✅ | ✅ 100% cov | ✅ PR #3 |
 | Feature toggles API — server-enforced capabilities, B2C + clinician-managed, consent-aware (ADR-0013) | ✅ | ✅ 100% cov | ✅ PR #4 |
-| BioMech PDF ingest module (V1) — balance/gait report PDFs into research-grade Observations (ADR-0014) | ✅ | ✅ | ✅ PR #5 |
+| BioMech PDF ingest module (V1) — balance/gait report PDFs into research-grade Observations (ADR-0014) | ✅ | ✅ | ⚠️ PR #5 — built & tested against an **assumed** report format; does **NOT** parse real BioMech reports (space-tabular, different metric set). Real-report support pending API-first pivot — see biomech-data-streams.md §3 |
 | Patient graphing/trends UI — from mockups/patient-app.html against the existing API (ADR-0015) | ✅ | ✅ | ✅ PR #6 |
 | Clinician UI — from mockups/clinician-app.html (panel, cross-source trend table, non-diagnostic) (ADR-0016) | ✅ | ✅ | ✅ PR #7 |
 | Hardening pass — invitation rate limiting, durable pending-auth store, encrypted token vault with deletion-on-revoke, hardened ops gate, blocking Python security/license scans (ADR-0017) | ✅ | ✅ 100% cov | ✅ PR #8 |
@@ -103,5 +103,7 @@ need no new backend surface.
 
 ## Deferred (not scheduled)
 
-- BioMech API/SDK live ingestion (decision 2026-07-14: PDF stays primary; revisit
-  when BioMech provides API/SDK documentation — the ADR-0014 seam absorbs it)
+- BioMech API/SDK live ingestion (**superseded 2026-07-16**: real reports don't match the
+  V1 PDF parser's assumed format, so the recommendation is now **API-first**
+  (`device_measured`), PDF only as a to-be-rebuilt fallback — see biomech-data-streams.md
+  §3/§7; owner says API access is probably available)

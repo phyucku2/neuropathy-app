@@ -9,7 +9,9 @@ duplicate them.
 A non‑diagnostic tracking and decision‑support platform for neuropathy patients: patient‑
 reported daily function (ADL check‑ins), lab results imported from the patient's EMR via
 SMART‑on‑FHIR with the patient's consent, and balance/gait metrics from BioMech assessment
-reports — fused into an explainable trend (direction, confidence, named signals). IP is owned
+reports (V1 ingest targets an assumed format; real‑report support pending an API‑first
+rebuild — see product/biomech‑data‑streams.md §3) — fused into an explainable trend
+(direction, confidence, named signals). IP is owned
 by **Advanced Health and Wellness Group**; **BioMech Health** is the licensee.
 
 Read `CLAUDE.md` (hard rules) before anything else.
