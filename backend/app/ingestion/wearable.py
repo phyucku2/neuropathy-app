@@ -102,11 +102,18 @@ def wearable_import_key(sample: WearableSampleIn) -> str:
     value), so a value never enters the analyzable dataset twice.
     """
     if sample.external_id:
-        return f"wearable:{sample.platform.value}:id:{sample.external_id}"
+        # Bind the metric even in the id branch: a client may (mistakenly) derive the id
+        # from a walking-BOUT rather than the per-metric sample, so two different metrics
+        # can share an external_id — without the metric they would collide and silently
+        # drop one metric's datum (mirrors the content key + biomech_import_key, which both
+        # bind the metric).
+        return f"wearable:{sample.platform.value}:id:{sample.external_id}:{sample.metric.value}"
+    # Provenance is part of identity: the same value at the same instant from a phone vs a
+    # watch are distinct observations, so device + phone_derived join the content key.
     return (
         f"wearable:{sample.platform.value}:content:{sample.metric.value}"
         f":{_as_utc(sample.effective_start).isoformat()}:{_as_utc(sample.effective_end).isoformat()}"
-        f":{sample.value}"
+        f":{sample.value}:{sample.source_device.value}:{sample.phone_derived}"
     )
 
 
@@ -127,11 +134,16 @@ def wearable_sample_to_observation(
     never coerce).
     """
     spec = WEARABLE_METRICS[sample.metric]
-    if sample.effective_end < sample.effective_start:
+    # Compare NORMALIZED bounds: a client may send one bound naive and the other aware,
+    # and comparing offset-naive to offset-aware datetimes raises TypeError (an uncaught
+    # 500). Normalize first so a mixed-tz window fails cleanly as a 422, not a crash.
+    if _as_utc(sample.effective_end) < _as_utc(sample.effective_start):
         raise WearableValueError(f"{spec.display}: effective_end is before effective_start")
     if not (spec.min_value <= sample.value <= spec.max_value):
+        # The measured VALUE is PHI and must never cross into an error body/log (audit
+        # contract). Report only the metric + the non-PHI catalog range.
         raise WearableValueError(
-            f"{spec.display}: {sample.value:g} is outside the expected range "
+            f"{spec.display}: value is outside the expected range "
             f"{spec.min_value:g}–{spec.max_value:g}"
         )
     quality: dict[str, object] = {

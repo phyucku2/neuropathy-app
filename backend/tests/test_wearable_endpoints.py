@@ -181,10 +181,37 @@ async def test_out_of_range_value_fails_whole_batch_before_any_write(
     assert resp.status_code == 422
     # The good sample was NOT partially written — the batch is all-or-nothing.
     assert await service.observations.list_for_patient(PATIENT.patient_id) == []
+    # The measured value never appears in the 422 body (PHI contract).
+    assert "9" not in resp.json()["detail"]
 
 
 def test_unknown_metric_is_422(client: TestClient, enabled: CapabilityService) -> None:
     assert _post(client, _sample(metric="wearable_heart_rate")).status_code == 422
+
+
+def test_two_metrics_sharing_an_external_id_both_import(
+    client: TestClient, enabled: CapabilityService
+) -> None:
+    # A bout-derived external_id shared across metrics must NOT collapse to one row.
+    resp = _post(
+        client,
+        _sample(metric="wearable_walking_speed", value=1.1, external_id="BOUT-1"),
+        _sample(metric="wearable_step_length", value=0.6, external_id="BOUT-1"),
+    ).json()
+    assert resp == {"imported": 2, "skipped": 0}
+
+
+def test_bad_value_on_a_duplicate_key_still_422s(
+    client: TestClient, enabled: CapabilityService, service: EmrService
+) -> None:
+    # Two samples share a key (same metric + external_id); the second is out of range.
+    # Validation runs before de-dup, so the batch still fails cleanly (all-or-nothing).
+    resp = _post(
+        client,
+        _sample(metric="wearable_walking_speed", value=1.1, external_id="DUP"),
+        _sample(metric="wearable_walking_speed", value=9.0, external_id="DUP"),
+    )
+    assert resp.status_code == 422
 
 
 # --- guards ----------------------------------------------------------------------------

@@ -151,15 +151,18 @@ async def import_wearable(
     prepared: list[tuple[str, Observation]] = []
     seen: set[str] = set()
     for sample, key in zip(body.samples, keys, strict=True):
-        if key in seen:
-            continue
-        seen.add(key)
+        # Validate EVERY sample (mapping is pure + cheap) BEFORE de-duplicating, so a bad
+        # value fails the whole batch (422) even when it shares a key with an earlier valid
+        # sample — the all-or-nothing invariant. The duplicate row is dropped by `seen`.
         try:
             row = wearable_sample_to_observation(
                 sample, patient_id=current.patient_id, import_key=key
             )
         except WearableValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if key in seen:
+            continue
+        seen.add(key)
         prepared.append((key, row))
     # ONE existence probe for the whole batch (indexed column), not N queries.
     on_file = await service.observations.existing_import_keys(

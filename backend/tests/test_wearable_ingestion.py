@@ -151,12 +151,39 @@ def test_inverted_window_raises() -> None:
         )
 
 
+def test_mixed_tz_window_raises_valueerror_not_typeerror() -> None:
+    # One bound naive, one aware — must fail cleanly as a WearableValueError (→ 422),
+    # never a TypeError from comparing offset-naive to offset-aware (→ 500).
+    naive_start = datetime(2026, 7, 15, 8, 5)  # naive, and AFTER the aware end
+    with pytest.raises(WearableValueError):
+        wearable_sample_to_observation(
+            _sample(start=naive_start, end=END), patient_id=PATIENT_ID, import_key="k"
+        )
+
+
+def test_out_of_range_message_carries_no_measured_value() -> None:
+    # The value is PHI; the error message must not echo it (audit/PHI contract).
+    with pytest.raises(WearableValueError) as exc:
+        wearable_sample_to_observation(
+            _sample(WearableMetric.walking_speed, 8.7), patient_id=PATIENT_ID, import_key="k"
+        )
+    assert "8.7" not in str(exc.value)
+
+
 # --- idempotency key -------------------------------------------------------------------
 
 
 def test_import_key_prefers_platform_uuid() -> None:
     key = wearable_import_key(_sample(external_id="HK-abc"))
-    assert key == "wearable:apple_health:id:HK-abc"
+    assert key == "wearable:apple_health:id:HK-abc:wearable_walking_speed"
+
+
+def test_same_external_id_different_metric_does_not_collide() -> None:
+    # A client may derive external_id from a walking-BOUT, so two metrics can share it.
+    # The metric is bound into the key so they never collapse into one (silent data loss).
+    speed = wearable_import_key(_sample(WearableMetric.walking_speed, external_id="BOUT-1"))
+    length = wearable_import_key(_sample(WearableMetric.step_length, external_id="BOUT-1"))
+    assert speed != length
 
 
 def test_import_key_falls_back_to_content_identity() -> None:
