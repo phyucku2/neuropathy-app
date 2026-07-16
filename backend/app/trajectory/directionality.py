@@ -60,12 +60,17 @@ _SYMPTOM_NUMBNESS = SignalInfo(Polarity.lower_is_better, "numbness or tingling")
 # METRICS registry (app/biomech/parser.py); a parity test keeps the two in agreement.
 # Cadence and step length have no clear better/worse direction — reported, not judged.
 _BIOMECH_BALANCE = SignalInfo(Polarity.higher_is_better, "balance")
-_BIOMECH_SWAY_VELOCITY = SignalInfo(Polarity.lower_is_better, "sway speed")
-_BIOMECH_SWAY_AREA = SignalInfo(Polarity.lower_is_better, "sway area")
-_BIOMECH_GAIT_SPEED = SignalInfo(Polarity.higher_is_better, "walking speed")
+_BIOMECH_BALANCE_SPEED = SignalInfo(Polarity.higher_is_better, "balance speed")
+_BIOMECH_BALANCE_MOVEMENT = SignalInfo(Polarity.higher_is_better, "balance steadiness")
+_BIOMECH_BALANCE_POSITION = SignalInfo(Polarity.higher_is_better, "balance position")
+_BIOMECH_GAIT_SCORE = SignalInfo(Polarity.higher_is_better, "gait score")
 _BIOMECH_CADENCE = SignalInfo(Polarity.unknown, "steps per minute")
-_BIOMECH_STEP_LENGTH = SignalInfo(Polarity.unknown, "step length")
-_BIOMECH_STEP_SYMMETRY = SignalInfo(Polarity.higher_is_better, "walking symmetry")
+_BIOMECH_STEP_LENGTH = SignalInfo(Polarity.higher_is_better, "step length")
+_BIOMECH_TOTAL_STEPS = SignalInfo(Polarity.unknown, "total steps")
+_BIOMECH_IMPACT_SYMMETRY = SignalInfo(Polarity.higher_is_better, "walking symmetry")
+_BIOMECH_SUPPORT_RATIO = SignalInfo(Polarity.higher_is_better, "support balance")
+_BIOMECH_SINGLE_SUPPORT_SYM = SignalInfo(Polarity.higher_is_better, "single-support symmetry")
+_BIOMECH_PELVIC_NEUTRAL = SignalInfo(Polarity.higher_is_better, "pelvic alignment")
 # Wearable/phone mobility metrics (source='wearable', ADR-0035 Phase 1). Polarity is the
 # clinical direction (which way is better); measurement FIDELITY is separate and lives in
 # each observation's quality (app/ingestion/wearable.py) — reliable for speed/step-length,
@@ -115,12 +120,17 @@ _REGISTRY: dict[str, SignalInfo] = {
     # BioMech report metrics (source='biomech'), friendly keys — code_system stays null
     # like the other non-lab codes. Trends read as "balance up 8 over 30 days".
     "biomech_balance_score": _BIOMECH_BALANCE,
-    "biomech_sway_velocity": _BIOMECH_SWAY_VELOCITY,
-    "biomech_sway_area": _BIOMECH_SWAY_AREA,
-    "biomech_gait_speed": _BIOMECH_GAIT_SPEED,
+    "biomech_balance_speed_normal": _BIOMECH_BALANCE_SPEED,
+    "biomech_balance_movement_normal": _BIOMECH_BALANCE_MOVEMENT,
+    "biomech_balance_position_normal": _BIOMECH_BALANCE_POSITION,
+    "biomech_gait_score": _BIOMECH_GAIT_SCORE,
     "biomech_cadence": _BIOMECH_CADENCE,
     "biomech_step_length": _BIOMECH_STEP_LENGTH,
-    "biomech_step_time_symmetry": _BIOMECH_STEP_SYMMETRY,
+    "biomech_total_steps": _BIOMECH_TOTAL_STEPS,
+    "biomech_impact_symmetry": _BIOMECH_IMPACT_SYMMETRY,
+    "biomech_support_ratio": _BIOMECH_SUPPORT_RATIO,
+    "biomech_single_support_symmetry": _BIOMECH_SINGLE_SUPPORT_SYM,
+    "biomech_pelvic_tilt_neutral": _BIOMECH_PELVIC_NEUTRAL,
     # Wearable/phone mobility (source='wearable', ADR-0035). Codes match schemas/wearable.py.
     "wearable_walking_speed": _WEARABLE_WALKING_SPEED,
     "wearable_step_length": _WEARABLE_STEP_LENGTH,

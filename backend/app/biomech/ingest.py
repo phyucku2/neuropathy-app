@@ -34,14 +34,21 @@ def _as_utc(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value
 
 
-def biomech_import_key(kind: ReportKind, assessment_at: datetime, metric: BiomechMetric) -> str:
+def biomech_import_key(
+    kind: ReportKind,
+    assessment_at: datetime,
+    metric: BiomechMetric,
+    condition: str | None = None,
+) -> str:
     """Stable idempotency key for one metric of one report: its content identity
-    (report kind + assessment datetime + code + value + unit), mirroring
-    `lab_import_key`. Re-uploading the same report yields the same keys, so already-
-    imported rows are skipped instead of double-counted in the analyzable dataset."""
+    (report kind + assessment datetime + balance condition + code + value + unit),
+    mirroring `lab_import_key`. Re-uploading the same report yields the same keys, so
+    already-imported rows are skipped instead of double-counted. The **condition** is in
+    the key so two same-day balance tests under different protocols (eyes open vs eyes
+    closed) never collide when they happen to share a value."""
     return (
         f"content:biomech:{kind.value}:{_as_utc(assessment_at).isoformat()}"
-        f":{metric.code}:{metric.value}:{metric.unit}"
+        f":{condition or ''}:{metric.code}:{metric.value}:{metric.unit}"
     )
 
 
@@ -50,7 +57,7 @@ def biomech_metric_to_observation(
     *,
     kind: ReportKind,
     assessment_at: datetime,
-    device: str | None,
+    condition: str | None = None,
     patient_id: uuid.UUID,
     import_key: str,
     recorded_at: datetime | None = None,
@@ -59,16 +66,19 @@ def biomech_metric_to_observation(
 
     source=biomech, origin=document_imported (extracted from an imported document),
     status=final, effective_at = the report's assessment datetime (naive -> UTC).
-    Displays come only from the closed metric registry (never document free text);
-    the device/source line, if any, is provenance in `quality`/`payload`, never a label.
+    Displays come only from the closed metric registry (never document free text); the
+    balance **condition** (e.g. "eyes open"/"eyes closed"), if any, is provenance in
+    `quality`/`payload`, never a label.
     """
     quality: dict[str, object] = {
         "source_system": _SOURCE_SYSTEM,
         "extraction": _EXTRACTION,
         "report_kind": kind.value,
     }
-    if device is not None:
-        quality["device"] = device
+    payload: dict[str, object] = {"display": metric.display, "report_kind": kind.value}
+    if condition is not None:
+        quality["condition"] = condition
+        payload["condition"] = condition
     return Observation(
         patient_id=patient_id,
         source=SourceType.biomech,
@@ -86,7 +96,7 @@ def biomech_metric_to_observation(
         recorded_by_role="patient",
         import_key=import_key,
         quality=quality,
-        payload={"display": metric.display, "report_kind": kind.value},
+        payload=payload,
     )
 
 

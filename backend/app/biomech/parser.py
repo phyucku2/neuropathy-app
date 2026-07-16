@@ -1,19 +1,25 @@
-"""Parse extracted BioMech report text into a typed, closed-set report (ADR-0014).
+"""Parse extracted BioMech report text into a typed, closed-set report (ADR-0014; real
+report format per ADR-0036).
 
-BioMech's balance and gait reports are labeled `label: value unit` lines over a text
-layer. Parsing is defensive and closed-set:
+BioMech's real Balance and Gait test reports are exported as PDFs whose text layer, when
+extracted with pypdf, emits each field on its **own line** — label, then unit, then value —
+with bold rows (composite scores, "% Normal" rows) **duplicated**. There are no
+`label: value` rows; the only colons are in the header (`Patient:`, `Test ID:`). This
+module normalizes that stream and reads it closed-set:
 
-- **Closed metric registry (METRICS).** Only the codes V1 understands are captured;
-  every one has a curated display, unit, valid range, and polarity. Unknown lines are
-  ignored — free text from the document NEVER becomes a display label or a code
-  (injection posture, ADR-0011). Displays come only from this registry.
-- **Never crash, never fabricate.** A non-numeric or out-of-range value is skipped
-  with a per-metric warning (returned to the uploader, not audited); the value is
-  never coerced or invented. Empty or unrecognizable text yields a report with zero
-  metrics and warnings, not an exception.
+- **Collapse adjacent duplicate lines**, which removes the bold-row duplication and turns
+  each metric into a clean ``label → unit → value → [range]`` sequence.
+- **Closed metric registry (METRICS).** Only the codes V1 understands are captured; each has
+  a curated display, unit, valid range, polarity, and the exact report label(s) it maps to.
+  Unknown lines are ignored — document free text NEVER becomes a display or a code (injection
+  posture, ADR-0011).
+- **Never crash, never fabricate.** A non-numeric value (e.g. "N/A"), a split value
+  ("47 / 53"), or an out-of-range number is skipped with a per-metric warning; the value is
+  never coerced or invented. Empty or unrecognizable text yields a report with zero metrics
+  and warnings, not an exception.
 
-The route turns the returned report into research-grade Observations (app/biomech/
-ingest.py); this module is pure (no I/O), so it is fully unit-testable.
+The route turns the returned report into research-grade Observations (app/biomech/ingest.py);
+this module is pure (no I/O), so it is fully unit-testable.
 """
 
 from __future__ import annotations
@@ -35,8 +41,9 @@ class ReportKind(enum.StrEnum):
 class MetricSpec:
     """One metric V1 understands: its code, curated display/unit, valid range, and
     polarity. `higher_is_better` is True/False for judged metrics, None when direction
-    carries no clear better/worse (mirrored in app/trajectory/directionality.py).
-    `labels` are the accepted (normalized) line labels that map to this metric."""
+    carries no clear better/worse (mirrored in app/trajectory/directionality.py). `labels`
+    are the exact (normalized) report labels that map to this metric, and `units` are the
+    accepted unit tokens that must follow the label (a guard against mis-alignment)."""
 
     code: str
     display: str
@@ -45,47 +52,65 @@ class MetricSpec:
     max_value: float
     higher_is_better: bool | None
     labels: tuple[str, ...]
+    units: tuple[str, ...]
 
 
-# The closed set of metrics V1 ingests. Balance-report metrics first, then gait.
-# Ranges are generous physiological bounds — their job is to reject nonsense (a negative
-# score, a parse that grabbed a page number), not to make a clinical judgment.
+# The closed set of metrics V1 ingests, keyed to the REAL report labels. Balance-report
+# metrics first, then gait. The "% Normal" rows are population-referenced 0–100 values
+# (higher = better) and are the cleanest inputs for the composite; the composite scores head
+# each report. Ranges are generous bounds whose job is to reject nonsense, not judge.
 METRICS: tuple[MetricSpec, ...] = (
+    # --- Balance report ---
     MetricSpec(
         code="biomech_balance_score",
         display="Balance score",
-        unit="{score}",
+        unit="%",
         min_value=0.0,
         max_value=100.0,
         higher_is_better=True,
-        labels=("balance score", "overall balance score"),
+        labels=("balance score",),
+        units=("percent",),
     ),
     MetricSpec(
-        code="biomech_sway_velocity",
-        display="Sway velocity",
-        unit="mm/s",
+        code="biomech_balance_speed_normal",
+        display="Balance speed (normalized)",
+        unit="%",
         min_value=0.0,
-        max_value=1000.0,
-        higher_is_better=False,
-        labels=("sway velocity", "mean sway velocity"),
-    ),
-    MetricSpec(
-        code="biomech_sway_area",
-        display="Sway area",
-        unit="mm2",
-        min_value=0.0,
-        max_value=100000.0,
-        higher_is_better=False,
-        labels=("sway area",),
-    ),
-    MetricSpec(
-        code="biomech_gait_speed",
-        display="Gait speed",
-        unit="m/s",
-        min_value=0.0,
-        max_value=10.0,
+        max_value=100.0,
         higher_is_better=True,
-        labels=("gait speed", "walking speed"),
+        labels=("average speed % normal",),
+        units=("percent",),
+    ),
+    MetricSpec(
+        code="biomech_balance_movement_normal",
+        display="Balance movement (normalized)",
+        unit="%",
+        min_value=0.0,
+        max_value=100.0,
+        higher_is_better=True,
+        labels=("average movement % normal",),
+        units=("percent",),
+    ),
+    MetricSpec(
+        code="biomech_balance_position_normal",
+        display="Balance position (normalized)",
+        unit="%",
+        min_value=0.0,
+        max_value=100.0,
+        higher_is_better=True,
+        labels=("average position % normal",),
+        units=("percent",),
+    ),
+    # --- Gait report ---
+    MetricSpec(
+        code="biomech_gait_score",
+        display="Gait score",
+        unit="%",
+        min_value=0.0,
+        max_value=100.0,
+        higher_is_better=True,
+        labels=("gait score",),
+        units=("percent",),
     ),
     MetricSpec(
         code="biomech_cadence",
@@ -95,90 +120,85 @@ METRICS: tuple[MetricSpec, ...] = (
         max_value=400.0,
         higher_is_better=None,
         labels=("cadence",),
+        units=("steps / min", "steps/min"),
     ),
     MetricSpec(
         code="biomech_step_length",
         display="Step length",
-        unit="cm",
+        unit="[ft_i]",
         min_value=0.0,
-        max_value=200.0,
-        higher_is_better=None,
-        labels=("step length",),
+        max_value=10.0,
+        higher_is_better=True,
+        labels=("average step length",),
+        units=("feet",),
     ),
     MetricSpec(
-        code="biomech_step_time_symmetry",
-        display="Step time symmetry",
+        code="biomech_total_steps",
+        display="Total steps",
+        unit="{steps}",
+        min_value=0.0,
+        max_value=100000.0,
+        higher_is_better=None,
+        labels=("total steps",),
+        units=("steps",),
+    ),
+    MetricSpec(
+        code="biomech_impact_symmetry",
+        display="Impact symmetry",
         unit="%",
         min_value=0.0,
         max_value=100.0,
         higher_is_better=True,
-        labels=("step time symmetry", "step symmetry"),
+        labels=("impact symmetry (left / right) % normal",),
+        units=("percent",),
+    ),
+    MetricSpec(
+        code="biomech_support_ratio",
+        display="Support ratio",
+        unit="%",
+        min_value=0.0,
+        max_value=100.0,
+        higher_is_better=True,
+        labels=("support ratio % normal (single:double)",),
+        units=("percent",),
+    ),
+    MetricSpec(
+        code="biomech_single_support_symmetry",
+        display="Single-support symmetry",
+        unit="%",
+        min_value=0.0,
+        max_value=100.0,
+        higher_is_better=True,
+        labels=("single support symmetry (left / right) % normal",),
+        units=("percent",),
+    ),
+    MetricSpec(
+        code="biomech_pelvic_tilt_neutral",
+        display="Pelvic tilt (neutral)",
+        unit="%",
+        min_value=0.0,
+        max_value=100.0,
+        higher_is_better=True,
+        labels=("pelvic tilt % neutral",),
+        units=("percent",),
     ),
 )
 
 _SPEC_BY_LABEL: dict[str, MetricSpec] = {label: spec for spec in METRICS for label in spec.labels}
+_KNOWN_UNITS: frozenset[str] = frozenset(unit for spec in METRICS for unit in spec.units)
 
-# The label lines that carry the assessment datetime and the device/source line.
-_DATE_LABELS = frozenset(
-    {
-        "assessment date",
-        "assessment date/time",
-        "assessment datetime",
-        "date",
-        "date/time",
-        "assessed",
-    }
-)
-_DEVICE_LABELS = frozenset({"device", "instrument", "system", "source", "device id"})
+# The header label whose following line carries the assessment date, and the sensor line.
+_DATE_LABEL = "date of service:"
+_DATE_FORMATS = ("%m/%d/%y", "%m/%d/%Y", "%Y-%m-%d")
 
-# Non-ISO datetime formats to try after datetime.fromisoformat (which already covers
-# ISO 8601, including space-separated and date-only). US-style dates are common on
-# clinical report exports and are not ISO, so they need explicit patterns.
-_DATE_FORMATS = ("%m/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M", "%m/%d/%Y")
+# Balance-condition tokens (stance / vision) — collected into a protocol string stored as
+# provenance. Neuropathy-relevant: the eyes-open vs eyes-closed contrast is a proprioceptive
+# signal (ADR-0036 notes it as a future sub-signal); here we simply preserve the condition.
+_CONDITION_TOKENS = ("parallel", "tandem", "eyes open", "eyes closed", "feet together")
 
-# A metric value must be the FULLY-CONSUMED first token of the value side — a prefix
-# match would silently truncate "1,234.5" to 1.0 and store a corrupted measurement
-# while reporting success (review finding). Thousands grouping and decimal commas are
-# normalized explicitly; anything else numeric-ish but ambiguous (scientific notation,
-# space-grouped digits, attached units) is skipped with a warning, never coerced.
-# Units/ranges ("82 / 100") keep the first token, which is the measurement.
-_NUMBER = re.compile(r"[-+]?\d+(?:\.\d+)?")
-_THOUSANDS_GROUPED = re.compile(r"[-+]?\d{1,3}(?:,\d{3})+(?:\.\d+)?")
-_DECIMAL_COMMA = re.compile(r"[-+]?\d+,\d+")
-
-
-def _metric_value(raw_value: str) -> float | None:
-    """The unambiguous numeric value of a metric line, or None (research-grade: skip,
-    never guess). "82 / 100" -> 82.0; "1,234.5" -> 1234.5; "1,05" -> 1.05;
-    "3.2e3", "1 234.5", "1,0,5", "82/100" -> None."""
-    tokens = raw_value.split()
-    if not tokens:
-        return None
-    token = tokens[0]
-    if len(tokens) > 1 and tokens[1][:1].isdigit():
-        return None  # space-grouped digits ("1 234.5") are ambiguous
-    if "," in token:
-        if _THOUSANDS_GROUPED.fullmatch(token):
-            token = token.replace(",", "")
-        elif _DECIMAL_COMMA.fullmatch(token):
-            token = token.replace(",", ".")
-        else:
-            return None
-    if _NUMBER.fullmatch(token) is None:
-        return None
-    return float(token)
-
-
-# Explicit report-kind markers: a "Report/Assessment type: balance|gait" line, or a
-# "<kind> assessment" phrase. Metric labels ("balance score", "gait speed") are never
-# matched because both patterns anchor on the kind word in a header position.
-_KIND_TYPE_LINE = re.compile(
-    r"(?im)^\s*(?:report|assessment)(?:\s+type)?\s*[:\-]\s*(balance|gait)\b"
-)
-_KIND_PHRASE = re.compile(r"(?i)\b(balance|gait)\s+assessment\b")
-
-# A device/source value is provenance only; cap its length so a runaway line cannot
-# bloat the payload. It is stored in quality/payload, never used as a display label.
+# A value must be a clean number, optionally with a trailing direction tag like "4.1 (RF)".
+# Splits ("47 / 53"), "N/A", ranges, and units are NOT values and are skipped.
+_VALUE = re.compile(r"^([-+]?\d+(?:\.\d+)?)(?:\s*\([A-Za-z ]+\))?$")
 _MAX_DEVICE_LEN = 120
 
 
@@ -194,88 +214,118 @@ class BiomechMetric:
 
 @dataclass(frozen=True, slots=True)
 class BiomechReport:
-    """A parsed BioMech report. `kind`/`assessment_at` are None when the text did not
-    carry a recognizable marker (a warning explains); `metrics` holds only accepted,
-    in-range measurements; `warnings` lists every defensive skip for the uploader."""
+    """A parsed BioMech report. `kind`/`assessment_at` are None when the text did not carry
+    a recognizable marker (a warning explains); `metrics` holds only accepted, in-range
+    measurements; `condition` is the balance protocol string when present; `warnings` lists
+    every defensive skip for the uploader."""
 
     kind: ReportKind | None
     assessment_at: datetime | None
     device: str | None
+    condition: str | None
     metrics: tuple[BiomechMetric, ...]
     warnings: tuple[str, ...]
 
 
-def _normalize_label(label: str) -> str:
-    return " ".join(label.strip().lower().split())
+def _normalize(text: str) -> str:
+    return " ".join(text.strip().lower().split())
 
 
-def _parse_datetime(raw: str) -> datetime | None:
-    """Parse a labeled assessment datetime; naive values are assumed UTC (like labs),
-    so every report's assessment_at is tz-aware and trend math never mixes naive/aware."""
+def _dedup_adjacent(lines: list[str]) -> list[str]:
+    """Strip blanks and collapse adjacent identical lines — this removes the bold-row
+    duplication pypdf emits, turning each metric into `label → unit → value → [range]`."""
+    out: list[str] = []
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            continue
+        if out and out[-1] == line:
+            continue
+        out.append(line)
+    return out
+
+
+def _parse_date(raw: str) -> datetime | None:
+    """Parse a Date-of-Service value; naive dates are assumed UTC midnight (like labs), so
+    every report's assessment_at is tz-aware and trend math never mixes naive/aware."""
     text = raw.strip()
-    parsed: datetime | None = None
-    try:
-        parsed = datetime.fromisoformat(text)
-    except ValueError:
-        for fmt in _DATE_FORMATS:
-            try:
-                parsed = datetime.strptime(text, fmt)
-                break
-            except ValueError:
-                continue
-    if parsed is None:
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.strptime(text, fmt).replace(tzinfo=UTC)
+        except ValueError:
+            continue
+    return None
+
+
+def _detect_kind(deduped: list[str]) -> ReportKind | None:
+    for line in deduped:
+        low = line.lower()
+        if "balance individual test report" in low:
+            return ReportKind.balance
+        if "gait individual test report" in low:
+            return ReportKind.gait
+    return None
+
+
+def _detect_condition(deduped: list[str]) -> str | None:
+    parts = [
+        line.rstrip(",") for line in deduped if any(t in line.lower() for t in _CONDITION_TOKENS)
+    ]
+    if not parts:
         return None
-    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed
+    # De-dupe while preserving order; cap length so a runaway line cannot bloat provenance.
+    seen: list[str] = []
+    for part in parts:
+        if part not in seen:
+            seen.append(part)
+    return ", ".join(seen)[:_MAX_DEVICE_LEN]
 
 
-def _detect_kind(text: str) -> ReportKind | None:
-    match = _KIND_TYPE_LINE.search(text) or _KIND_PHRASE.search(text)
-    return ReportKind(match.group(1).lower()) if match else None
+def _metric_value(raw: str) -> float | None:
+    """The clean numeric value of a value line, or None (skip, never guess). "97" -> 97.0;
+    "4.1 (RF)" -> 4.1; "N/A", "47 / 53", "2.1 - 2.5 ft" -> None."""
+    match = _VALUE.match(raw.strip())
+    return float(match.group(1)) if match else None
 
 
 def parse_report(text: str) -> BiomechReport:
     """Parse extracted report text into a typed BiomechReport (never raises).
 
-    Scans labeled lines: recognized metric labels become measurements (skipped with a
-    warning when non-numeric, out of range, or a repeated code); the datetime and
-    device lines are captured; every other line is ignored. Missing kind or datetime
-    is reported as a warning, not an error.
+    Collapses adjacent duplicate lines, detects the report kind / date / balance condition,
+    then walks the normalized lines: when a line is a known metric label, the next line must
+    be that metric's unit and the line after is its value (skipped with a warning when
+    non-numeric, out of range, mis-unit, or a repeated code). Every other line is ignored.
+    Missing kind or date is reported as a warning, not an error.
     """
-    assessment_at: datetime | None = None
-    device: str | None = None
+    deduped = _dedup_adjacent(text.splitlines())
     metrics: list[BiomechMetric] = []
     warnings: list[str] = []
     seen_codes: set[str] = set()
+    assessment_at: datetime | None = None
 
-    for line in text.splitlines():
-        if ":" not in line:
-            continue
-        raw_label, _, raw_value = line.partition(":")
-        label = _normalize_label(raw_label)
+    for index, line in enumerate(deduped):
+        low = _normalize(line)
 
-        if label in _DATE_LABELS:
-            if assessment_at is None:
-                assessment_at = _parse_datetime(raw_value)
-            continue
-        if label in _DEVICE_LABELS:
-            if device is None:
-                cleaned = " ".join(raw_value.split())[:_MAX_DEVICE_LEN]
-                device = cleaned or None
+        if low == _DATE_LABEL and assessment_at is None and index + 1 < len(deduped):
+            assessment_at = _parse_date(deduped[index + 1])
             continue
 
-        spec = _SPEC_BY_LABEL.get(label)
+        spec = _SPEC_BY_LABEL.get(low)
         if spec is None:
-            continue  # unknown line — ignored, never a fabricated label
+            continue
+        if spec.code in seen_codes:
+            warnings.append(f"{spec.display}: appears more than once; kept the first value.")
+            continue
 
-        value = _metric_value(raw_value)
+        # The two lines after the label must be the unit then the value.
+        unit_line = _normalize(deduped[index + 1]) if index + 1 < len(deduped) else ""
+        value_line = deduped[index + 2] if index + 2 < len(deduped) else ""
+        if unit_line not in spec.units:
+            warnings.append(f"{spec.display}: expected its unit after the label (skipped).")
+            continue
+        value = _metric_value(value_line)
         if value is None:
-            if _NUMBER.search(raw_value) is None:
-                warnings.append(f"{spec.display}: no numeric value found (skipped).")
-            else:
-                warnings.append(
-                    f"{spec.display}: value {' '.join(raw_value.split())!r} is not an "
-                    "unambiguous number (skipped)."
-                )
+            warnings.append(f"{spec.display}: no clean numeric value found (skipped).")
             continue
         if not (spec.min_value <= value <= spec.max_value):
             warnings.append(
@@ -283,24 +333,23 @@ def parse_report(text: str) -> BiomechReport:
                 f"{spec.min_value:g}–{spec.max_value:g} (skipped)."
             )
             continue
-        if spec.code in seen_codes:
-            warnings.append(f"{spec.display}: appears more than once; kept the first value.")
-            continue
         seen_codes.add(spec.code)
         metrics.append(
             BiomechMetric(code=spec.code, display=spec.display, unit=spec.unit, value=value)
         )
 
-    kind = _detect_kind(text)
+    kind = _detect_kind(deduped)
+    condition = _detect_condition(deduped) if kind is ReportKind.balance else None
     if kind is None:
         warnings.append("Could not determine the report kind (expected balance or gait).")
     if assessment_at is None:
-        warnings.append("Could not find the assessment date; no metrics can be imported.")
+        warnings.append("Could not find the date of service; no metrics can be imported.")
 
     return BiomechReport(
         kind=kind,
         assessment_at=assessment_at,
-        device=device,
+        device=None,
+        condition=condition,
         metrics=tuple(metrics),
         warnings=tuple(warnings),
     )

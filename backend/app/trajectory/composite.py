@@ -9,8 +9,8 @@ How the number is built:
 - Every present sub-measure is normalized to a common **0-100, higher = better**
   metric using a small, illustrative reference registry (physician-signed config
   pending validation). **Inversion is driven by the Phase-1 polarity registry**
-  (`directionality.py`), never hardcoded per call — pain, numbness, HbA1c and
-  postural sway all read higher = worse, so they are flipped during normalization.
+  (`directionality.py`), never hardcoded per call — pain, numbness and HbA1c read
+  higher = worse, so they are flipped during normalization.
 - A **domain score** is the mean of its present sub-measures.
 - The **composite** weights the *present* domains and renormalizes the weights
   across them (an absent domain is never imputed as 0 — that would fabricate a
@@ -116,12 +116,14 @@ _MEASURES: dict[str, MeasureRef] = {
     # --- Symptoms (0-10 severity items; higher = worse, inverted via polarity) ---
     "symptom_pain": MeasureRef(Domain.symptoms, 0.0, 10.0),
     "symptom_numbness": MeasureRef(Domain.symptoms, 0.0, 10.0),
-    # --- Function (BioMech balance/gait + ADLs; sway inverted via polarity) ---
+    # --- Function (BioMech device-grade composite scores + self-reported ADLs) ---
+    # Only the two headline BioMech scores (both 0-100, higher = better) enter the Index;
+    # their component metrics (speed/movement/position, impact/support/pelvic) surface as
+    # trajectory signals but are NOT summed here — that would double-count the same test
+    # against its own parts (the rule that also excludes adl_daily_score). Real report
+    # catalog per ADR-0036.
     "biomech_balance_score": MeasureRef(Domain.function, 0.0, 100.0),
-    "biomech_gait_speed": MeasureRef(Domain.function, 0.0, 1.6),
-    "biomech_step_time_symmetry": MeasureRef(Domain.function, 0.0, 1.0),
-    "biomech_sway_velocity": MeasureRef(Domain.function, 0.0, 30.0),
-    "biomech_sway_area": MeasureRef(Domain.function, 0.0, 800.0),
+    "biomech_gait_score": MeasureRef(Domain.function, 0.0, 100.0),
     "adl_walking": MeasureRef(Domain.function, 0.0, 4.0),
     "adl_stairs": MeasureRef(Domain.function, 0.0, 4.0),
     "adl_balance_confidence": MeasureRef(Domain.function, 0.0, 4.0),
