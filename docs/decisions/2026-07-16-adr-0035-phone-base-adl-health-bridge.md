@@ -28,22 +28,34 @@ The key finding — and an **honest platform asymmetry** that shapes "phone as b
 
 ### iOS — iPhone alone is rich (HealthKit + CoreMotion)
 
-The iPhone (carried in a pocket) computes **Mobility metrics** without a watch:
+The iPhone (iPhone 8+, iOS 14/15, carried body-coupled in a pocket/belt with height
+entered; computed only on flat overground walking bouts, not all-day) computes **Mobility
+metrics** without a watch. **Verified (deep-research pass, 2026-07-16) — and validity is
+uneven, which changes how we use them:**
 
-| Metric | Source | Neuropathy relevance | BioMech gait parallel |
+| Metric | Source | Phone-alone validity (verified) | BioMech gait parallel |
 |---|---|---|---|
-| Walking Steadiness (+ notifications) | iPhone | fall-risk / stability | balance/fall-risk |
-| Walking Asymmetry % | iPhone | gait quality | Impact / Single-Support Symmetry |
-| Double Support Time % | iPhone | gait quality | Support Ratio (single:double) |
-| Walking Speed | iPhone | function/pace | (gait pace) |
-| Walking Step Length | iPhone | function | Average Step Length |
-| Steps, Distance, Flights, Stair speed | iPhone | ADL volume | Cadence / Total Steps |
-| Six-Minute Walk (estimated) | iPhone | endurance | — |
+| Walking **Speed** | iPhone | **Strong** — ICC ~0.85–0.93 vs pressure-mat/IMU | gait pace |
+| Walking **Step Length** | iPhone | **Good** (adults/seniors) — ICC ~0.76–0.85 | Average Step Length |
+| Steps, Distance, Flights, Stair speed | iPhone | Quantity (well-established) | Cadence / Total Steps |
+| Walking **Asymmetry** % | iPhone | **Weak** — significantly under-reported phone-alone | Impact / Single-Support Symmetry |
+| **Double Support Time** % | iPhone | **Weak** — ICC ~0.42–0.58, up to ~32% error in seniors | Support Ratio (single:double) |
+| Walking **Steadiness** | iPhone | Fall-risk classifier; validated on Apple Heart & Movement Study (vendor) | balance/fall-risk |
+| Six-Minute Walk (estimated) | iPhone | endurance (context-limited) | — |
 
-**This is the standout:** iPhone-derived mobility metrics **mirror BioMech's gait
-metrics** — so on iOS the phone-base real-world tier can run *parallel* to the clinical
-tier (same constructs, different setting). Walking Steadiness + Asymmetry are directly
-fall-risk / DPN-relevant.
+**Corrected standout (this supersedes the earlier "mirrors BioMech" framing):** the iPhone
+measures the *same gait constructs* a wearable IMU does, but **only speed and step-length
+are reliable phone-alone.** The **gait-quality** metrics (asymmetry, double-support) are
+**poor-to-moderate and biased phone-alone** — so a phone-first design must **lean on
+speed + step-length** and treat asymmetry/double-support/steadiness as **advisory or
+watch-augmented**, never as device-grade truth.
+
+> **Biggest external-validity caveat (verified):** every phone-gait accuracy figure above
+> comes from **healthy / general-population adults, not a DPN or impaired-gait cohort** —
+> and Apple's own figures are first-party (an upper bound). Accuracy in our actual target
+> population (abnormal, slow, unsteady gait) is **unverified** and could be worse. This is
+> a validation task before any clinical weight is placed on phone-derived gait, and it
+> reinforces the fidelity-weighting rule below.
 
 **Watch (Apple Watch) adds — the "good-to-have":** continuous heart rate + HRV, cardio
 fitness (VO₂max), workouts, fall detection, and more continuous/accurate sampling. It
@@ -133,7 +145,8 @@ the phase that adds them, not before.
    iOS lag long — the "phone as base" story is strongest there.)
 2. **v1 metric set** — confirm the phone-derivable set above as v1 (steps/speed/step-length
    + iOS asymmetry/double-support/steadiness; Android volume/pace).
-3. **Health-store catalog verification** — lock the exact HealthKit / Health Connect data
-   types + which are phone- vs watch-derived against current SDK docs before Phase 2/3
-   (a short verification pass; the table above is from working knowledge and must be
-   confirmed before we pin behavior to it).
+3. **Health-store catalog verification** — ✅ done (deep-research pass, 2026-07-16):
+   iPhone-alone metric set + validity confirmed; Health Connect gait-quality gap confirmed.
+   **Remaining, and now the priority open question:** accuracy of iPhone gait metrics in a
+   **DPN / impaired-gait population** (all published figures are healthy adults) — a
+   validation task before clinical weight is placed on phone-derived gait.
