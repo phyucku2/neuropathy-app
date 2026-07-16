@@ -112,8 +112,9 @@ data with a comprehensive automated test suite and green continuous integration.
 - **Four ingestion paths into one record:**
   - Symptoms and daily function (patient-reported).
   - Labs from the patient's EMR via **SMART-on-FHIR** (patient-consented).
-  - **BioMech** balance/gait reports (V1 ingestion; being upgraded to a direct API path —
-    §8).
+  - **BioMech** balance/gait reports — **ingests real BioMech reports today** (balance and
+    gait metrics, including the eyes-open/eyes-closed test condition); a direct API path is
+    the planned upgrade (§8).
   - **Phone and watch mobility** via Apple Health / Health Connect — the ingestion contract
     and the in-app seam are built; the native connectors are the next step.
 - **A clinician surface.** A consent-gated panel and shared patient view — a patient-held
