@@ -29,8 +29,8 @@ export function HomePage() {
       <h1 className="greeting">{greetingName ? `Hi, ${greetingName}` : 'Welcome back'}</h1>
       <TrajectoryHero
         trajectory={trajectory}
-        eyebrow="Your 30-day trend"
-        ariaLabel="Your 30-day trend"
+        eyebrow="30 Day Score"
+        ariaLabel="Your 30 day score"
       />
 
       {trajectory.signals.length > 0 && (

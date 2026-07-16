@@ -8,6 +8,7 @@ AI-Safety lens). Numbers are computed in code; narrative only synthesizes over t
 from __future__ import annotations
 
 import enum
+from datetime import date
 
 from pydantic import BaseModel, Field
 
@@ -17,6 +18,14 @@ class Direction(enum.StrEnum):
     stable = "stable"
     declining = "declining"
     insufficient_data = "insufficient_data"
+
+
+class ConfidenceLevel(enum.StrEnum):
+    """How much to trust the Index (coverage + recency) — NOT a health signal (ADR-0034)."""
+
+    high = "high"
+    medium = "medium"
+    low = "low"
 
 
 class SignalTrend(BaseModel):
@@ -41,4 +50,32 @@ class Trajectory(BaseModel):
     narrative_source: str = Field(
         default="deterministic",
         description="'deterministic' (template) or 'ai' (validated model rephrasing, ADR-0011)",
+    )
+    # ---- Neuropathy Status Index (ADR-0034) — a non-diagnostic 0-100 composite. The
+    # card's single source of truth: score + its OWN 30-day delta + Confidence, anchored
+    # to a real as_of date. PHI-free (fixed vocabulary + rounded ints, never raw values).
+    score: int | None = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="Neuropathy Status Index, 0-100, higher = better. None when no domain present.",
+    )
+    score_delta_30d: int | None = Field(
+        default=None,
+        description="Composite now minus ~30 days prior; sign drives the card's direction.",
+    )
+    as_of: date | None = Field(
+        default=None,
+        description="Effective date of the newest contributing observation (never wall-clock).",
+    )
+    confidence_level: ConfidenceLevel | None = Field(
+        default=None, description="High/Medium/Low from domain coverage + data recency."
+    )
+    direction_word: Direction | None = Field(
+        default=None,
+        description="The composite's OWN direction (improving/stable/declining); card SSoT.",
+    )
+    data_is_stale: bool = Field(
+        default=False,
+        description="True when a contributing domain is materially old — the UI says so.",
     )

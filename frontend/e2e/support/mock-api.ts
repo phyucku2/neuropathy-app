@@ -75,6 +75,20 @@ export const TRAJECTORY_IMPROVING: Trajectory = {
   confidence: 0.72,
   summary: 'Balance and daily function are up. One lab is worth a look.',
   signals: [
+    // Symptom domain (ADR-0034 Phase 1 capture) — makes the composite a full 3-domain
+    // score so the demo/E2E card shows Symptoms + Function + Physiologic together.
+    {
+      code: 'symptom_pain',
+      source: 'adl',
+      direction: 'improving',
+      detail: 'nerve pain easing over 30 days',
+    },
+    {
+      code: 'symptom_numbness',
+      source: 'adl',
+      direction: 'stable',
+      detail: 'numbness or tingling steady this month',
+    },
     {
       code: 'biomech_balance_score',
       source: 'biomech',
@@ -96,6 +110,13 @@ export const TRAJECTORY_IMPROVING: Trajectory = {
   ],
   data_gaps: ['No lab results in the last 90 days'],
   narrative_source: 'deterministic',
+  // Neuropathy Status Index (ADR-0034): a full three-domain composite, improving.
+  score: 74,
+  score_delta_30d: 7,
+  as_of: '2026-07-12',
+  confidence_level: 'high',
+  direction_word: 'improving',
+  data_is_stale: false,
 };
 
 export const TRAJECTORY_DECLINING: Trajectory = {
@@ -120,6 +141,13 @@ export const TRAJECTORY_DECLINING: Trajectory = {
   ],
   data_gaps: ['Fewer than 3 check-ins this month'],
   narrative_source: 'deterministic',
+  // NSI declining: lower score, a negative 30-day delta.
+  score: 61,
+  score_delta_30d: -6,
+  as_of: '2026-07-11',
+  confidence_level: 'medium',
+  direction_word: 'declining',
+  data_is_stale: false,
 };
 
 export const TRAJECTORY_INSUFFICIENT: Trajectory = {
@@ -129,6 +157,13 @@ export const TRAJECTORY_INSUFFICIENT: Trajectory = {
   signals: [],
   data_gaps: ['No BioMech reports yet', 'No daily check-ins yet'],
   narrative_source: 'deterministic',
+  // No domain present yet — the NSI is null (the "not enough data" card).
+  score: null,
+  score_delta_30d: null,
+  as_of: null,
+  confidence_level: null,
+  direction_word: null,
+  data_is_stale: false,
 };
 
 /** Default observations (mirror src/test/fixtures.ts): balance (3 numeric points,

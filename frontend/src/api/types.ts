@@ -48,6 +48,9 @@ export interface MeOut {
 /** Direction */
 export type Direction = 'improving' | 'stable' | 'declining' | 'insufficient_data';
 
+/** ConfidenceLevel — how much to trust the Index (coverage + recency), NOT health. */
+export type ConfidenceLevel = 'high' | 'medium' | 'low';
+
 /** SignalTrend */
 export interface SignalTrend {
   code: string;
@@ -64,6 +67,17 @@ export interface Trajectory {
   signals: SignalTrend[];
   data_gaps: string[];
   narrative_source: string;
+  /** Neuropathy Status Index (ADR-0034) — a non-diagnostic 0-100 composite, higher =
+   *  better. `score` is null when no domain is present (the "not enough data" state).
+   *  The card's single source of truth: `score` + its OWN `score_delta_30d` + Confidence,
+   *  anchored to a real `as_of` date. Card colour AND arrow are both driven by the delta,
+   *  so they can never contradict. */
+  score: number | null;
+  score_delta_30d: number | null;
+  as_of: string | null;
+  confidence_level: ConfidenceLevel | null;
+  direction_word: Direction | null;
+  data_is_stale: boolean;
 }
 
 // ---- ingestion.py ----

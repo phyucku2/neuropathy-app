@@ -23,6 +23,7 @@ from datetime import datetime
 from app.models.observation import ObservationStatus, SourceType
 from app.schemas.trajectory import Direction, SignalTrend, Trajectory
 from app.services.observation import counts_toward_analysis
+from app.trajectory.composite import compute_index
 from app.trajectory.directionality import Polarity, SignalInfo, signal_info
 from app.trajectory.points import ObservationPoint
 from app.trajectory.stats import (
@@ -321,6 +322,11 @@ def compute_trajectory(points: list[ObservationPoint], now: datetime) -> Traject
     assessments = [_assess(code, series[code], now) for code in sorted(series)]
     judged = [assessment for assessment in assessments if assessment.judged]
 
+    # The Neuropathy Status Index (ADR-0034): the composite is the SINGLE SOURCE OF
+    # TRUTH for the hero card's direction — its own 30-day delta, never the per-signal
+    # vote below (which still drives the "what's driving it" list + summary).
+    index = compute_index(series, now)
+
     direction = _overall_direction(judged)
     return Trajectory(
         direction=direction,
@@ -336,4 +342,10 @@ def compute_trajectory(points: list[ObservationPoint], now: datetime) -> Traject
             for assessment in assessments
         ],
         data_gaps=_data_gaps(assessments, now),
+        score=index.score,
+        score_delta_30d=index.score_delta_30d,
+        as_of=index.as_of,
+        confidence_level=index.confidence_level,
+        direction_word=index.direction,
+        data_is_stale=index.data_is_stale,
     )

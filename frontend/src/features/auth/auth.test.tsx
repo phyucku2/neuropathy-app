@@ -29,7 +29,7 @@ describe('auth screens', () => {
     await user.type(await screen.findByLabelText('Email'), TEST_EMAIL);
     await user.type(screen.getByLabelText('Password'), TEST_PASSWORD);
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
-    expect(await screen.findByText('Improving')).toBeInTheDocument();
+    expect(await screen.findByText('30 Day Score')).toBeInTheDocument();
   });
 
   it('shows a friendly error for a wrong password', async () => {
@@ -64,7 +64,7 @@ describe('auth screens', () => {
     await user.type(screen.getByLabelText('Email'), TEST_EMAIL);
     await user.type(screen.getByLabelText('Password'), TEST_PASSWORD);
     await user.click(screen.getByRole('button', { name: 'Create account' }));
-    expect(await screen.findByText('Improving')).toBeInTheDocument();
+    expect(await screen.findByText('30 Day Score')).toBeInTheDocument();
   });
 
   it('rejects a too-short password before calling the API', async () => {
@@ -144,7 +144,7 @@ describe('auth screens', () => {
       }),
     );
     renderApp('/', { authenticated: false }); // the surviving token drives the restore
-    expect(await screen.findByText('Improving')).toBeInTheDocument();
+    expect(await screen.findByText('30 Day Score')).toBeInTheDocument();
     await waitFor(() => {
       expect(bodies.map((b) => b.check_in_date)).toEqual(['2026-07-01']);
     });
@@ -172,7 +172,7 @@ describe('auth screens', () => {
     await user.type(screen.getByLabelText('Email'), TEST_EMAIL);
     await user.type(screen.getByLabelText('Password'), TEST_PASSWORD);
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
-    expect(await screen.findByText('Improving')).toBeInTheDocument();
+    expect(await screen.findByText('30 Day Score')).toBeInTheDocument();
     // The confirmed profile (ME) is not FOREIGN_OWNER — the foreign PHI is gone.
     expect(listQueuedCheckIns(FOREIGN_OWNER)).toEqual([]);
   });
@@ -180,7 +180,7 @@ describe('auth screens', () => {
   it('signs out from the avatar button', async () => {
     const user = userEvent.setup();
     renderApp('/');
-    await screen.findByText('Improving');
+    await screen.findByText('30 Day Score');
     await user.click(screen.getByRole('button', { name: /Sign out/ }));
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Welcome back' })).toBeInTheDocument();

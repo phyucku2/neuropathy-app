@@ -186,7 +186,7 @@ describe('navigation', () => {
   it('moves between tabs from the tab bar', async () => {
     const user = userEvent.setup();
     renderApp('/');
-    await screen.findByText('Improving');
+    await screen.findByText('30 Day Score');
     await user.click(screen.getByRole('link', { name: /Trends/ }));
     expect(await screen.findByRole('heading', { name: 'Trends' })).toBeInTheDocument();
     await user.click(screen.getByRole('link', { name: /Sources/ }));
@@ -195,7 +195,7 @@ describe('navigation', () => {
 
   it('uses `within` scoping to keep this suite honest about a single tab bar', async () => {
     renderApp('/');
-    await screen.findByText('Improving');
+    await screen.findByText('30 Day Score');
     const nav = screen.getByRole('navigation', { name: 'Main' });
     expect(within(nav).getAllByRole('link')).toHaveLength(4);
   });

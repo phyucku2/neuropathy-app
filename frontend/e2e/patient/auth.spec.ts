@@ -17,7 +17,7 @@ test.describe('Auth', () => {
     await page.getByRole('button', { name: 'Create account' }).click();
 
     await expect(page).toHaveURL(/\/$/);
-    await expect(page.getByRole('region', { name: 'Your 30-day trend' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Your 30 day score' })).toBeVisible();
   });
 
   test('signs in with valid credentials and lands on Home', async ({ page }) => {
@@ -28,7 +28,7 @@ test.describe('Auth', () => {
     await page.getByLabel('Password').fill(SYNTHETIC_PASSWORD);
     await page.getByRole('button', { name: 'Sign in' }).click();
 
-    await expect(page.getByRole('region', { name: 'Your 30-day trend' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Your 30 day score' })).toBeVisible();
   });
 
   test('shows a friendly error for invalid credentials', async ({ page }) => {

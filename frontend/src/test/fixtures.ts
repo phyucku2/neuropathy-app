@@ -41,6 +41,18 @@ export const TRAJECTORY_IMPROVING: Trajectory = {
   summary: 'Balance and daily function are up. One lab is worth a look.',
   signals: [
     {
+      code: 'symptom_pain',
+      source: 'adl',
+      direction: 'improving',
+      detail: 'nerve pain easing over 30 days',
+    },
+    {
+      code: 'symptom_numbness',
+      source: 'adl',
+      direction: 'stable',
+      detail: 'numbness or tingling steady this month',
+    },
+    {
       code: 'biomech_balance_score',
       source: 'biomech',
       direction: 'improving',
@@ -61,6 +73,13 @@ export const TRAJECTORY_IMPROVING: Trajectory = {
   ],
   data_gaps: ['No lab results in the last 90 days'],
   narrative_source: 'deterministic',
+  // Neuropathy Status Index (ADR-0034): a full three-domain composite, improving.
+  score: 74,
+  score_delta_30d: 7,
+  as_of: '2026-07-12',
+  confidence_level: 'high',
+  direction_word: 'improving',
+  data_is_stale: false,
 };
 
 export const TRAJECTORY_AI: Trajectory = {
@@ -76,6 +95,13 @@ export const TRAJECTORY_INSUFFICIENT: Trajectory = {
   signals: [],
   data_gaps: ['No BioMech reports yet', 'No daily check-ins yet'],
   narrative_source: 'deterministic',
+  // No domain present yet — the NSI is null (the "not enough data" card).
+  score: null,
+  score_delta_30d: null,
+  as_of: null,
+  confidence_level: null,
+  direction_word: null,
+  data_is_stale: false,
 };
 
 export const OBSERVATIONS: ObservationItem[] = [
