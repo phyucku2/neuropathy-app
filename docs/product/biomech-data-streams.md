@@ -17,10 +17,17 @@ materials received from the owner (company deck + live Balance/Gait test reports
 
 - **"BioMech is a daily activity" = the RKM at-home product.** RKM = **Remote Kinematic
   Measurement**. At home ($180/patient/month), the **patient self-administers** short
-  balance/gait tests that **auto-upload to the referring clinician** — a *standardized
-  daily assessment*, producing the same rich metric set as the in-clinic reports. This is
-  the high-value case: a genuine **daily functional measurement stream**, not a gamified
-  engagement score.
+  tests that **auto-upload to the referring clinician** — a *standardized daily
+  assessment*, producing the same rich metric set as the in-clinic reports. Cadence is
+  **once daily: one gait test + one balance test.** This is the high-value case: a genuine
+  **daily functional measurement stream**, not a gamified engagement score.
+- **Two tiers, and both matter (owner's framing).** BioMech is the **clinical tier**
+  (structured, device-grade gait/balance). Our **ADLs are the real-world tier**, sourced
+  from a **wearable (watch)** — passive, continuous, ecological function. The product's
+  outcome story for the **aging population** is proving a patient improves in **both**:
+  clinical scores (BioMech) *and* real-world ADL scores (watch). Clinical gain that shows
+  up in daily living is the payer/value-based-care argument (falls avoided, aging in
+  place).
 - **The sensor is the moat feedstock.** BioMech's proprietary sensor captures **12 vectors
   at 100 Hz**. If we can reach that (API/SDK — owner says *"we can probably have API
   access"*), a **daily, device-grade, multimodal** stream is exactly the proprietary
@@ -137,23 +144,42 @@ bundled into this review.
 
 | # | Stream | Frequency | Fidelity | Status today | Feeds | Unlock |
 |---|--------|-----------|----------|--------------|-------|--------|
-| 1 | **In-Clinic test reports** (balance/gait) | Episodic (per visit) | Device-grade | ⚠️ parser mismatch (see §3) | NSI Function | Fix parser **or** API |
-| 2 | **RKM at-home daily self-tests** | **Daily** | Device-grade | ❌ not ingested | NSI Function (high-freq) | API/SDK + order feed |
+| 1 | **In-Clinic test reports** (balance/gait) | Episodic (per visit) | Device-grade | ⚠️ parser mismatch (see §3) | NSI Function (clinical) | Fix parser **or** API |
+| 2 | **RKM at-home daily self-tests** (1 gait + 1 balance/day) | **Daily** | Device-grade | ❌ not ingested | NSI Function (clinical, high-freq) | API/SDK + order feed |
 | 3 | **Raw sensor** (12 vectors @ 100 Hz) | Continuous | Highest | ❌ not accessed | **Moat / ML feedstock** | SDK/raw access |
 | 4 | **Per-metric "% Normal"** (population-referenced) | With each test | Derived | ❌ (we hand-roll our own) | NSI normalization | Same feed |
 | 5 | **Test conditions** (eyes open/closed, stance) | With each test | — | ❌ (parser ignores) | Neuropathy-specific signal (Romberg gap) | Capture condition per obs |
 | 6 | **RKM order lifecycle** (order/expiry/renewal) | Event | — | ❌ | Capability activation + RTM billing | Portal/order API |
 | 7 | **Clinician review / transmission days** | Event/daily | — | ❌ | Adherence → Confidence + RTM billing | Portal API |
 | 8 | **Remote Assist** (real-time biofeedback) | Real-time | — | ❌ (their line) | Future therapy loop | Later |
+| 9 | **Wearable ADLs (watch)** — real-world function | **Continuous** | Consumer-grade | ⚠️ today self-reported, not sensed | NSI Function (**real-world tier**) | Watch/HealthKit/Health Connect ingest |
 
-Our research-grade `Observation` model already accommodates all of this without a schema
-change: new `code`s per metric, `origin=device_measured`, the **test condition** as a
-coded qualifier (or code suffix) in `code`/`quality`, and BioMech's **% Normal** stored
-alongside the raw value. Streams 3 and 5 are the neuropathy-differentiating ones.
+Streams 1–8 are **BioMech (clinical tier)**; stream 9 is **ours (real-world tier)** — the
+two sources the outcome story pairs. Our research-grade `Observation` model already
+accommodates all of this without a schema change: new `code`s per metric,
+`origin=device_measured` (BioMech/API) or `device_measured` from the watch, the **test
+condition** as a coded qualifier in `code`/`quality`, and BioMech's **% Normal** stored
+alongside the raw value. Streams 3 and 5 are the neuropathy-differentiating clinical
+signals; stream 9 is what proves the clinical gain reached daily life.
+
+> **Honesty on the watch tier.** Today our "ADLs" are the **self-reported** 0–4 check-in
+> items (`adl_walking/stairs/balance_confidence`), not sensor-derived — so stream 9 is a
+> **design direction**, not current state. Consumer-watch metrics (steps, real-world gait
+> cadence, active minutes, sit-to-stand) are **consumer-grade**, not clinical, and mapping
+> them to an "ADL function" score is itself a modeling + validation task. The value is the
+> *pairing* (clinical ↑ **and** real-world ↑), not treating watch data as clinical truth.
 
 ## 5. What this means for the NSI
 
-- **A daily, device-grade Function stream (stream 2)** upgrades the Function domain from a
+- **Split Function into two tiers.** The Function domain should distinguish
+  **clinical function** (BioMech gait/balance) from **real-world ADL function** (watch).
+  They answer different questions — *can you perform the test* vs *do you actually move
+  well in daily life* — and the compelling outcome for the aging population is when **both
+  rise together**. Options: surface them as two sub-scores under Function, or as parallel
+  tracks on the card (a "clinical" line and a "daily-life" line). This is an ADR-0034
+  refinement to design clean-room; do **not** silently average a consumer-grade watch
+  signal into a device-grade clinical one without weighting for fidelity.
+- **A daily, device-grade Function stream (stream 2)** upgrades the clinical tier from a
   handful of episodic points to a **curve** — which is what actually powers 30-day trend
   detection, responsiveness, and MCID. Frequency helps the science regardless of ML.
 - **Neuropathy-specific sub-signals** worth adding to the composite design (clean-room,
@@ -193,11 +219,15 @@ alongside the raw value. Streams 3 and 5 are the neuropathy-differentiating ones
 4. **Design the neuropathy composite v2** to use the richer metrics + condition gap,
    clean-room (§6), feeding the NSI Function domain daily.
 
-**Still needs an owner/BioMech answer (sensor posture — the big one, unchanged):** for our
-app, do we (A) use the **phone** as the sensor, (B) **ingest BioMech's** hardware data via
-API, or (C) both? The daily RKM stream makes **(B/C) newly attractive** — a real daily
-device-grade feed we don't have to build — while (A) remains the B2C/invention play. This
-is an open ADR.
+**Sensor posture — the owner's framing largely resolves it into a division of labor:**
+**BioMech's kit/sensor does the clinical tier** (structured daily gait + balance), and
+**our watch/phone does the real-world tier** (passive ADL monitoring). That is
+**complementary, not competing** — good for the license relationship — and it means we
+**ingest** BioMech's clinical feed (API) rather than rebuild clinical tests on the phone.
+The narrower open question for the ADR: which **watch metrics** define our ADL score
+(steps, real-world cadence, active minutes, sit-to-stand, gait variability), on which
+platform (Apple HealthKit / Android Health Connect), and how they map to a validated
+real-world-function measure.
 
 ## 8. Owner questions — status
 
@@ -206,7 +236,12 @@ is an open ADR.
   (real measurement).
 - ✅ **Sensor** — proprietary IMU, 12 vectors @ 100 Hz.
 - ✅ **All data / codes** — confirmed in the reports (metric catalog, §2).
+- ✅ **Daily cadence** — once daily: **1 gait + 1 balance** test.
+- ✅ **Sensor posture (division of labor)** — BioMech kit = clinical tier; **our watch =
+  real-world ADL tier** (complementary). Narrower ADR remains on *which* watch metrics
+  define the ADL score (§7).
 - 🟡 **API/SDK access** — "probably"; confirm endpoints/schema + whether raw 12-vector is
   exposed.
-- 🟡 **Sensor posture (A/B/C)** — open ADR (§7).
+- 🟡 **Watch ADL modeling** — which metrics + platform (HealthKit / Health Connect), and
+  validation of watch-derived real-world function (today ADLs are self-reported, §4).
 - 🟡 **RTM/RPM codes + transmission-day counting** — confirm for billing (streams 6–7).
