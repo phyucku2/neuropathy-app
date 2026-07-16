@@ -178,14 +178,18 @@ def _lab() -> dict[str, Any]:
 # ---------------------------------------------------------------- B2C patient authority
 
 
-def test_b2c_patient_sees_all_defaults_on(client: TestClient) -> None:
+def test_b2c_patient_sees_registry_defaults(client: TestClient) -> None:
     patient, _ = _register_patient(client)
     states = _states(client, patient)
     assert sorted(states) == sorted(ALL_KEYS)
     for state in states.values():
-        assert state["active"] is True  # absence of a row = default (back-compat)
         assert state["managed_by"] == "patient"
         assert state["expires_at"] is None
+    # Back-compat keys default ON (absence of a row = default). `ingest_symptoms` is the
+    # one opt-in key (ADR-0034 Phase 1): default OFF until the owner turns it on.
+    for key, state in states.items():
+        expected = key != "ingest_symptoms"
+        assert state["active"] is expected, key
 
 
 def test_b2c_patient_toggles_own_capability(client: TestClient) -> None:

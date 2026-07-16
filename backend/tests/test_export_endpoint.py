@@ -342,7 +342,7 @@ def test_export_writes_one_phi_free_audit_event(world: World, client: TestClient
         "observations": 3,
         "emr_connections": 1,
         "clinic_connections": 1,
-        "capabilities": 6,
+        "capabilities": 7,  # ADR-0034 added ingest_symptoms to the registry
     }
     assert "Synthetic" not in json.dumps(event.detail)
 

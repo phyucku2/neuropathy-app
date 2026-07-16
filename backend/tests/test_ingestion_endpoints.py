@@ -4,6 +4,7 @@ GET /observations. All data is synthetic (CLAUDE.md §5).
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -12,11 +13,17 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.deps import CurrentUser, get_current_user, get_emr_service
+from app.api.deps import (
+    CurrentUser,
+    get_capability_service,
+    get_current_user,
+    get_emr_service,
+)
 from app.emr.service import EmrService
 from app.main import app
 from app.models.observation import DataOrigin, ObservationStatus
 from app.models.user import UserRole
+from app.services.capability import CapabilityService
 
 NOW = datetime.now(UTC)
 TODAY = NOW.date().isoformat()
@@ -262,12 +269,183 @@ async def test_adl_check_in_audits_counts_only(client: TestClient, service: EmrS
     client.post("/adl", json=_adl(walking=4, stairs=2, balance=4))
     events = await service.audit.list_for_patient(PATIENT.patient_id)
     assert [e.action for e in events] == ["record_adl", "record_adl"]
-    assert events[0].detail == {"observations": 4, "superseded": 0}
-    assert events[1].detail == {"observations": 4, "superseded": 4}
+    # `symptoms` counts the symptom rows written — 0 here (the opt-in toggle is off).
+    assert events[0].detail == {"observations": 4, "superseded": 0, "symptoms": 0}
+    assert events[1].detail == {"observations": 4, "superseded": 4, "symptoms": 0}
     for event in events:
         assert event.actor_id == PATIENT.user_id
         detail_text = str(event.detail)
         assert "walking" not in detail_text and "3" not in str(event.detail.values())
+
+
+# --- POST /adl symptom capture (ADR-0034 Phase 1) -------------------------------------
+
+
+def _symptoms_on_service() -> CapabilityService:
+    """A capability service with `ingest_symptoms` turned ON for PATIENT (the opt-in
+    toggle defaults OFF). No clinic connections -> the patient holds authority, so the
+    self-set succeeds; every other key falls back to its registry default."""
+    service = CapabilityService()
+    asyncio.run(
+        service.set_for_patient(
+            patient_id=PATIENT.patient_id,
+            actor_id=PATIENT.user_id,
+            key="ingest_symptoms",
+            active=True,
+            now=NOW,
+        )
+    )
+    return service
+
+
+@pytest.fixture()
+def symptom_client(service: EmrService) -> Iterator[TestClient]:
+    """A signed-in patient client with the symptom capture capability enabled."""
+    # Built once at setup (not per request): the override must not run asyncio.run
+    # inside the request's running event loop.
+    capability_service = _symptoms_on_service()
+    app.dependency_overrides[get_emr_service] = lambda: service
+    app.dependency_overrides[get_current_user] = lambda: PATIENT
+    app.dependency_overrides[get_capability_service] = lambda: capability_service
+    try:
+        yield TestClient(app)
+    finally:
+        app.dependency_overrides.clear()
+
+
+async def test_symptoms_off_by_default_ignores_pain_and_numbness(
+    client: TestClient, service: EmrService
+) -> None:
+    """The opt-in toggle defaults OFF: even when the client sends pain/numbness, nothing
+    is persisted for them — a stored 'off' the code actually respects (ADR-0013)."""
+    resp = client.post("/adl", json=_adl(pain=8, numbness=5))
+    assert resp.status_code == 200
+    # daily_score stays function-only (0-12); Phase 1 composites nothing.
+    assert resp.json() == {"check_in_date": TODAY, "daily_score": 9, "superseded": False}
+    rows = await service.observations.list_for_patient(PATIENT.patient_id)
+    assert {row.code for row in rows} == {
+        "adl_walking",
+        "adl_stairs",
+        "adl_balance_confidence",
+        "adl_daily_score",
+    }
+
+
+async def test_symptoms_on_stores_pain_and_numbness_with_polarity_and_provenance(
+    symptom_client: TestClient, service: EmrService
+) -> None:
+    resp = symptom_client.post("/adl", json=_adl(pain=7, numbness=4))
+    assert resp.status_code == 200
+    # The response is unchanged — function-only score, no symptom compositing in Phase 1.
+    assert resp.json() == {"check_in_date": TODAY, "daily_score": 9, "superseded": False}
+
+    rows = await service.observations.list_for_patient(PATIENT.patient_id)
+    by_code = {row.code: row for row in rows}
+    assert set(by_code) == {
+        "adl_walking",
+        "adl_stairs",
+        "adl_balance_confidence",
+        "adl_daily_score",
+        "symptom_pain",
+        "symptom_numbness",
+    }
+    pain = by_code["symptom_pain"]
+    numbness = by_code["symptom_numbness"]
+    assert pain.value_num == 7.0
+    assert numbness.value_num == 4.0
+    midnight = datetime.combine(NOW.date(), datetime.min.time(), tzinfo=UTC)
+    for row, alignment in ((pain, "NRS-aligned"), (numbness, "NTSS-6-aligned")):
+        # Research-grade provenance (ALCOA+, data-standards.md).
+        assert row.source.value == "adl"
+        assert row.origin is DataOrigin.patient_reported
+        assert row.recorded_by_role == "patient"
+        assert row.status is ObservationStatus.final
+        assert row.effective_at == midnight
+        assert row.recorded_at is not None
+        assert row.unit == "{score}"
+        # Higher-is-worse polarity persisted so Phase 2 normalization inverts it.
+        assert row.quality["higher_is_worse"] is True
+        assert row.quality["polarity"] == "lower_is_better"
+        assert row.quality["scale_max"] == 10
+        # Honest instrument mapping: aligned, NOT a validated instrument.
+        assert row.quality["measure_alignment"] == alignment
+        assert row.quality["validated_instrument"] is False
+        assert row.quality["instrument"] == "symptom-check-in"
+
+
+async def test_symptoms_partial_answer_is_rejected_atomically(
+    symptom_client: TestClient, service: EmrService
+) -> None:
+    """With the toggle on, symptoms are both-or-neither: a partial submission (only one
+    of pain/numbness) is rejected 422 and NOTHING is persisted — not even the function
+    rows — so the day never lands a half-answered symptom pair (ADR-0034)."""
+    for partial in (_adl(pain=3), _adl(numbness=5)):
+        resp = symptom_client.post("/adl", json=partial)
+        assert resp.status_code == 422
+        assert "both pain and numbness" in resp.json()["detail"]
+    rows = await service.observations.list_for_patient(PATIENT.patient_id)
+    assert rows == []
+
+
+async def test_symptoms_partial_resubmission_cannot_desync_the_pair(
+    symptom_client: TestClient, service: EmrService
+) -> None:
+    """The reviewer's empirical repro: a full symptom check-in, then a same-day re-POST
+    answering only ONE symptom. The partial is rejected (422), so the earlier pair stays
+    intact and current — the code can no longer leave a morning numbness paired with an
+    evening pain in the day's 'current' record (which Phase 2 reads per code)."""
+    assert symptom_client.post("/adl", json=_adl(pain=2, numbness=2)).status_code == 200
+    # POST {pain:8} with numbness omitted — previously this superseded only pain and
+    # left numbness=2 current (the mixed-day defect). Now it is refused.
+    resp = symptom_client.post("/adl", json=_adl(pain=8))
+    assert resp.status_code == 422
+
+    current = await service.observations.list_for_patient(PATIENT.patient_id)
+    by_code = {row.code: row for row in current}
+    # Both symptoms remain at their original, coherent pair — neither superseded.
+    assert by_code["symptom_pain"].value_num == 2.0
+    assert by_code["symptom_numbness"].value_num == 2.0
+    assert by_code["symptom_pain"].status is ObservationStatus.final
+    assert by_code["symptom_numbness"].status is ObservationStatus.final
+
+
+async def test_symptoms_full_resubmission_supersedes_both_codes_together(
+    symptom_client: TestClient, service: EmrService
+) -> None:
+    """A full re-submit supersedes BOTH symptom codes together, so the current pair
+    always comes from one check-in (never a mix of two)."""
+    symptom_client.post("/adl", json=_adl(pain=2, numbness=2))
+    second = symptom_client.post("/adl", json=_adl(pain=8, numbness=6)).json()
+    assert second["superseded"] is True
+
+    current = await service.observations.list_for_patient(PATIENT.patient_id)
+    by_code = {row.code: row for row in current}
+    # Only the current rows analyze; the first pain/numbness are superseded, not lost.
+    assert by_code["symptom_pain"].value_num == 8.0
+    assert by_code["symptom_numbness"].value_num == 6.0
+    # Both moved together — each new row chains onto its own earlier same-day record.
+    assert by_code["symptom_pain"].status is ObservationStatus.amended
+    assert by_code["symptom_numbness"].status is ObservationStatus.amended
+    assert by_code["symptom_pain"].revises_id is not None
+    assert by_code["symptom_numbness"].revises_id is not None
+
+
+def test_symptom_values_must_be_in_the_0_10_scale(symptom_client: TestClient) -> None:
+    # Bounds are enforced at the schema boundary regardless of the toggle.
+    assert symptom_client.post("/adl", json=_adl(pain=11)).status_code == 422
+    assert symptom_client.post("/adl", json=_adl(numbness=-1)).status_code == 422
+
+
+async def test_symptom_capture_audits_counts_only(
+    symptom_client: TestClient, service: EmrService
+) -> None:
+    symptom_client.post("/adl", json=_adl(pain=7, numbness=4))
+    events = await service.audit.list_for_patient(PATIENT.patient_id)
+    assert [e.action for e in events] == ["record_adl"]
+    assert events[0].detail == {"observations": 6, "superseded": 0, "symptoms": 2}
+    # PHI-free: the answer values never appear in the audit detail.
+    detail_text = str(events[0].detail)
+    assert "7" not in detail_text and "4" not in detail_text
 
 
 # --- GET /observations ----------------------------------------------------------------

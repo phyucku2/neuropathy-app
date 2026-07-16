@@ -23,6 +23,15 @@ MAX_LAB_BATCH = 100
 ADL_ANSWER_MAX = 4
 ADL_COMPOSITE_MAX = 12
 
+# Symptom check-in (ADR-0034 Phase 1): pain + numbness/paresthesia, each a 0-10 severity
+# item where HIGHER = WORSE (the opposite polarity of the function answers above). These
+# are validated-measure-ALIGNED, not the instruments themselves: pain uses a 0-10 Numeric
+# Rating Scale (NRS, public-domain); numbness/tingling is an NTSS-6-aligned severity item.
+# Exact NTSS-6 wording/scoring and licensing are NOT confirmed (ADR-0034 "confirm against
+# source"), so nothing here claims to BE NTSS-6 or a validated instrument. Phase 1 only
+# CAPTURES and STORES — no normalization/scoring (Phase 2 inverts the polarity).
+SYMPTOM_NRS_MAX = 10
+
 
 class LabImportIn(BaseModel):
     """A panel of lab results the patient confirmed on-device (ADR-0003)."""
@@ -45,6 +54,23 @@ class AdlCheckInIn(BaseModel):
     stairs: int = Field(..., ge=0, le=ADL_ANSWER_MAX, description="How stairs felt today")
     balance_confidence: int = Field(
         ..., ge=0, le=ADL_ANSWER_MAX, description="Confidence in balance today"
+    )
+    # Symptom items (ADR-0034 Phase 1) — OPTIONAL so the base function check-in stays
+    # back-compatible, and gated by the `ingest_symptoms` capability: when that toggle is
+    # off the route ignores these entirely (enforced-flag honesty, ADR-0013). Higher =
+    # worse (inverse polarity of the function answers), persisted per-observation.
+    pain: int | None = Field(
+        default=None,
+        ge=0,
+        le=SYMPTOM_NRS_MAX,
+        description="Worst pain today, 0-10 NRS (0 = none, 10 = worst imaginable)",
+    )
+    numbness: int | None = Field(
+        default=None,
+        ge=0,
+        le=SYMPTOM_NRS_MAX,
+        description="Numbness/tingling severity today, 0-10 (0 = none, 10 = most severe); "
+        "NTSS-6-aligned symptom item",
     )
     check_in_date: date | None = Field(
         default=None, description="Calendar day the answers are about (default: today, UTC)"

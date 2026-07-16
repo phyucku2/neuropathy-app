@@ -12,10 +12,11 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { ApiError, messageFor } from '../../api/client';
-import { postAdlCheckIn } from '../../api/endpoints';
+import { getCapabilities, postAdlCheckIn } from '../../api/endpoints';
 import type { AdlCheckInOut } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
-import { ErrorNotice, SuccessNotice } from '../../components/StatusMessages';
+import { ErrorNotice, Loading, SuccessNotice } from '../../components/StatusMessages';
+import { useApi } from '../../lib/useApi';
 import {
   enqueueCheckIn,
   getQueuedCheckIn,
@@ -30,7 +31,12 @@ import {
   type SyncedCheckIn,
 } from './offlineSync';
 
-const ANSWER_VALUES = [0, 1, 2, 3, 4] as const;
+/** Capability key gating the symptom items (pain + numbness) — ADR-0034 Phase 1. */
+const SYMPTOMS_CAPABILITY = 'ingest_symptoms';
+
+/** 0-4 for the function questions; 0-10 for the symptom NRS-aligned items. */
+const FUNCTION_VALUES = [0, 1, 2, 3, 4] as const;
+const SYMPTOM_VALUES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
 
 /**
  * The browser-LOCAL calendar day as YYYY-MM-DD. Never toISOString(): that is
@@ -52,21 +58,61 @@ function displayDay(isoDate: string): string {
   });
 }
 
-interface Question {
-  key: 'walking' | 'stairs' | 'balance_confidence';
+type FunctionKey = 'walking' | 'stairs' | 'balance_confidence';
+type SymptomKey = 'pain' | 'numbness';
+
+interface Question<K extends string = string> {
+  key: K;
   prompt: string;
   low: string;
   high: string;
+  /** The answer scale for this question (0-4 function, 0-10 symptom). */
+  values: readonly number[];
 }
 
-const QUESTIONS: Question[] = [
-  { key: 'walking', prompt: 'How did walking feel today?', low: 'Very hard', high: 'Easy' },
-  { key: 'stairs', prompt: 'How were stairs today?', low: 'Very hard', high: 'Easy' },
+const QUESTIONS: Question<FunctionKey>[] = [
+  {
+    key: 'walking',
+    prompt: 'How did walking feel today?',
+    low: 'Very hard',
+    high: 'Easy',
+    values: FUNCTION_VALUES,
+  },
+  {
+    key: 'stairs',
+    prompt: 'How were stairs today?',
+    low: 'Very hard',
+    high: 'Easy',
+    values: FUNCTION_VALUES,
+  },
   {
     key: 'balance_confidence',
     prompt: 'How confident did you feel about your balance?',
     low: 'Not confident',
     high: 'Very confident',
+    values: FUNCTION_VALUES,
+  },
+];
+
+// Symptom items (ADR-0034 Phase 1), shown only when the ingest_symptoms toggle is on.
+// Higher = WORSE here (inverse of the function questions), so 0 anchors "none" and 10
+// the most severe. These are validated-measure-ALIGNED (pain = 0-10 NRS; numbness =
+// NTSS-6-aligned), NOT the copyrighted instruments themselves — nothing here claims to
+// be a validated/clinical measure (licensing + exact items pending confirmation).
+const SYMPTOM_QUESTIONS: Question<SymptomKey>[] = [
+  {
+    key: 'pain',
+    prompt: 'What was your worst pain today?',
+    low: 'No pain',
+    high: 'Worst imaginable',
+    values: SYMPTOM_VALUES,
+  },
+  {
+    key: 'numbness',
+    prompt: 'How strong was any numbness or tingling today?',
+    low: 'None',
+    high: 'Most severe',
+    values: SYMPTOM_VALUES,
   },
 ];
 
@@ -80,6 +126,8 @@ function SegmentedAnswer({
   onChange: (answer: number) => void;
 }) {
   const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const values = question.values;
+  const maxValue = values[values.length - 1] ?? 0;
 
   // WAI-ARIA radio-group keyboard pattern: arrow keys move focus AND select,
   // wrapping at the ends.
@@ -94,7 +142,8 @@ function SegmentedAnswer({
       return;
     }
     event.preventDefault();
-    const next = (answer + step + ANSWER_VALUES.length) % ANSWER_VALUES.length;
+    // Values are contiguous 0..max, so the value doubles as its index.
+    const next = (answer + step + values.length) % values.length;
     onChange(next);
     optionRefs.current[next]?.focus();
   };
@@ -102,7 +151,7 @@ function SegmentedAnswer({
   // Scale anchors in the accessible name so AT users hear what the endpoints mean.
   const nameFor = (answer: number): string | undefined => {
     if (answer === 0) return `0 — ${question.low}`;
-    if (answer === ANSWER_VALUES.length - 1) return `${String(answer)} — ${question.high}`;
+    if (answer === maxValue) return `${String(answer)} — ${question.high}`;
     return undefined;
   };
 
@@ -110,7 +159,7 @@ function SegmentedAnswer({
     <fieldset className="seg-group">
       <legend>{question.prompt}</legend>
       <div className="seg-row" role="radiogroup" aria-label={question.prompt}>
-        {ANSWER_VALUES.map((answer) => (
+        {values.map((answer) => (
           <button
             key={answer}
             ref={(element) => {
@@ -123,7 +172,7 @@ function SegmentedAnswer({
             aria-label={nameFor(answer)}
             // Roving tabindex: the selected option — or the first, before any
             // selection — is the group's single tab stop.
-            tabIndex={value === answer || (value === null && answer === 0) ? 0 : -1}
+            tabIndex={value === answer || (value === null && answer === values[0]) ? 0 : -1}
             onKeyDown={(event) => {
               onKeyDown(event, answer);
             }}
@@ -136,8 +185,12 @@ function SegmentedAnswer({
         ))}
       </div>
       <div className="seg-anchors">
-        <span>0 · {question.low}</span>
-        <span>4 · {question.high}</span>
+        <span>
+          {values[0]} · {question.low}
+        </span>
+        <span>
+          {maxValue} · {question.high}
+        </span>
       </div>
     </fieldset>
   );
@@ -149,11 +202,24 @@ export function CheckInPage() {
   // fallback only satisfies the type and skips queue access when it cannot apply.
   const { user } = useAuth();
   const ownerId = user?.user_id ?? null;
-  const [answers, setAnswers] = useState<Record<Question['key'], number | null>>({
+  const [answers, setAnswers] = useState<Record<FunctionKey, number | null>>({
     walking: null,
     stairs: null,
     balance_confidence: null,
   });
+  // Symptom answers (ADR-0034 Phase 1) — only collected/sent when the toggle is on.
+  const [symptoms, setSymptoms] = useState<Record<SymptomKey, number | null>>({
+    pain: null,
+    numbness: null,
+  });
+  // The symptom capture toggle (ingest_symptoms, ADR-0013). We gate the whole page on
+  // this read RESOLVING (below): a patient whose toggle is on but whose capabilities
+  // read is merely slow must not be shown a function-only form they could submit before
+  // the symptom section ever appears. A genuinely FAILED read still reads as OFF (safe
+  // default; keeps the page usable offline) — only an in-flight read blocks.
+  const { data: capabilityData, loading: capabilityLoading } = useApi(getCapabilities);
+  const symptomsOn =
+    capabilityData?.capabilities.some((c) => c.key === SYMPTOMS_CAPABILITY && c.active) ?? false;
   const [result, setResult] = useState<AdlCheckInOut | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [featureOff, setFeatureOff] = useState(false);
@@ -229,8 +295,11 @@ export function CheckInPage() {
     }
   }, [lastDropped, offlineSaved]);
 
-  const complete =
+  const functionComplete =
     answers.walking !== null && answers.stairs !== null && answers.balance_confidence !== null;
+  // When symptom capture is on, both symptom items must be answered too.
+  const symptomsComplete = symptoms.pain !== null && symptoms.numbness !== null;
+  const complete = functionComplete && (!symptomsOn || symptomsComplete);
 
   const submit = async () => {
     if (
@@ -243,12 +312,20 @@ export function CheckInPage() {
     // The patient's local calendar day — otherwise the backend defaults
     // to today-UTC and evening check-ins west of UTC land on tomorrow.
     const day = localCheckInDate();
-    const body = {
+    // Typed as the queue entry so it feeds both postAdlCheckIn and enqueueCheckIn; the
+    // optional symptom fields are structurally compatible with AdlCheckInIn.
+    const body: Omit<QueuedCheckIn, 'queued_at'> = {
       walking: answers.walking,
       stairs: answers.stairs,
       balance_confidence: answers.balance_confidence,
       check_in_date: day,
     };
+    // Attach the symptom answers only when the feature is on AND both are set — the
+    // server ignores them when off, but sending nothing keeps the payload honest.
+    if (symptomsOn && symptoms.pain !== null && symptoms.numbness !== null) {
+      body.pain = symptoms.pain;
+      body.numbness = symptoms.numbness;
+    }
     setSubmitting(true);
     setError(null);
     setFeatureOff(false);
@@ -297,6 +374,16 @@ export function CheckInPage() {
   const notices = syncNotices.map((notice) => (
     <ErrorNotice key={notice.id}>{notice.text}</ErrorNotice>
   ));
+
+  // Wait for the capability read to resolve before rendering the form (like other
+  // screens await their first read). Without this, a slow read would default the
+  // symptom items OFF and a symptoms-on patient could submit a function-only check-in
+  // without ever seeing the symptom section (ADR-0034). A failed read leaves
+  // `capabilityLoading` false, so offline/error still proceeds function-only — only an
+  // in-flight read blocks here.
+  if (capabilityLoading && capabilityData === null) {
+    return <Loading label="Loading your check-in…" />;
+  }
 
   if (offlineSaved !== null) {
     return (
@@ -377,6 +464,26 @@ export function CheckInPage() {
           />
         ))}
       </div>
+      {symptomsOn && (
+        <>
+          <h2>Symptoms today</h2>
+          <p className="muted" style={{ marginTop: 0 }}>
+            For these, a higher number means it was worse. 0 means none.
+          </p>
+          <div className="card">
+            {SYMPTOM_QUESTIONS.map((question) => (
+              <SegmentedAnswer
+                key={question.key}
+                question={question}
+                value={symptoms[question.key]}
+                onChange={(answer) => {
+                  setSymptoms((current) => ({ ...current, [question.key]: answer }));
+                }}
+              />
+            ))}
+          </div>
+        </>
+      )}
       <button
         className="btn"
         type="button"

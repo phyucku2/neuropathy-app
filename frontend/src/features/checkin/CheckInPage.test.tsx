@@ -1,9 +1,9 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { AdlCheckInIn } from '../../api/types';
-import { ME } from '../../test/fixtures';
+import type { AdlCheckInIn, CapabilityStateOut } from '../../api/types';
+import { CAPABILITIES, ME } from '../../test/fixtures';
 import { renderApp } from '../../test/renderApp';
 import { server } from '../../test/server';
 import { localCheckInDate } from './CheckInPage';
@@ -12,6 +12,11 @@ import { consumeDroppedNotices } from './offlineSync';
 
 /** The signed-in account (msw /auth/me returns ME) — the queue's owner. */
 const OWNER = ME.user_id;
+
+/** Capabilities with the opt-in symptom capture (ADR-0034) turned ON. */
+function withSymptomsOn(): CapabilityStateOut[] {
+  return CAPABILITIES.map((c) => (c.key === 'ingest_symptoms' ? { ...c, active: true } : c));
+}
 
 async function answerAll(user: ReturnType<typeof userEvent.setup>) {
   const groups = await screen.findAllByRole('radiogroup');
@@ -461,6 +466,154 @@ describe('CheckInPage', () => {
     await waitFor(() => {
       expect(bodies.map((b) => b.check_in_date)).toEqual(['2026-07-01']);
     });
+    expect(listQueuedCheckIns(OWNER)).toEqual([]);
+  });
+
+  // ---- symptom capture toggle (ADR-0034 Phase 1) ----
+
+  it('hides the pain and numbness questions when symptom capture is off (default)', async () => {
+    renderApp('/check-in');
+    // The default capabilities fixture has ingest_symptoms off — only the three
+    // function questions render, exactly as before symptom capture existed.
+    const groups = await screen.findAllByRole('radiogroup');
+    expect(groups).toHaveLength(3);
+    expect(screen.queryByText('Symptoms today')).not.toBeInTheDocument();
+    expect(screen.queryByRole('radiogroup', { name: /worst pain/i })).not.toBeInTheDocument();
+  });
+
+  it('waits for the capabilities read to resolve before rendering the form (never silently function-only)', async () => {
+    // A SLOW capabilities read with symptoms ON. The form must not render (and be
+    // submittable function-only) while the read is in flight — the Loading state holds
+    // until it resolves, then the symptom section appears (ADR-0034 finding #3).
+    server.use(
+      http.get('/capabilities', async () => {
+        await delay(60);
+        return HttpResponse.json({ capabilities: withSymptomsOn() });
+      }),
+    );
+    renderApp('/check-in');
+    // While the read is in flight: Loading, and no check-in form / submit button yet.
+    expect(await screen.findByText('Loading your check-in…')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save my check-in' })).not.toBeInTheDocument();
+    // Once resolved, the symptom section is present — it was never skipped.
+    await waitFor(() => {
+      expect(screen.getAllByRole('radiogroup')).toHaveLength(5);
+    });
+    expect(screen.getByText('Symptoms today')).toBeInTheDocument();
+  });
+
+  it('shows pain + numbness when the toggle is on and includes them in the POST', async () => {
+    let received: AdlCheckInIn | null = null;
+    server.use(
+      http.get('/capabilities', () => HttpResponse.json({ capabilities: withSymptomsOn() })),
+      http.post('/adl', async ({ request }) => {
+        received = (await request.json()) as AdlCheckInIn;
+        return HttpResponse.json({
+          check_in_date: '2026-07-13',
+          daily_score: 9,
+          superseded: false,
+        });
+      }),
+    );
+    const user = userEvent.setup();
+    renderApp('/check-in');
+    // Five questions now: three function + two symptom (0-10).
+    await waitFor(() => {
+      expect(screen.getAllByRole('radiogroup')).toHaveLength(5);
+    });
+    const groups = screen.getAllByRole('radiogroup');
+    const save = screen.getByRole('button', { name: 'Save my check-in' });
+
+    // Function answers alone are NOT enough while symptom capture is on.
+    await user.click(within(groups[0] as HTMLElement).getByRole('radio', { name: '3' }));
+    await user.click(within(groups[1] as HTMLElement).getByRole('radio', { name: '2' }));
+    await user.click(
+      within(groups[2] as HTMLElement).getByRole('radio', { name: '4 — Very confident' }),
+    );
+    expect(save).toBeDisabled();
+
+    // The symptom scales anchor 0 = none, 10 = worst (higher = worse).
+    const pain = within(
+      screen.getByRole('radiogroup', { name: 'What was your worst pain today?' }),
+    );
+    expect(pain.getByRole('radio', { name: '0 — No pain' })).toBeInTheDocument();
+    expect(pain.getByRole('radio', { name: '10 — Worst imaginable' })).toBeInTheDocument();
+    await user.click(pain.getByRole('radio', { name: '7' }));
+    const numbness = within(
+      screen.getByRole('radiogroup', { name: 'How strong was any numbness or tingling today?' }),
+    );
+    await user.click(numbness.getByRole('radio', { name: '3' }));
+    expect(save).toBeEnabled();
+
+    await user.click(save);
+    expect(await screen.findByText('Check-in saved')).toBeInTheDocument();
+    const now = new Date();
+    const localDay = `${String(now.getFullYear())}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    expect(received).toEqual({
+      walking: 3,
+      stairs: 2,
+      balance_confidence: 4,
+      check_in_date: localDay,
+      pain: 7,
+      numbness: 3,
+    });
+  });
+
+  it('queues the symptom answers offline and flushes them when back online', async () => {
+    let offline = true;
+    const bodies: AdlCheckInIn[] = [];
+    server.use(
+      http.get('/capabilities', () => HttpResponse.json({ capabilities: withSymptomsOn() })),
+      http.post('/adl', async ({ request }) => {
+        const body = (await request.json()) as AdlCheckInIn;
+        if (offline) {
+          return HttpResponse.error();
+        }
+        bodies.push(body);
+        return HttpResponse.json({
+          check_in_date: body.check_in_date,
+          daily_score: 9,
+          superseded: false,
+        });
+      }),
+    );
+    const user = userEvent.setup();
+    renderApp('/check-in');
+    await waitFor(() => {
+      expect(screen.getAllByRole('radiogroup')).toHaveLength(5);
+    });
+    const groups = screen.getAllByRole('radiogroup');
+    await user.click(within(groups[0] as HTMLElement).getByRole('radio', { name: '3' }));
+    await user.click(within(groups[1] as HTMLElement).getByRole('radio', { name: '2' }));
+    await user.click(
+      within(groups[2] as HTMLElement).getByRole('radio', { name: '4 — Very confident' }),
+    );
+    await user.click(within(groups[3] as HTMLElement).getByRole('radio', { name: '7' }));
+    await user.click(within(groups[4] as HTMLElement).getByRole('radio', { name: '3' }));
+    await user.click(screen.getByRole('button', { name: 'Save my check-in' }));
+
+    await screen.findByRole('heading', { name: 'Check-in saved on this device' });
+    // The queued entry carries the symptom answers (ADR-0034), not just the function ones.
+    expect(listQueuedCheckIns(OWNER)).toEqual([
+      {
+        walking: 3,
+        stairs: 2,
+        balance_confidence: 4,
+        pain: 7,
+        numbness: 3,
+        check_in_date: localCheckInDate(),
+        queued_at: expect.any(String) as string,
+      },
+    ]);
+
+    // Connectivity returns: the flush sends pain + numbness through to the server.
+    offline = false;
+    window.dispatchEvent(new Event('online'));
+    await screen.findByRole('heading', { name: 'Check-in saved' });
+    await waitFor(() => {
+      expect(bodies).toHaveLength(1);
+    });
+    expect(bodies[0]).toMatchObject({ pain: 7, numbness: 3 });
     expect(listQueuedCheckIns(OWNER)).toEqual([]);
   });
 });

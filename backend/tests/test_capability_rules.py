@@ -122,12 +122,16 @@ async def test_registry_covers_every_shipped_feature() -> None:
         "ingest_labs",
         "ingest_adl",
         "ingest_biomech",
+        "ingest_symptoms",
         "emr_connect",
         "ai_narrative",
         "share_with_clinic",
     }
-    # Back-compat: with no rows, everything that works today keeps working.
-    assert all(s.active for s in states)
+    by_key = {s.key: s for s in states}
+    # Back-compat: with no rows, every pre-existing feature keeps working. The one opt-in
+    # key (ingest_symptoms, ADR-0034 Phase 1) is default OFF until the owner enables it.
+    assert all(s.active for s in states if s.key != "ingest_symptoms")
+    assert by_key["ingest_symptoms"].active is False
     assert all(s.managed_by == "patient" for s in states)
 
 
