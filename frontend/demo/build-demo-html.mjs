@@ -64,6 +64,17 @@ const SLIDES = [
       'says so — research-grade integrity over a pretty number.',
   },
   {
+    img: '04b-learn',
+    eyebrow: 'Learn',
+    title: 'Non-diagnostic education',
+    body:
+      'A “Learn” surface indexes short, plain-language education modules — exercise and ' +
+      'balance training first, the one topic with strong verified DPN outcome evidence. ' +
+      'The content is a closed, clinician-reviewed registry (no generated medical claims), ' +
+      'general to everyone rather than tailored advice, and every card carries the ' +
+      'non-diagnostic disclaimer.',
+  },
+  {
     img: '05-checkin',
     eyebrow: 'Engagement',
     title: 'A 60-second daily check-in',

@@ -197,6 +197,7 @@ describe('navigation', () => {
     renderApp('/');
     await screen.findByText('30 Day Score');
     const nav = screen.getByRole('navigation', { name: 'Main' });
-    expect(within(nav).getAllByRole('link')).toHaveLength(4);
+    // Home, Trends, Learn (ADR-0037), Add, Sources — five tabs.
+    expect(within(nav).getAllByRole('link')).toHaveLength(5);
   });
 });

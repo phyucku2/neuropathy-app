@@ -34,6 +34,9 @@ const HomePage = lazy(() =>
 const TrendsPage = lazy(() =>
   import('./features/trends/TrendsPage').then((m) => ({ default: m.TrendsPage })),
 );
+const LearnPage = lazy(() =>
+  import('./features/learn/LearnPage').then((m) => ({ default: m.LearnPage })),
+);
 const CheckInPage = lazy(() =>
   import('./features/checkin/CheckInPage').then((m) => ({ default: m.CheckInPage })),
 );
@@ -119,6 +122,9 @@ export function App() {
               <Route element={<AppShell />}>
                 <Route index element={<HomePage />} />
                 <Route path="trends" element={<TrendsPage />} />
+                {/* Learn — the non-diagnostic education index (ADR-0037), a patient-area
+                    route alongside trends/add/settings. Placeholder content only. */}
+                <Route path="learn" element={<LearnPage />} />
                 <Route path="check-in" element={<CheckInPage />} />
                 <Route path="add" element={<AddDataPage />} />
                 <Route path="settings" element={<SettingsPage />} />
