@@ -1,0 +1,127 @@
+# Render Blueprint (Infrastructure-as-Code) for the neuropathy-app.
+# Docs: https://render.com/docs/blueprint-spec
+#
+# What this provisions:
+#   - neuropathy-backend  : FastAPI (Gunicorn + Uvicorn workers) from backend/Dockerfile
+#   - neuropathy-frontend : built SPA on non-root nginx from frontend/Dockerfile, which
+#                           reverse-proxies the API to the backend over Render's private
+#                           network (same-origin -> no CORS; the backend has no CORS layer)
+#   - neuropathy-db       : managed Postgres
+#
+# Nothing here is a secret. Values that must be supplied by the operator use
+# `sync: false` (Render prompts for them at first deploy and never stores them in git).
+# See docs/ops/DEPLOY.md for the full runbook.
+#
+# NOTE ON DATABASE_URL (important — one manual step): the app's async engine requires the
+# `postgresql+asyncpg://` scheme (backend/app/db/session.py, alembic/env.py). Render's
+# managed-Postgres connection string uses the bare `postgresql://` scheme, and the app is
+# intentionally NOT modified to rewrite it. So DATABASE_URL is `sync: false`: after the DB
+# is created, copy its *Internal* Database URL and change the scheme prefix from
+# `postgresql://` to `postgresql+asyncpg://` (drop any `?sslmode=`/`?ssl=` query — asyncpg
+# does not accept libpq's sslmode param; the internal URL has none). Details in DEPLOY.md.
+#
+# A `fromDatabase` auto-wire is shown commented-out below to make the reason explicit; it
+# is NOT used because it would inject the wrong (non-asyncpg) scheme.
+
+databases:
+  - name: neuropathy-db
+    databaseName: neuropathy
+    user: neuro
+    # `free` Postgres is fine to try the app but is deleted ~30 days after creation and
+    # has no backups. Move to `basic-256mb` (or larger) for anything you care about.
+    plan: free
+    region: oregon
+
+services:
+  # ---------------------------------------------------------------------------
+  # Backend API — the real, durable app (auth, check-ins, trajectory, EMR, ops).
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: neuropathy-backend
+    runtime: docker
+    repo: # optional — Render fills this from the connected repo. Set if deploying a fork.
+    region: oregon
+    # `starter` (or larger) is required for `preDeployCommand` (release-phase migrations)
+    # and avoids the free tier's cold-start spin-down. `free` works but has neither.
+    plan: starter
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    # Liveness probe — the backend's always-fast, dependency-free 200 (app/api/routes/
+    # health.py). Use /readyz instead if you want Render to also gate on DB reachability.
+    healthCheckPath: /healthz
+    # Release step: apply DB migrations to `head` BEFORE the new version serves traffic.
+    # The app never migrates its own schema (files-only rule, backend/README.md); the
+    # image's WORKDIR is /app where alembic.ini + alembic/ live, and PATH has the venv, so
+    # `alembic upgrade head` resolves and reads DATABASE_URL from app settings. This runs
+    # through the image ENTRYPOINT (docker-entrypoint.sh `exec "$@"`), so it is the same
+    # image as the server. docker-entrypoint.sh does NOT migrate on boot, so there is no
+    # double-run. (preDeployCommand requires a paid instance type.)
+    preDeployCommand: alembic upgrade head
+    envVars:
+      # REQUIRED, manual: see the DATABASE_URL note at the top of this file. Set this to
+      # the DB's Internal URL with the scheme rewritten to postgresql+asyncpg:// .
+      - key: DATABASE_URL
+        sync: false
+      #   Auto-wire is intentionally NOT used — it yields the wrong (non-asyncpg) scheme:
+      # - key: DATABASE_URL
+      #   fromDatabase:
+      #     name: neuropathy-db
+      #     property: connectionString   # -> postgresql://...  (app needs +asyncpg)
+      #
+      # JWT signing secret (ADR-0010). No format constraint -> safe to auto-generate.
+      # Rotating this invalidates all issued tokens (everyone must log in again).
+      - key: JWT_SECRET
+        generateValue: true
+      # Fernet key for the DB-backed EMR OAuth token vault (ADR-0017). MUST be a real
+      # base64 Fernet key, which Render's generateValue does NOT produce, so it is manual.
+      # Optional: leave blank to keep EMR tokens in a per-process in-memory vault (fail
+      # closed — never written to the DB in plaintext). Required only for durable EMR
+      # connections. Generate:
+      #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      - key: SECRET_STORE_KEY
+        sync: false
+      # First-ops bootstrap token (ADR-0019). Optional: blank = clinician provisioning
+      # disabled (patient register/login still works). If set, must be >= 32 chars or the
+      # process fails closed at startup. Generate:
+      #   python -c "import secrets; print(secrets.token_urlsafe(48))"
+      - key: OPS_BOOTSTRAP_TOKEN
+        sync: false
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      # Gunicorn worker count (gunicorn.conf.py). Size to the instance's CPU.
+      - key: WEB_CONCURRENCY
+        value: "2"
+      # PORT is injected by Render and honored by gunicorn.conf.py (bind 0.0.0.0:$PORT).
+      # PROMETHEUS_MULTIPROC_DIR is baked into the image; no need to set either here.
+
+  # ---------------------------------------------------------------------------
+  # Frontend SPA — one immutable image; API base URL is injected at container start.
+  # It reverse-proxies the API to the backend over Render's private network, so the
+  # browser talks to a single origin and no backend CORS layer is required.
+  # (Optional: delete this service if you host the SPA elsewhere or serve the static
+  #  mock demo separately. The backend above is the core deliverable.)
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: neuropathy-frontend
+    runtime: docker
+    region: oregon
+    plan: starter
+    dockerfilePath: ./frontend/Dockerfile
+    dockerContext: ./frontend
+    healthCheckPath: /healthz
+    envVars:
+      # Empty = same-origin: nginx reverse-proxies /auth, /observations, /trajectory, etc.
+      # to BACKEND_ORIGIN (frontend/nginx.conf.template). No CORS needed.
+      - key: API_BASE_URL
+        value: ""
+      # Internal host:port of the backend on Render's private network. If `hostport` is
+      # not resolved in your Render setup, hard-code the backend's internal address here
+      # instead (see DEPLOY.md), or point API_BASE_URL at the backend's public URL — but
+      # that path needs a CORS layer the backend does not currently ship.
+      - key: BACKEND_ORIGIN
+        fromService:
+          type: web
+          name: neuropathy-backend
+          property: hostport
