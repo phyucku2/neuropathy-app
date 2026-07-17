@@ -12,7 +12,8 @@ import {
 describe('signalMeta', () => {
   it('mirrors the backend directionality registry for known codes', () => {
     expect(polarityFor('biomech_balance_score')).toBe('higher_is_better');
-    expect(polarityFor('biomech_sway_velocity')).toBe('lower_is_better');
+    expect(polarityFor('biomech_gait_score')).toBe('higher_is_better');
+    expect(polarityFor('wearable_walking_asymmetry')).toBe('lower_is_better');
     expect(polarityFor('4548-4')).toBe('lower_is_better'); // HbA1c by LOINC code
     expect(polarityFor('2132-9')).toBe('in_range_is_better'); // B12
     expect(polarityFor('biomech_cadence')).toBe('unknown');
@@ -22,16 +23,18 @@ describe('signalMeta', () => {
 
   it('states direction-of-better in plain language, never judging unknown codes', () => {
     expect(directionOfBetter('biomech_balance_score')).toBe('Higher is better for this measure.');
-    expect(directionOfBetter('biomech_sway_velocity')).toBe('Lower is better for this measure.');
+    expect(directionOfBetter('wearable_walking_asymmetry')).toBe(
+      'Lower is better for this measure.',
+    );
     expect(directionOfBetter('2345-7')).toBe('Best when inside the normal range.');
-    expect(directionOfBetter('biomech_step_length')).toContain('not judged better or worse');
+    expect(directionOfBetter('biomech_cadence')).toContain('not judged better or worse');
   });
 
   it('judges deltas against polarity', () => {
     expect(judgeChange('biomech_balance_score', 8)).toBe('better');
     expect(judgeChange('biomech_balance_score', -3)).toBe('worse');
-    expect(judgeChange('biomech_sway_velocity', -1.5)).toBe('better');
-    expect(judgeChange('biomech_sway_velocity', 1.5)).toBe('worse');
+    expect(judgeChange('wearable_walking_asymmetry', -1.5)).toBe('better');
+    expect(judgeChange('wearable_walking_asymmetry', 1.5)).toBe('worse');
     expect(judgeChange('biomech_balance_score', 0)).toBe('neutral');
     expect(judgeChange('2132-9', 40)).toBe('neutral'); // in-range: never judged by delta
     expect(judgeChange('made_up_code', 2)).toBe('neutral');
