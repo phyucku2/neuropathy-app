@@ -19,8 +19,8 @@ test.describe('Patient Trends', () => {
     // A real SVG axis was drawn (recharts).
     await expect(page.locator('.trend-chart svg')).toBeVisible();
 
-    // Sway velocity: lower-is-better, rising 9 -> 13 = "worse".
-    await page.getByRole('button', { name: 'Sway velocity' }).click();
+    // Walking asymmetry: lower-is-better, rising 5 -> 9 = "worse".
+    await page.getByRole('button', { name: 'Walking asymmetry' }).click();
     await expect(page.getByLabel('up 4 — getting worse')).toBeVisible();
     await expect(page.getByText('Lower is better for this measure.')).toBeVisible();
   });
@@ -39,7 +39,7 @@ test.describe('Patient Trends', () => {
     await signedInApp(page, { observations: OBSERVATIONS_TRENDS });
     await page.goto('/trends');
 
-    await page.getByRole('button', { name: 'Gait speed' }).click();
+    await page.getByRole('button', { name: 'Cadence' }).click();
     await expect(
       page.getByText('Not enough readings to draw a trend yet — one more and the line appears.'),
     ).toBeVisible();

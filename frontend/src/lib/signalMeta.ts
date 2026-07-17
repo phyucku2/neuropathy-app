@@ -49,14 +49,34 @@ const REGISTRY: Record<string, SignalMeta> = {
   // labels from the lab-side "pain" so the self-reported symptom never renders twice.
   symptom_pain: { polarity: 'lower_is_better', label: 'nerve pain' },
   symptom_numbness: { polarity: 'lower_is_better', label: 'numbness or tingling' },
-  // BioMech report metrics (ADR-0014).
+  // BioMech report metrics (ADR-0014; real report format ADR-0036). Mirrors the backend
+  // directionality registry (backend/app/trajectory/directionality.py) — the two device-grade
+  // composites (balance/gait score) plus their component metrics.
   biomech_balance_score: { polarity: 'higher_is_better', label: 'Balance score' },
-  biomech_sway_velocity: { polarity: 'lower_is_better', label: 'Sway velocity' },
-  biomech_sway_area: { polarity: 'lower_is_better', label: 'Sway area' },
-  biomech_gait_speed: { polarity: 'higher_is_better', label: 'Gait speed' },
+  biomech_balance_speed_normal: { polarity: 'higher_is_better', label: 'Balance speed' },
+  biomech_balance_movement_normal: { polarity: 'higher_is_better', label: 'Balance steadiness' },
+  biomech_balance_position_normal: { polarity: 'higher_is_better', label: 'Balance position' },
+  biomech_gait_score: { polarity: 'higher_is_better', label: 'Gait score' },
   biomech_cadence: { polarity: 'unknown', label: 'Cadence' },
-  biomech_step_length: { polarity: 'unknown', label: 'Step length' },
-  biomech_step_time_symmetry: { polarity: 'higher_is_better', label: 'Step time symmetry' },
+  biomech_step_length: { polarity: 'higher_is_better', label: 'Step length' },
+  biomech_total_steps: { polarity: 'unknown', label: 'Total steps' },
+  biomech_impact_symmetry: { polarity: 'higher_is_better', label: 'Walking symmetry' },
+  biomech_support_ratio: { polarity: 'higher_is_better', label: 'Support balance' },
+  biomech_single_support_symmetry: {
+    polarity: 'higher_is_better',
+    label: 'Single-support symmetry',
+  },
+  biomech_pelvic_tilt_neutral: { polarity: 'higher_is_better', label: 'Pelvic alignment' },
+  // Wearable / phone mobility metrics (source='wearable', ADR-0035 Phase 1). Codes match
+  // schemas/wearable.py; polarity mirrors the backend registry (the verified reliability split
+  // lives in the fidelity tier, not here).
+  wearable_walking_speed: { polarity: 'higher_is_better', label: 'Walking speed' },
+  wearable_step_length: { polarity: 'higher_is_better', label: 'Step length' },
+  wearable_steps: { polarity: 'higher_is_better', label: 'Daily steps' },
+  wearable_walking_distance: { polarity: 'higher_is_better', label: 'Walking distance' },
+  wearable_walking_asymmetry: { polarity: 'lower_is_better', label: 'Walking asymmetry' },
+  wearable_double_support: { polarity: 'lower_is_better', label: 'Double-support time' },
+  wearable_walking_steadiness: { polarity: 'higher_is_better', label: 'Walking steadiness' },
 };
 
 export function polarityFor(code: string): Polarity {
@@ -117,6 +137,8 @@ export function sourceLabel(source: string): string {
       return 'Lab';
     case 'adl':
       return 'Check-in';
+    case 'wearable':
+      return 'Phone/watch';
     case 'emr':
       return 'Your records';
     default:

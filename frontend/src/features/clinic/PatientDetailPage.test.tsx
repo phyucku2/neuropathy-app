@@ -92,10 +92,10 @@ describe('PatientDetailPage — cross-source trend table', () => {
     expect(balanceRow).toHaveTextContent('↑ 1');
     expect(balanceRow).toHaveTextContent('better');
 
-    // Sway velocity: 12.9 → 11.4 (LOWER is better) — a falling line judged better.
-    const swayRow = screen.getByRole('row', { name: /Sway velocity/ });
-    expect(swayRow).toHaveTextContent('↓ 1.5');
-    expect(swayRow).toHaveTextContent('better');
+    // Walking asymmetry: 7.6 → 6.1 (LOWER is better) — a falling line judged better.
+    const asymmetryRow = screen.getByRole('row', { name: /Walking asymmetry/ });
+    expect(asymmetryRow).toHaveTextContent('↓ 1.5');
+    expect(asymmetryRow).toHaveTextContent('better');
 
     // A single lab reading is never judged. Named by the backend's display —
     // the same name the Observations tab shows, never the raw code.
@@ -226,7 +226,7 @@ describe('PatientDetailPage — observations tab', () => {
   it('lists the page of raw records with values, sources, and dates', async () => {
     actAsClinician();
     await openTab('Observations');
-    expect(await screen.findByText('Showing 1–6 of 6')).toBeInTheDocument();
+    expect(await screen.findByText('Showing 1–8 of 8')).toBeInTheDocument();
     const labRow = screen.getByRole('row', { name: /Hemoglobin A1c/ });
     expect(labRow).toHaveTextContent('7.2 %');
     expect(labRow).toHaveTextContent('Lab');

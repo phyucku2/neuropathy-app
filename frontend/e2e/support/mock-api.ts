@@ -170,8 +170,24 @@ export const OBSERVATIONS: ObservationItem[] = [
   obs('biomech_balance_score', 'Balance score', 65, '{score}', '2026-07-02T10:00:00Z', 'biomech'),
   obs('biomech_balance_score', 'Balance score', 64, '{score}', '2026-06-04T10:00:00Z', 'biomech'),
   obs('biomech_balance_score', 'Balance score', 57, '{score}', '2026-05-06T10:00:00Z', 'biomech'),
-  obs('biomech_sway_velocity', 'Sway velocity', 11.4, 'mm/s', '2026-07-02T10:00:00Z', 'biomech'),
-  obs('biomech_sway_velocity', 'Sway velocity', 12.9, 'mm/s', '2026-06-04T10:00:00Z', 'biomech'),
+  obs('biomech_gait_score', 'Gait score', 72, '{score}', '2026-07-02T10:00:00Z', 'biomech'),
+  obs('biomech_gait_score', 'Gait score', 66, '{score}', '2026-06-04T10:00:00Z', 'biomech'),
+  obs(
+    'wearable_walking_asymmetry',
+    'Walking asymmetry',
+    6.1,
+    '%',
+    '2026-07-02T10:00:00Z',
+    'wearable',
+  ),
+  obs(
+    'wearable_walking_asymmetry',
+    'Walking asymmetry',
+    7.6,
+    '%',
+    '2026-06-04T10:00:00Z',
+    'wearable',
+  ),
   obs('4548-4', 'Hemoglobin A1c', 7.2, '%', '2026-06-20T09:00:00Z', 'lab'),
 ];
 
@@ -182,13 +198,27 @@ export const OBSERVATIONS_TRENDS: ObservationItem[] = [
   obs('biomech_balance_score', 'Balance score', 60, '{score}', '2026-05-01T10:00:00Z', 'biomech'),
   obs('biomech_balance_score', 'Balance score', 68, '{score}', '2026-06-01T10:00:00Z', 'biomech'),
   // lower-is-better, rising → "worse"
-  obs('biomech_sway_velocity', 'Sway velocity', 9, 'mm/s', '2026-05-02T10:00:00Z', 'biomech'),
-  obs('biomech_sway_velocity', 'Sway velocity', 13, 'mm/s', '2026-06-02T10:00:00Z', 'biomech'),
+  obs(
+    'wearable_walking_asymmetry',
+    'Walking asymmetry',
+    5,
+    '%',
+    '2026-05-02T10:00:00Z',
+    'wearable',
+  ),
+  obs(
+    'wearable_walking_asymmetry',
+    'Walking asymmetry',
+    9,
+    '%',
+    '2026-06-02T10:00:00Z',
+    'wearable',
+  ),
   // two readings with DIFFERENT unit strings → "unit changed", no delta
   obs('hba1c', 'Hemoglobin A1c', 7, '%', '2026-05-03T09:00:00Z', 'lab'),
   obs('hba1c', 'Hemoglobin A1c', 53, 'mmol/mol', '2026-06-03T09:00:00Z', 'lab'),
   // single reading → chart empty state ("not enough readings")
-  obs('biomech_gait_speed', 'Gait speed', 1.1, 'm/s', '2026-06-04T10:00:00Z', 'biomech'),
+  obs('biomech_cadence', 'Cadence', 104, 'steps/min', '2026-06-04T10:00:00Z', 'biomech'),
 ];
 
 export const CAPABILITIES: CapabilityStateOut[] = [
@@ -787,12 +817,12 @@ function buildClinicObservations(): ObservationItem[] {
     const day = String(28 - i).padStart(2, '0');
     items.push(
       obs(
-        'biomech_sway_velocity',
-        'Sway velocity',
+        'wearable_walking_asymmetry',
+        'Walking asymmetry',
         10 + i * 0.2,
-        'mm/s',
+        '%',
         `2026-05-${day}T10:00:00Z`,
-        'biomech',
+        'wearable',
       ),
     );
   }

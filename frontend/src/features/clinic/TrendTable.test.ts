@@ -65,8 +65,8 @@ describe('buildTrendRows', () => {
 
   it('calls a zero delta on a judgeable measure "no change", not "stable"', () => {
     const rows = buildTrendRows([
-      reading('biomech_gait_speed', 1.2, '2026-06-01T10:00:00Z', 'biomech'),
-      reading('biomech_gait_speed', 1.2, '2026-07-01T10:00:00Z', 'biomech'),
+      reading('biomech_gait_score', 70, '2026-06-01T10:00:00Z', 'biomech'),
+      reading('biomech_gait_score', 70, '2026-07-01T10:00:00Z', 'biomech'),
     ]);
     expect(rows[0]?.judgment).toBe('no change');
   });

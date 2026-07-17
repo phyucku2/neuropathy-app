@@ -22,7 +22,8 @@ describe('TrendsPage', () => {
     expect(picker).toBeInTheDocument();
     const chips = screen.getAllByRole('button', { pressed: false }).map((b) => b.textContent);
     expect(screen.getByRole('button', { pressed: true })).toHaveTextContent('Balance score');
-    expect(chips).toContain('Sway velocity');
+    expect(chips).toContain('Gait score');
+    expect(chips).toContain('Walking asymmetry');
     expect(chips).toContain('Hemoglobin A1c');
   });
 
@@ -44,9 +45,9 @@ describe('TrendsPage', () => {
     const user = userEvent.setup();
     renderApp('/trends');
     await screen.findByRole('img', { name: /^Balance score:/ });
-    await user.click(screen.getByRole('button', { name: 'Sway velocity' }));
-    expect(await screen.findByRole('img', { name: /^Sway velocity:/ })).toHaveAccessibleName(
-      /falling from 12.9 to 11.4 mm\/s/,
+    await user.click(screen.getByRole('button', { name: 'Walking asymmetry' }));
+    expect(await screen.findByRole('img', { name: /^Walking asymmetry:/ })).toHaveAccessibleName(
+      /falling from 7.6 to 6.1 %/,
     );
     expect(screen.getByText('Lower is better for this measure.')).toBeInTheDocument();
   });
@@ -57,23 +58,23 @@ describe('TrendsPage', () => {
     // Balance score: higher-is-better, +1 → judged better, up-arrow.
     const balanceDelta = await screen.findByRole('img', { name: 'up 1 — improving' });
     expect(balanceDelta).toHaveTextContent('↑ 1 · better');
-    // Sway velocity: lower-is-better, so the DOWN arrow is judged better too —
+    // Walking asymmetry: lower-is-better, so the DOWN arrow is judged better too —
     // the visible word resolves the arrow/color contradiction.
-    await user.click(screen.getByRole('button', { name: 'Sway velocity' }));
-    const swayDelta = await screen.findByRole('img', { name: 'down 1.5 — improving' });
-    expect(swayDelta).toHaveTextContent('↓ 1.5 · better');
+    await user.click(screen.getByRole('button', { name: 'Walking asymmetry' }));
+    const asymmetryDelta = await screen.findByRole('img', { name: 'down 1.5 — improving' });
+    expect(asymmetryDelta).toHaveTextContent('↓ 1.5 · better');
   });
 
   it('marks a worsening change and leaves unjudged metrics without a verdict word', async () => {
     const worseAndUnjudged: ObservationItem[] = [
-      // Sway velocity rising: lower-is-better, so this is judged worse.
+      // Walking asymmetry rising: lower-is-better, so this is judged worse.
       {
-        ...(OBSERVATIONS[3] as ObservationItem),
+        ...(OBSERVATIONS[5] as ObservationItem),
         value: 13.1,
         effective_at: '2026-07-02T10:00:00Z',
       },
       {
-        ...(OBSERVATIONS[3] as ObservationItem),
+        ...(OBSERVATIONS[5] as ObservationItem),
         value: 11.4,
         effective_at: '2026-06-04T10:00:00Z',
       },
@@ -231,7 +232,7 @@ describe('TrendChart helpers', () => {
   it('trendAriaLabel covers rising, falling, steady, and unitless series', () => {
     expect(trendAriaLabel('Balance score', 'score', points)).toMatch(/rising from 57 to 64 score/);
     const falling = [...points].map((p, i) => ({ ...p, value: 70 - i }));
-    expect(trendAriaLabel('Sway velocity', 'mm/s', falling)).toMatch(/falling/);
+    expect(trendAriaLabel('Walking asymmetry', '%', falling)).toMatch(/falling/);
     const steady = points.map((p) => ({ ...p, value: 5 }));
     expect(trendAriaLabel('Cadence', '', steady)).toMatch(/steady at 5$/);
     expect(trendAriaLabel('Anything', '', [])).toBe('Anything: no readings yet');
