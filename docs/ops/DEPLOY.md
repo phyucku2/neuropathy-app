@@ -193,6 +193,15 @@ Platform mapping: Fly.io → `fly.toml` with a `[deploy] release_command = "alem
 upgrade head"`; Railway → a pre-deploy/release command with the same string. The contract
 is identical: one image, the env vars above, `alembic upgrade head` before serving.
 
+> **Azure** — for a first-class Azure path (Container Apps + Azure Database for PostgreSQL
+> Flexible Server) as Infrastructure-as-Code, see the Bicep template `infra/azure/main.bicep`
+> and the dedicated runbook **[`docs/ops/deploy-azure.md`](./deploy-azure.md)**. It follows
+> the same contract (one image each, the env vars above, `alembic upgrade head` in a
+> Container Apps **Job** before serving) and documents the Azure-specific
+> `DATABASE_URL` form: `postgresql+asyncpg://…?ssl=require` (asyncpg's `ssl`, not libpq's
+> `sslmode`, because Azure Postgres enforces TLS). **PHI note:** a signed Microsoft BAA is
+> required before real PHI — called out prominently in that runbook.
+
 ---
 
 ## 4. Verify it's live (checklist)
