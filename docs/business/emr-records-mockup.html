@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your Records — EMR pull mockup</title>
+<style>
+  :root {
+    --navy: #173a5e; --navy-deep: #0f2a45; --blue: #2e6da4; --blue-bright: #2e86c8;
+    --sky: #7fb0d4; --sky-tint: #e8f1f8;
+    --ink: #233444; --sub: #556677; --border: #d3dee8; --muted: #f2f6fa; --card: #ffffff;
+    --bg: #dbe7f2; --frame-ring: #c2d4e4;
+    --good: #277a4d; --good-tint: #e5f2ea; --warn: #b4701f; --warn-tint: #f7ecdb;
+    --danger: #b23543; --danger-tint: #f7e2e4; --neutral: #1f4e79; --neutral-tint: #e6eef6;
+    --header: linear-gradient(90deg, #0f2a45 0%, #2e86c8 100%);
+    --shadow: 0 18px 50px rgba(15, 42, 69, 0.20);
+    --font: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --display: "Poppins", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #e8eff6; --sub: #9db2c6; --border: #2b3f54; --muted: #142433; --card: #182a3b;
+      --bg: #0c1826; --frame-ring: #24384c;
+      --good: #6fd39b; --good-tint: #14352a; --warn: #e6b26a; --warn-tint: #3a2c14;
+      --danger: #f0919c; --danger-tint: #3a1c22; --neutral: #9cc2e6; --neutral-tint: #16304a;
+      --shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ink: #e8eff6; --sub: #9db2c6; --border: #2b3f54; --muted: #142433; --card: #182a3b;
+    --bg: #0c1826; --frame-ring: #24384c;
+    --good: #6fd39b; --good-tint: #14352a; --warn: #e6b26a; --warn-tint: #3a2c14;
+    --danger: #f0919c; --danger-tint: #3a1c22; --neutral: #9cc2e6; --neutral-tint: #16304a;
+    --shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+  }
+  :root[data-theme="light"] {
+    --ink: #233444; --sub: #556677; --border: #d3dee8; --muted: #f2f6fa; --card: #ffffff;
+    --bg: #dbe7f2; --frame-ring: #c2d4e4;
+    --good: #277a4d; --good-tint: #e5f2ea; --warn: #b4701f; --warn-tint: #f7ecdb;
+    --danger: #b23543; --danger-tint: #f7e2e4; --neutral: #1f4e79; --neutral-tint: #e6eef6;
+    --shadow: 0 18px 50px rgba(15, 42, 69, 0.20);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--font); font-size: 17px; line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    padding: clamp(16px, 4vw, 48px) 16px 64px;
+    display: flex; flex-direction: column; align-items: center; gap: 28px;
+  }
+  .lead { max-width: 760px; text-align: center; }
+  .lead .tag {
+    display: inline-block; font-size: 12px; font-weight: 700; letter-spacing: 0.14em;
+    text-transform: uppercase; color: #fff; background: var(--blue);
+    padding: 5px 12px; border-radius: 999px; margin-bottom: 14px;
+  }
+  .lead h1 {
+    font-family: var(--display); font-size: clamp(24px, 4.5vw, 34px); line-height: 1.15;
+    margin: 0 0 10px; text-wrap: balance; letter-spacing: -0.01em;
+  }
+  .lead p { margin: 0 auto; max-width: 62ch; color: var(--sub); font-size: 16px; }
+
+  /* Phone frame */
+  .phone {
+    width: 100%; max-width: 440px; background: var(--card);
+    border-radius: 30px; box-shadow: var(--shadow);
+    outline: 1px solid var(--frame-ring); overflow: hidden;
+  }
+  .appbar {
+    background: var(--header); color: #fff;
+    padding: 22px 20px; display: flex; align-items: center; justify-content: space-between;
+  }
+  .appbar .brand { display: flex; align-items: center; gap: 10px; font-family: var(--display); font-weight: 600; font-size: 19px; }
+  .appbar .disc { width: 22px; height: 22px; border-radius: 50%;
+    background: repeating-linear-gradient(90deg, #fff 0 2px, transparent 2px 4px); opacity: .9; }
+  .appbar .avatar { width: 40px; height: 40px; border-radius: 50%; background: rgba(255,255,255,.22);
+    display: grid; place-items: center; font-weight: 700; font-size: 14px; }
+
+  .screen { padding: 22px 18px 12px; display: flex; flex-direction: column; gap: 18px; }
+  .screen h2.page { font-family: var(--display); font-size: 26px; margin: 4px 2px 0; letter-spacing: -0.01em; }
+  .intro { color: var(--sub); font-size: 16px; margin: 0 2px; }
+  .conn {
+    display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--sub);
+    margin: 0 2px; padding: 8px 12px; background: var(--muted); border-radius: 10px;
+  }
+  .conn .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--good); flex: none; }
+  .conn b { color: var(--ink); font-weight: 600; }
+
+  section.card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+    padding: 16px 16px 6px;
+  }
+  .sec-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+  .sec-head h3 { font-family: var(--display); font-size: 18px; margin: 0; }
+  .fhir {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.04em; color: var(--sub);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    background: var(--muted); border: 1px solid var(--border); padding: 2px 7px; border-radius: 6px; white-space: nowrap;
+  }
+
+  .row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+    padding: 12px 0; border-top: 1px solid var(--border); }
+  section.card .row:first-of-type { border-top: 0; }
+  .row .l { min-width: 0; }
+  .row .name { font-weight: 600; font-size: 17px; }
+  .row .meta { color: var(--sub); font-size: 14px; margin-top: 2px; }
+  .row .r { text-align: right; flex: none; }
+  .row .val { font-weight: 700; font-size: 18px; font-variant-numeric: tabular-nums; }
+  .row .unit { font-weight: 500; color: var(--sub); font-size: 14px; }
+  .row .rref { color: var(--sub); font-size: 13px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 700;
+    padding: 3px 9px; border-radius: 999px; letter-spacing: 0.01em; white-space: nowrap;
+  }
+  .chip.good { background: var(--good-tint); color: var(--good); }
+  .chip.warn { background: var(--warn-tint); color: var(--warn); }
+  .chip.danger { background: var(--danger-tint); color: var(--danger); }
+  .chip.neutral { background: var(--neutral-tint); color: var(--neutral); }
+
+  .disclaimer { color: var(--sub); font-size: 13.5px; line-height: 1.5; margin: 4px 2px 2px;
+    padding-top: 12px; border-top: 1px dashed var(--border); }
+
+  .bottomnav { display: flex; border-top: 1px solid var(--border); background: var(--card); }
+  .bottomnav a { flex: 1; text-align: center; padding: 12px 4px 14px; text-decoration: none;
+    color: var(--sub); font-size: 12px; font-weight: 500; }
+  .bottomnav a.on { color: var(--blue); font-weight: 700; }
+  .bottomnav a .ico { display: block; font-size: 18px; margin-bottom: 3px; }
+
+  /* Legend / spec */
+  .legend { max-width: 760px; width: 100%; background: var(--card); border: 1px solid var(--border);
+    border-radius: 16px; padding: 20px 22px; box-shadow: var(--shadow); }
+  .legend h3 { font-family: var(--display); font-size: 18px; margin: 0 0 4px; }
+  .legend p.sub { color: var(--sub); font-size: 14.5px; margin: 0 0 14px; }
+  .legend table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+  .legend th, .legend td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .legend th { color: var(--sub); font-weight: 600; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; }
+  .legend td.res { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 13px; color: var(--blue); white-space: nowrap; }
+  .legend .foot { color: var(--sub); font-size: 13px; margin: 14px 0 0; }
+  .legend .foot b { color: var(--ink); }
+  @media (max-width: 460px) { .legend { padding: 16px; } .legend .hide-s { display: none; } }
+</style>
+
+<div class="lead">
+  <span class="tag">Mockup · not a real record</span>
+  <h1>What a connected EMR gives us</h1>
+  <p>An illustrative <b>SMART&nbsp;on&nbsp;FHIR</b> pull — the US&nbsp;Core / USCDI data classes a patient's
+  electronic health record returns after they connect it — rendered in the app's read-only
+  <b>Your Records</b> surface. Synthetic patient; no real data.</p>
+</div>
+
+<div class="phone" role="img" aria-label="Mockup of the Your Records screen populated with EMR data">
+  <div class="appbar">
+    <span class="brand"><span class="disc"></span> Neuropathy</span>
+    <span class="avatar">PE</span>
+  </div>
+
+  <div class="screen">
+    <h2 class="page">Your records</h2>
+    <p class="intro">A read-only copy of the records retrieved from your connected health record, shown for your reference.</p>
+    <div class="conn"><span class="dot"></span> Connected · <b>Epic&nbsp;(MyChart)</b> · updated Jun&nbsp;15,&nbsp;2026</div>
+
+    <!-- Conditions -->
+    <section class="card">
+      <div class="sec-head"><h3>Conditions</h3><span class="fhir">Condition</span></div>
+      <div class="row"><div class="l"><div class="name">Type&nbsp;2 diabetes mellitus</div><div class="meta">Onset 2016</div></div><div class="r"><span class="chip neutral">Active</span></div></div>
+      <div class="row"><div class="l"><div class="name">Diabetic polyneuropathy</div><div class="meta">Onset 2021</div></div><div class="r"><span class="chip neutral">Active</span></div></div>
+      <div class="row"><div class="l"><div class="name">Essential hypertension</div><div class="meta">Onset 2015</div></div><div class="r"><span class="chip neutral">Active</span></div></div>
+      <div class="row"><div class="l"><div class="name">Hyperlipidemia</div><div class="meta">Onset 2017</div></div><div class="r"><span class="chip neutral">Active</span></div></div>
+    </section>
+
+    <!-- Medications -->
+    <section class="card">
+      <div class="sec-head"><h3>Medications</h3><span class="fhir">MedicationRequest</span></div>
+      <div class="row"><div class="l"><div class="name">Metformin 1,000&nbsp;mg</div><div class="meta">Twice daily · last filled May&nbsp;28</div></div><div class="r"><span class="chip good">Active</span></div></div>
+      <div class="row"><div class="l"><div class="name">Gabapentin 300&nbsp;mg</div><div class="meta">Three times daily · last filled Jun&nbsp;2</div></div><div class="r"><span class="chip good">Active</span></div></div>
+      <div class="row"><div class="l"><div class="name">Lisinopril 10&nbsp;mg</div><div class="meta">Once daily · last filled May&nbsp;28</div></div><div class="r"><span class="chip good">Active</span></div></div>
+      <div class="row"><div class="l"><div class="name">Atorvastatin 20&nbsp;mg</div><div class="meta">Nightly · last filled May&nbsp;28</div></div><div class="r"><span class="chip good">Active</span></div></div>
+    </section>
+
+    <!-- Allergies -->
+    <section class="card">
+      <div class="sec-head"><h3>Allergies</h3><span class="fhir">AllergyIntolerance</span></div>
+      <div class="row"><div class="l"><div class="name">Penicillin</div><div class="meta">Reaction: hives</div></div><div class="r"><span class="chip danger">High</span></div></div>
+      <div class="row"><div class="l"><div class="name">Sulfonamides</div><div class="meta">Reaction: rash</div></div><div class="r"><span class="chip neutral">Low</span></div></div>
+    </section>
+
+    <!-- Labs -->
+    <section class="card">
+      <div class="sec-head"><h3>Labs &amp; results</h3><span class="fhir">Observation · DiagnosticReport</span></div>
+      <div class="row"><div class="l"><div class="name">Hemoglobin A1c</div><div class="meta">Jun&nbsp;15, 2026</div></div><div class="r"><span class="val">7.2<span class="unit">&nbsp;%</span></span><div class="rref">Ref &lt; 5.7 &nbsp;<span class="chip warn">High</span></div></div></div>
+      <div class="row"><div class="l"><div class="name">Fasting glucose</div><div class="meta">Jun&nbsp;15, 2026</div></div><div class="r"><span class="val">128<span class="unit">&nbsp;mg/dL</span></span><div class="rref">Ref 70–99 &nbsp;<span class="chip warn">High</span></div></div></div>
+      <div class="row"><div class="l"><div class="name">eGFR</div><div class="meta">Jun&nbsp;15, 2026</div></div><div class="r"><span class="val">74<span class="unit">&nbsp;mL/min</span></span><div class="rref">Ref ≥ 60 &nbsp;<span class="chip good">Normal</span></div></div></div>
+      <div class="row"><div class="l"><div class="name">Vitamin B12</div><div class="meta">Jun&nbsp;15, 2026</div></div><div class="r"><span class="val">420<span class="unit">&nbsp;pg/mL</span></span><div class="rref">Ref 200–900 &nbsp;<span class="chip good">Normal</span></div></div></div>
+      <div class="row"><div class="l"><div class="name">LDL cholesterol</div><div class="meta">Jun&nbsp;15, 2026</div></div><div class="r"><span class="val">96<span class="unit">&nbsp;mg/dL</span></span><div class="rref">Ref &lt; 100 &nbsp;<span class="chip good">Normal</span></div></div></div>
+      <div class="row"><div class="l"><div class="name">Creatinine</div><div class="meta">Jun&nbsp;15, 2026</div></div><div class="r"><span class="val">1.0<span class="unit">&nbsp;mg/dL</span></span><div class="rref">Ref 0.6–1.3 &nbsp;<span class="chip good">Normal</span></div></div></div>
+    </section>
+
+    <!-- Vitals -->
+    <section class="card">
+      <div class="sec-head"><h3>Vital signs</h3><span class="fhir">Observation</span></div>
+      <div class="row"><div class="l"><div class="name">Blood pressure</div><div class="meta">Mar&nbsp;6, 2026 · clinic</div></div><div class="r"><span class="val">132/84<span class="unit">&nbsp;mmHg</span></span></div></div>
+      <div class="row"><div class="l"><div class="name">Weight</div><div class="meta">BMI 29.1</div></div><div class="r"><span class="val">198<span class="unit">&nbsp;lb</span></span></div></div>
+      <div class="row"><div class="l"><div class="name">Pulse</div><div class="meta">Mar&nbsp;6, 2026</div></div><div class="r"><span class="val">76<span class="unit">&nbsp;bpm</span></span></div></div>
+    </section>
+
+    <!-- Immunizations -->
+    <section class="card">
+      <div class="sec-head"><h3>Immunizations</h3><span class="fhir">Immunization</span></div>
+      <div class="row"><div class="l"><div class="name">Influenza, seasonal</div><div class="meta">Oct&nbsp;2025</div></div><div class="r"><span class="chip good">Given</span></div></div>
+      <div class="row"><div class="l"><div class="name">Pneumococcal (PCV20)</div><div class="meta">2024</div></div><div class="r"><span class="chip good">Given</span></div></div>
+      <div class="row"><div class="l"><div class="name">Tdap</div><div class="meta">2021</div></div><div class="r"><span class="chip good">Given</span></div></div>
+    </section>
+
+    <!-- Procedures -->
+    <section class="card">
+      <div class="sec-head"><h3>Procedures &amp; screenings</h3><span class="fhir">Procedure</span></div>
+      <div class="row"><div class="l"><div class="name">Comprehensive diabetic foot exam</div><div class="meta">Mar&nbsp;6, 2026</div></div><div class="r"><span class="chip good">Done</span></div></div>
+      <div class="row"><div class="l"><div class="name">Diabetic retinal screening</div><div class="meta">Jan&nbsp;18, 2026</div></div><div class="r"><span class="chip good">Done</span></div></div>
+    </section>
+
+    <!-- Care team -->
+    <section class="card">
+      <div class="sec-head"><h3>Care team &amp; visits</h3><span class="fhir">CareTeam · Encounter</span></div>
+      <div class="row"><div class="l"><div class="name">Dr. Alicia Nguyen</div><div class="meta">Primary care</div></div><div class="r"><span class="chip neutral">PCP</span></div></div>
+      <div class="row"><div class="l"><div class="name">Dr. Frank Fornari</div><div class="meta">Neurology</div></div><div class="r"><span class="chip neutral">Specialist</span></div></div>
+      <div class="row"><div class="l"><div class="name">Last office visit</div><div class="meta">Mar&nbsp;6, 2026</div></div><div class="r"><span class="val" style="font-size:15px;">Endocrinology</span></div></div>
+      <div class="row"><div class="l"><div class="name">Next appointment</div><div class="meta">Jun&nbsp;23, 2026 · 11:00 AM</div></div><div class="r"><span class="chip good">Scheduled</span></div></div>
+    </section>
+
+    <p class="disclaimer">A read-only copy of your health record, not medical advice or a diagnosis. Talk to your care team about what it means.</p>
+  </div>
+
+  <nav class="bottomnav" aria-hidden="true">
+    <a><span class="ico">◍</span>Home</a>
+    <a><span class="ico">◹</span>Trends</a>
+    <a><span class="ico">▤</span>Learn</a>
+    <a><span class="ico">＋</span>Add</a>
+    <a class="on"><span class="ico">☰</span>Sources</a>
+  </nav>
+</div>
+
+<div class="legend">
+  <h3>Where each section comes from</h3>
+  <p class="sub">SMART on FHIR returns discrete <b>US&nbsp;Core / USCDI&nbsp;v3</b> resources once the patient authorizes the connection. Today we ingest labs; the rest are the read-only surface's roadmap.</p>
+  <div style="overflow-x:auto;">
+  <table>
+    <thead><tr><th>Section</th><th>FHIR resource</th><th class="hide-s">USCDI data class</th><th>In app</th></tr></thead>
+    <tbody>
+      <tr><td>Labs &amp; results</td><td class="res">Observation, DiagnosticReport</td><td class="hide-s">Laboratory</td><td><span class="chip good">Ingested</span></td></tr>
+      <tr><td>Conditions</td><td class="res">Condition</td><td class="hide-s">Problems</td><td><span class="chip warn">Roadmap</span></td></tr>
+      <tr><td>Medications</td><td class="res">MedicationRequest</td><td class="hide-s">Medications</td><td><span class="chip warn">Roadmap</span></td></tr>
+      <tr><td>Allergies</td><td class="res">AllergyIntolerance</td><td class="hide-s">Allergies &amp; Intolerances</td><td><span class="chip warn">Roadmap</span></td></tr>
+      <tr><td>Vital signs</td><td class="res">Observation</td><td class="hide-s">Vital Signs</td><td><span class="chip warn">Roadmap</span></td></tr>
+      <tr><td>Immunizations</td><td class="res">Immunization</td><td class="hide-s">Immunizations</td><td><span class="chip warn">Roadmap</span></td></tr>
+      <tr><td>Procedures &amp; screenings</td><td class="res">Procedure</td><td class="hide-s">Procedures</td><td><span class="chip warn">Roadmap</span></td></tr>
+      <tr><td>Care team &amp; visits</td><td class="res">CareTeam, Encounter</td><td class="hide-s">Care Team, Encounters</td><td><span class="chip warn">Roadmap</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="foot"><b>Bounded by the patient API:</b> we receive only what the EMR exposes to its patient-facing FHIR endpoint and what the patient authorizes — the USCDI classes above, not necessarily the entire chart a clinician sees. Everything is <b>read-only and non-interpretive</b>: the record is shown as-is; the Neuropathy Status Index is computed separately. Synthetic patient — not a real record.</p>
+</div>
