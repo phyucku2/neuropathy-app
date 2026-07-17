@@ -26,7 +26,7 @@ describe('RecordsPage', () => {
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Your records' }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/A read-only copy of the health information/)).toBeInTheDocument();
+    expect(screen.getByText(/A read-only copy of the records retrieved/)).toBeInTheDocument();
 
     // The two EMR-sourced fixture rows render with value+unit and a date.
     const glucose = screen.getByText('Glucose').closest('.record');

@@ -121,8 +121,8 @@ export function RecordsPage() {
     <div>
       <h1>Your records</h1>
       <p className="muted records-intro">
-        A read-only copy of the health information we&apos;ve pulled from your medical record. This
-        is your record as-is — we don&apos;t change it or judge it.
+        A read-only copy of the records retrieved from your connected health record, shown for your
+        reference.
       </p>
 
       <h2>Labs and results</h2>
