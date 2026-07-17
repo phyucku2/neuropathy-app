@@ -687,6 +687,98 @@ h2 {
   color: var(--color-action-green-strong);
 }
 
+/* ---------- Your Records (ADR-0039) — read-only, display-only record copy ---------- */
+
+/*
+ * Reuses the .card base and existing tokens; no new color pairs beyond the three text
+ * colors locked in contrast.test.ts (record value = brand-blue on white; record meta =
+ * secondary on white; the coming-soon note = secondary on the muted placeholder fill).
+ * Large legible type, generous spacing, one purpose per screen — never color-only.
+ */
+.records-intro {
+  margin: 0 0 var(--space-md);
+  font-size: var(--text-body); /* 17px — larger than the 14px .muted default for readability */
+  line-height: var(--lh-body);
+}
+
+/* One raw record: name + value on top, date + provenance below. Read-only, no controls. */
+.record {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.record:last-child {
+  border-bottom: 0;
+}
+
+.record-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.record-name {
+  font-weight: 600;
+  font-size: var(--text-body);
+}
+
+/* The reading itself — brand-blue on white holds AA (5.5:1); locked by contrast.test.ts. */
+.record-value {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: var(--text-data);
+  color: var(--color-brand-blue);
+  white-space: nowrap;
+}
+
+.record-meta {
+  margin-top: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: var(--text-small);
+  color: var(--color-text-secondary); /* secondary on white — locked by contrast.test.ts */
+}
+
+.rec-provenance {
+  font-style: italic;
+}
+
+/*
+ * "Coming soon" placeholders for the record classes we don't pull yet — visually
+ * distinct from the real record: a dashed border over the muted fill (same treatment as
+ * .empty-state / .video-slot), each carrying a "Coming soon" pill so meaning never rides
+ * on color alone (ADR-0039 / WCAG 1.4.1).
+ */
+.record-soon {
+  background: var(--color-muted);
+  border-style: dashed;
+}
+
+.record-soon-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.record-soon-head h2 {
+  margin: 0;
+}
+
+/* Note text on the muted placeholder fill: secondary on muted (5.4:1) — locked. */
+.record-soon-note {
+  margin: 0 0 6px;
+  font-size: var(--text-small);
+  color: var(--color-text-secondary);
+}
+
+.record-soon-note:last-child {
+  margin-bottom: 0;
+}
+
 /*
  * Respect prefers-reduced-motion (ADR-0039): no essential info is conveyed by motion, and
  * users who ask for less of it get none. Scoped broadly so any transition/animation the UI

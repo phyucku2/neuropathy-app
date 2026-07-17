@@ -189,6 +189,12 @@ export const OBSERVATIONS: ObservationItem[] = [
     'wearable',
   ),
   obs('4548-4', 'Hemoglobin A1c', 7.2, '%', '2026-06-20T09:00:00Z', 'lab'),
+  // EMR-sourced records (source='emr', ADR-0008/0028) — the raw labs pulled from the
+  // patient's health record, so the read-only "Your records" surface shows real content
+  // in the hosted demo. Dated before the newest BioMech reading (Trends default unchanged);
+  // distinct codes from 4548-4 so no trend series merges across sources.
+  obs('2345-7', 'Glucose', 101, 'mg/dL', '2026-06-15T08:30:00Z', 'emr'),
+  obs('2132-9', 'Vitamin B12', 420, 'pg/mL', '2026-06-15T08:30:00Z', 'emr'),
 ];
 
 /** Trends showcase: exercises "better", "worse", "unit changed", and the

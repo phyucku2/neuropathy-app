@@ -17,6 +17,7 @@ import { ConnectionRow } from './ConnectionRow';
 import { DeleteAccountCard } from './DeleteAccountCard';
 import { DownloadDataCard } from './DownloadDataCard';
 import { EmrConnectCard } from './EmrConnectCard';
+import { RecordsLinkCard } from './RecordsLinkCard';
 import { ReminderCard } from './ReminderCard';
 
 const CAPABILITY_ICONS: Record<string, { glyph: string; color: string }> = {
@@ -195,6 +196,10 @@ export function SettingsPage() {
       {/* EMR connect (ADR-0028) sits with the clinic connections — a data-source
           concern, deliberately outside the danger zone below. */}
       <EmrConnectCard />
+      {/* Your Records (read-only, display-only) is reached from here — beside the EMR
+          connection card, since the connection is what brings the record in. Not a
+          sixth nav tab (ADR-0039: five is the accessible max). */}
+      <RecordsLinkCard />
       {/* Right-of-access export (ADR-0031): the safe counterpart to deletion, placed
           ABOVE the danger zone and clearly separated from it. */}
       <DownloadDataCard />

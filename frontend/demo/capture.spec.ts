@@ -89,6 +89,14 @@ test('capture — sources & settings', async ({ page }) => {
   await shot(page, '07-settings');
 });
 
+test('capture — your records', async ({ page }) => {
+  await signedInApp(page);
+  await page.goto('/records');
+  await page.getByRole('heading', { level: 1, name: 'Your records' }).waitFor();
+  await page.waitForLoadState('networkidle');
+  await shot(page, '07b-records');
+});
+
 test('capture — about', async ({ page }) => {
   await installApiMocks(page);
   await page.goto('/about');
