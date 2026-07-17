@@ -59,6 +59,13 @@ test('capture — trends', async ({ page }) => {
   await shot(page, '04-trends');
 });
 
+test('capture — learn', async ({ page }) => {
+  await signedInApp(page);
+  await page.goto('/learn');
+  await page.getByRole('heading', { level: 1, name: 'Learn' }).waitFor();
+  await shot(page, '04b-learn');
+});
+
 test('capture — daily check-in', async ({ page }) => {
   // Symptom capture ON so the demo check-in shows all three domains' inputs
   // (function questions + pain + numbness), matching the full 3-domain NSI card.

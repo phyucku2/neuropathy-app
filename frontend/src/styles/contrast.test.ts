@@ -130,6 +130,33 @@ describe('WCAG 2.2 AA contrast locks', () => {
     const background = resolveColor(declaration('.prow .ava', 'background'));
     expect(contrastRatio(background, WHITE)).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
   });
+
+  it('learn module icon discs pass AA with white (brand-blue + featured strong-green)', () => {
+    expect(
+      contrastRatio(resolveColor(declaration('.learn-ic', 'background')), WHITE),
+    ).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
+    expect(
+      contrastRatio(
+        resolveColor(declaration('.learn-card.featured .learn-ic', 'background')),
+        WHITE,
+      ),
+    ).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
+  });
+
+  it('learn video-slot placeholder label passes AA on the muted slot', () => {
+    // The "▶ Watch (coming soon)" text and the featured "Next session" text both sit on
+    // the muted slot fill — lock both pairs so a token change can't silently drop them.
+    const background = resolveColor(declaration('.video-slot', 'background'));
+    expect(
+      contrastRatio(resolveColor(declaration('.video-cta', 'color')), background),
+    ).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
+    expect(
+      contrastRatio(
+        resolveColor(declaration('.learn-card.featured .video-cta', 'color')),
+        background,
+      ),
+    ).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
+  });
 });
 
 describe('toggle switch knob convention', () => {

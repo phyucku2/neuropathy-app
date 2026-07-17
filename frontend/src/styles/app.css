@@ -593,6 +593,116 @@ h2 {
   color: var(--color-text-secondary);
 }
 
+/* ---------- Learn — education modules (ADR-0037), 60+ a11y bar (ADR-0039) ---------- */
+
+/*
+ * Module cards reuse the .card base; .learn-card only adds the internal layout. Generous
+ * spacing and large legible type (no thin weights) throughout — one purpose per card.
+ */
+.learn-intro {
+  margin: 0 0 var(--space-md);
+}
+
+.learn-card {
+  padding: var(--space-md);
+}
+
+/* The evidence-first lead (exercise/balance): a brand-blue accent that draws the eye
+   without putting any essential text on a color fill (all card text stays on white). */
+.learn-card.featured {
+  border: 2px solid var(--color-brand-blue);
+}
+
+.learn-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+/* Icon disc: brand-blue holds AA with white (same pair as .prow .ava / pressed chip). */
+.learn-ic {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  background: var(--color-brand-blue);
+  color: var(--color-text-on-dark);
+}
+
+.learn-card.featured .learn-ic {
+  /* Text-bearing green surface: the -strong derived token (≥4.5:1 with white). */
+  background: var(--color-action-green-strong);
+}
+
+.learn-titles {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.learn-titles h2 {
+  margin: 0;
+  font-size: var(--text-h3);
+  line-height: var(--lh-h3);
+}
+
+.learn-blurb {
+  margin: 0 0 12px;
+  font-size: var(--text-body); /* 17px — larger than the 14px .muted default for readability */
+  line-height: var(--lh-body);
+}
+
+/*
+ * Video slot placeholder: a clearly-labeled empty player area (no player yet). Same
+ * muted-surface + secondary-text pair as .empty-state / .file-drop (5.4:1 — locked by
+ * contrast.test.ts). Tall enough to read as a future video, non-interactive for now.
+ */
+.video-slot {
+  background: var(--color-muted);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  min-height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-md);
+}
+
+.video-cta {
+  font-weight: 600;
+  font-size: var(--text-body);
+  color: var(--color-text-secondary);
+}
+
+.learn-card.featured .video-cta {
+  /* The prominent "Next session" affordance leans on the strong green (≥4.5:1 on the
+     muted slot); still non-interactive — the words say it's not ready yet. */
+  color: var(--color-action-green-strong);
+}
+
+/*
+ * Respect prefers-reduced-motion (ADR-0039): no essential info is conveyed by motion, and
+ * users who ask for less of it get none. Scoped broadly so any transition/animation the UI
+ * grows is disabled for these users rather than needing per-rule opt-outs.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* ---------- Forms ---------- */
 
 .field {

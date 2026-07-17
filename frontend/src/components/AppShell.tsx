@@ -12,9 +12,16 @@ import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { initials } from '../lib/format';
 
+// Entry point for the Learn surface (ADR-0037): a fifth bottom-nav tab, chosen over a
+// Home-screen card. Five tabs stay legible and comfortably tappable in the 430px frame
+// (~86px each, well above the 44px floor; the tab keeps its 48px min-height, ADR-0039),
+// and a persistent tab is reachable in one tap from ANY screen — better for 60+ users
+// than a card only present on Home. Learn sits center (position 3 of 5), which also gives
+// the evidence-first education surface visual prominence.
 const TABS = [
   { to: '/', icon: '◍', label: 'Home' },
   { to: '/trends', icon: '📈', label: 'Trends' },
+  { to: '/learn', icon: '📖', label: 'Learn' },
   { to: '/add', icon: '＋', label: 'Add' },
   { to: '/settings', icon: '⚙', label: 'Sources' },
 ];
