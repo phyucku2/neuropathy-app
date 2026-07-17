@@ -3,9 +3,10 @@
 - **Status:** Proposed
 - **Date:** 2026-07-17
 - **Relates to:** ADR-0006 (research-grade Observations), ADR-0013 (enforced feature toggles),
-  the NSI composite (ADR-0034), and the data-streams work. Evidence base is being assembled by a
-  dedicated cited research pass (DPN→ADL/falls correlation + DPP/DSMES effectiveness) —
-  this ADR defines the *framework*; that review supplies *which modules* and *what claims*.
+  the NSI composite (ADR-0034), and the data-streams work. The evidence base is in
+  [`docs/product/dpn-adl-falls-and-education-evidence.md`](../product/dpn-adl-falls-and-education-evidence.md)
+  (DPN→ADL/falls correlation + module evidence) — this ADR defines the *framework*; that review
+  supplies *which modules* have outcome evidence and *what claims* are defensible.
 
 ## Context
 
@@ -57,10 +58,14 @@ research-grade-provenance discipline the rest of the app already uses.
   team" line. Modules can *link out* to the check-in / trends where relevant (e.g. a foot-care
   module next to a foot-check reminder) but never present themselves as advice tailored to the
   patient's readings.
-- **First module.** Start with the **highest-evidence, highest-impact** topic — likely **daily
-  foot care** (the ulcer→amputation ADL catastrophe is the most preventable) or a **DSMES-lite**
-  glycemic-control basics module. The research pass will confirm the ranking; foot-care education's
-  ulcer/amputation-reduction evidence is the leading candidate.
+- **First module (evidence-informed).** The cited research pass has now run. **Exercise /
+  balance-training education has the strongest *verified* outcome evidence** in DPN (2025
+  meta-analysis, 23 studies: gait speed +0.08 m/s, strength SMD 0.76) and is the evidence-first
+  choice. **Daily foot care** remains a standard-of-care, high-impact companion (ulcer→amputation is
+  the most preventable ADL catastrophe), but its education effect size was **not verified** in that
+  pass — nor were DPP/DSMES — so foot-care/DPP/DSMES numbers must be verified in a dedicated pass
+  before they are quoted. Final first-module pick is a clinical call between evidence (exercise/
+  balance) and standard-of-care impact (foot care).
 
 ## Relationship to the NSI and the dataset
 
