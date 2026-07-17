@@ -105,5 +105,5 @@ Priorities: **P0** = prerequisite blocker before any real PHI; **P1** = required
 - [../../ops/backup-restore.md](../../ops/backup-restore.md), [../../ops/observability.md](../../ops/observability.md), [../../ops/deployment.md](../../ops/deployment.md) — operational runbooks
 - [../../engineering/data-standards.md](../../engineering/data-standards.md), [../../engineering/standards.md](../../engineering/standards.md) — engineering standards
 - [../../product/reimbursement-signoff-packet.md](../../product/reimbursement-signoff-packet.md) — routes the FDA/reimbursement sign-off (D2)
-- [../../decisions/](../../decisions/) — 32 Architecture Decision Records (ADR-0001 … ADR-0032)
+- [../../decisions/](../../decisions/) — the Architecture Decision Records (ADR-0001 … ADR-0035)
 - [../../roadmap-status.md](../../roadmap-status.md) — Wave status, incl. the deferred FDA device-status ADR

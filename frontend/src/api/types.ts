@@ -132,6 +132,41 @@ export interface BiomechImportOut {
   warnings: string[];
 }
 
+// ---- wearable.py (ADR-0035 Phase 1) ----
+
+/** The closed set of mobility metrics — kept in lockstep with the backend catalog. */
+export type WearableMetric =
+  | 'wearable_walking_speed'
+  | 'wearable_step_length'
+  | 'wearable_steps'
+  | 'wearable_walking_distance'
+  | 'wearable_walking_asymmetry'
+  | 'wearable_double_support'
+  | 'wearable_walking_steadiness';
+
+export type HealthPlatform = 'apple_health' | 'health_connect';
+
+export type WearableSourceDevice =
+  'iphone' | 'apple_watch' | 'android_phone' | 'wear_os' | 'unknown';
+
+/** WearableSampleIn — the client sends metric + value; the server derives the unit. */
+export interface WearableSampleIn {
+  metric: WearableMetric;
+  value: number;
+  effective_start: string;
+  effective_end: string;
+  platform: HealthPlatform;
+  source_device: WearableSourceDevice;
+  phone_derived: boolean;
+  external_id: string | null;
+}
+
+/** WearableImportOut */
+export interface WearableImportOut {
+  imported: number;
+  skipped: number;
+}
+
 // ---- capability.py ----
 
 /** CapabilityStateOut */

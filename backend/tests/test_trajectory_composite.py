@@ -52,7 +52,7 @@ def _full_three_domain() -> list[ObservationPoint]:
         _series("symptom_pain", [2, 2, 2, 2], source="adl")
         + _series("symptom_numbness", [3, 3, 3, 3], source="adl")
         + _series("biomech_balance_score", [70, 70, 70, 70], source="biomech")
-        + _series("biomech_gait_speed", [1.2, 1.2, 1.2, 1.2], source="biomech")
+        + _series("biomech_gait_score", [70, 70, 70, 70], source="biomech")
         + _series("adl_walking", [3, 3, 3, 3], source="adl")
         + _series("adl_stairs", [3, 3, 3, 3], source="adl")
         + _series("adl_balance_confidence", [3, 3, 3, 3], source="adl")
@@ -83,13 +83,13 @@ def test_full_three_domain_composite_is_the_weighted_mean() -> None:
 
 
 def test_absent_symptom_domain_renormalizes_the_weights() -> None:
-    # Function 74 + Physiologic 60 only (symptom domain toggled off / absent):
-    # weights renormalized over {0.40, 0.15} -> (0.40*74 + 0.15*60)/0.55 = 70.18 -> 70.
+    # Function 73 + Physiologic 60 only (symptom domain toggled off / absent):
+    # weights renormalized over {0.40, 0.15} -> (0.40*73 + 0.15*60)/0.55 = 69.45 -> 69.
     # It must NOT impute symptoms as 0 (that would fabricate a false alarm, dragging
-    # the number far below 70).
+    # the number far below 69).
     points = (
         _series("biomech_balance_score", [70, 70, 70, 70], source="biomech")
-        + _series("biomech_gait_speed", [1.2, 1.2, 1.2, 1.2], source="biomech")
+        + _series("biomech_gait_score", [70, 70, 70, 70], source="biomech")
         + _series("adl_walking", [3, 3, 3, 3], source="adl")
         + _series("adl_stairs", [3, 3, 3, 3], source="adl")
         + _series("adl_balance_confidence", [3, 3, 3, 3], source="adl")
@@ -97,7 +97,7 @@ def test_absent_symptom_domain_renormalizes_the_weights() -> None:
     )
     index = _index(points)
 
-    assert index.score == 70
+    assert index.score == 69
     # Two domains present, both fresh -> Medium (not High: coverage is partial).
     assert index.confidence_level is ConfidenceLevel.medium
 

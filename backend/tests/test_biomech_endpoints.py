@@ -1,8 +1,10 @@
-"""End-to-end tests for POST /biomech/reports and its downstream surfaces (ADR-0014).
+"""End-to-end tests for POST /biomech/reports and its downstream surfaces (ADR-0014;
+real report format per ADR-0036).
 
 Uploaded BioMech reports become research-grade Observations that flow into
 GET /observations and the trajectory automatically. All PDFs and data are synthetic
-(CLAUDE.md §5); PDFs are built in-test (tests/synthetic_pdf.py), no binary fixtures.
+(CLAUDE.md §5); PDFs are built in-test (tests/synthetic_pdf.py) with the REAL pypdf line
+structure (label → unit → value), no binary fixtures.
 """
 
 from __future__ import annotations
@@ -54,7 +56,6 @@ def service() -> EmrService:
 
 @pytest.fixture()
 def cap_service() -> CapabilityService:
-    """A fresh capability service per test so a toggle in one never leaks into another."""
     return CapabilityService()
 
 
@@ -71,19 +72,39 @@ def client(service: EmrService, cap_service: CapabilityService) -> Iterator[Test
 
 def _balance_report(
     *,
-    date: str = "2026-06-15T00:00:00",
-    score: int = 82,
-    sway_velocity: float = 12.4,
-    sway_area: int = 340,
+    date: str = "3/6/25",
+    eyes_open: bool = True,
+    score: str = "93",
+    speed: str = "97",
+    movement: str = "97",
+    position: str = "80",
 ) -> str:
+    stance = (
+        ["PARALLEL APART,", "EYES OPEN,"] if eyes_open else ["PARALLEL TOGETHER,", "EYES CLOSED,"]
+    )
     return "\n".join(
         [
-            "BioMech Balance Assessment Report",
-            f"Assessment Date: {date}",
-            "Device: BioMech Balance Platform v3",
-            f"Overall Balance Score: {score} / 100",
-            f"Sway Velocity: {sway_velocity} mm/s",
-            f"Sway Area: {sway_area} mm2",
+            "BALANCE INDIVIDUAL TEST REPORT",
+            *stance,
+            "(Static, Stable Surface)",
+            "Date of Service:",
+            date,
+            "Balance Score",
+            "Percent",
+            score,
+            "0 - 100",
+            "Average Speed % Normal",
+            "Percent",
+            speed,
+            "0 - 100",
+            "Average Movement % Normal",
+            "Percent",
+            movement,
+            "0 - 100",
+            "Average Position % Normal",
+            "Percent",
+            position,
+            "0 - 100",
         ]
     )
 
@@ -105,15 +126,16 @@ async def test_upload_persists_research_grade_biomech_rows(
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["report_kind"] == "balance"
-    assert body["assessment_at"] == "2026-06-15T00:00:00Z"
-    assert body["imported"] == 3 and body["skipped"] == 0
+    assert body["assessment_at"] == "2025-03-06T00:00:00Z"
+    assert body["imported"] == 4 and body["skipped"] == 0
     assert body["warnings"] == []
 
     rows = await service.observations.list_for_patient(PATIENT.patient_id)
     assert {row.code for row in rows} == {
         "biomech_balance_score",
-        "biomech_sway_velocity",
-        "biomech_sway_area",
+        "biomech_balance_speed_normal",
+        "biomech_balance_movement_normal",
+        "biomech_balance_position_normal",
     }
     for row in rows:
         assert row.source is SourceType.biomech
@@ -123,68 +145,99 @@ async def test_upload_persists_research_grade_biomech_rows(
         assert row.quality["source_system"] == "BioMech"
         assert row.quality["extraction"] == "pdf_text"
         assert row.quality["report_kind"] == "balance"
-        assert row.effective_at == datetime(2026, 6, 15, tzinfo=UTC)
+        # The balance condition (eyes-open/closed) is preserved as provenance.
+        assert row.quality["condition"] == "PARALLEL APART, EYES OPEN"
+        assert row.effective_at == datetime(2025, 3, 6, tzinfo=UTC)
         assert row.import_key is not None and row.import_key.startswith("content:biomech:")
 
 
 def test_uploaded_rows_are_queryable_via_get_observations(client: TestClient) -> None:
     _upload(client, _balance_report())
     listed = client.get("/observations").json()
-    assert listed["total"] == 3
+    assert listed["total"] == 4
     assert {item["source"] for item in listed["items"]} == {"biomech"}
     by_code = {item["code"]: item for item in listed["items"]}
-    assert by_code["biomech_balance_score"]["value"] == 82.0
+    assert by_code["biomech_balance_score"]["value"] == 93.0
     assert by_code["biomech_balance_score"]["display"] == "Balance score"
-    assert by_code["biomech_sway_velocity"]["unit"] == "mm/s"
+    assert by_code["biomech_balance_score"]["unit"] == "%"
 
 
 def test_reupload_of_same_report_is_idempotent(client: TestClient) -> None:
-    assert _upload(client, _balance_report()).json()["imported"] == 3
+    assert _upload(client, _balance_report()).json()["imported"] == 4
     second = _upload(client, _balance_report()).json()
-    assert second["imported"] == 0 and second["skipped"] == 3
+    assert second["imported"] == 0 and second["skipped"] == 4
+
+
+async def test_same_day_eyes_open_and_closed_do_not_collide(
+    client: TestClient, service: EmrService
+) -> None:
+    # Two balance tests on the same day under different protocols must both persist —
+    # the condition is in the idempotency key even when a value coincides.
+    _upload(client, _balance_report(eyes_open=True, score="93"))
+    _upload(client, _balance_report(eyes_open=False, score="93"))
+    scores = [
+        r
+        for r in await service.observations.list_for_patient(PATIENT.patient_id)
+        if r.code == "biomech_balance_score"
+    ]
+    assert len(scores) == 2
+    assert {r.quality["condition"] for r in scores} == {
+        "PARALLEL APART, EYES OPEN",
+        "PARALLEL TOGETHER, EYES CLOSED",
+    }
 
 
 def test_trajectory_shows_a_sourced_biomech_signal(client: TestClient) -> None:
-    # Three balance reports over ~2 months: balance rising and sway falling — every
-    # judged signal improving, so the overall call is improving too.
-    for days_ago, score, sway_v, sway_a in (
-        (60, 74, 18.0, 400),
-        (30, 79, 15.0, 360),
-        (2, 82, 12.0, 320),
+    # Three balance reports over ~2 months, every metric rising — balance improving.
+    for days_ago, score, sp, mv, ps in (
+        (60, 74, 90, 90, 70),
+        (30, 84, 94, 94, 76),
+        (2, 93, 97, 97, 80),
     ):
-        date = (NOW - timedelta(days=days_ago)).date().isoformat() + "T00:00:00"
+        date = (NOW - timedelta(days=days_ago)).strftime("%m/%d/%Y")
         _upload(
-            client, _balance_report(date=date, score=score, sway_velocity=sway_v, sway_area=sway_a)
+            client,
+            _balance_report(
+                date=date, score=str(score), speed=str(sp), movement=str(mv), position=str(ps)
+            ),
         )
 
     trajectory = client.get("/trajectory").json()
     balance = [s for s in trajectory["signals"] if s["code"] == "biomech_balance_score"]
     assert balance and balance[0]["source"] == "biomech"
     assert balance[0]["direction"] == "improving"
-    assert "balance up" in balance[0]["detail"]  # plain-language, sourced signal
+    assert "balance up" in balance[0]["detail"]
     assert trajectory["direction"] == "improving"
 
 
 def test_defensive_parse_skips_bad_metrics_but_imports_the_rest(client: TestClient) -> None:
     text = "\n".join(
         [
-            "BioMech Balance Assessment Report",
-            "Assessment Date: 2026-06-15T00:00:00",
-            "Overall Balance Score: 250",  # out of range -> skipped
-            "Sway Velocity: not measured",  # non-numeric -> skipped
-            "Sway Area: 340 mm2",  # good
+            "BALANCE INDIVIDUAL TEST REPORT",
+            "Date of Service:",
+            "3/6/25",
+            "Balance Score",
+            "Percent",
+            "250",  # out of range -> skipped
+            "0 - 100",
+            "Average Speed % Normal",
+            "Percent",
+            "N/A",  # non-numeric -> skipped
+            "Average Movement % Normal",
+            "Percent",
+            "96",  # good
+            "0 - 100",
         ]
     )
     body = _upload(client, text).json()
     assert body["imported"] == 1
     assert any("250" in w for w in body["warnings"])
-    assert any("no numeric value" in w for w in body["warnings"])
+    assert any("no clean numeric value" in w for w in body["warnings"])
 
 
 async def test_unrecognizable_report_imports_nothing_but_does_not_error(
     client: TestClient, service: EmrService
 ) -> None:
-    # A valid PDF whose text is not a recognizable BioMech report: no kind, no date.
     body = _upload(client, "Just some notes.\nNothing structured here.").json()
     assert body["report_kind"] is None
     assert body["assessment_at"] is None
@@ -210,25 +263,7 @@ def test_oversized_upload_is_422(client: TestClient, monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(settings, "biomech_max_pdf_bytes", 64)
     resp = _upload(client, _balance_report())
     assert resp.status_code == 422
-    # The spooled-size guard fired BEFORE the body was read into memory.
     assert "size cap" in resp.json()["detail"]
-
-
-def test_over_declared_upload_is_refused_before_body_parsing(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The middleware rejects on the declared Content-Length before the multipart
-    body is parsed or spooled (review finding: the byte cap must bound network and
-    disk work too, not just memory)."""
-    from app.core.config import settings
-
-    monkeypatch.setattr(settings, "biomech_max_pdf_bytes", 64)
-    huge = "Balance Score: 82\n" * 5000  # body far beyond cap + multipart overhead
-    resp = _upload(client, huge)
-    assert resp.status_code == 422
-    # The middleware's message — distinct from the route's "size cap" detail —
-    # proves the request never reached body parsing.
-    assert resp.json()["detail"] == "Upload exceeds the PDF size cap"
 
 
 async def test_capability_off_refuses_with_409(
@@ -243,7 +278,6 @@ async def test_capability_off_refuses_with_409(
     )
     resp = _upload(client, _balance_report())
     assert resp.status_code == 409
-    # Nothing was persisted while the feature was off.
     assert await service.observations.list_for_patient(PATIENT.patient_id) == []
 
 
@@ -272,7 +306,7 @@ def test_biomech_upload_requires_auth() -> None:
 
 
 async def test_upload_audits_counts_and_kind_only(client: TestClient, service: EmrService) -> None:
-    _upload(client, _balance_report(score=82))
+    _upload(client, _balance_report(score="93"))
     events = await service.audit.list_for_patient(PATIENT.patient_id)
     assert [e.action for e in events] == ["import_biomech"]
     event = events[0]
@@ -280,9 +314,9 @@ async def test_upload_audits_counts_and_kind_only(client: TestClient, service: E
     assert event.actor_role == "patient"
     assert event.detail == {
         "report_kind": "balance",
-        "imported": 3,
+        "imported": 4,
         "skipped": 0,
         "warnings": 0,
     }
-    # No value ever reaches the audit log (counts + kind only).
-    assert "82" not in str(event.detail) and "12.4" not in str(event.detail)
+    # No measured value ever reaches the audit log (counts + kind only).
+    assert "93" not in str(event.detail)

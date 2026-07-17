@@ -24,6 +24,7 @@ const CAPABILITY_ICONS: Record<string, { glyph: string; color: string }> = {
   ingest_labs: { glyph: '⚗', color: 'var(--color-status-warning)' },
   ingest_adl: { glyph: '☑', color: 'var(--color-action-green)' },
   ingest_symptoms: { glyph: '✚', color: 'var(--color-status-warning)' },
+  ingest_wearable: { glyph: '📲', color: 'var(--color-brand-sky)' },
   emr_connect: { glyph: '🏥', color: 'var(--color-brand-sky)' },
   ai_narrative: { glyph: '✦', color: 'var(--color-brand-navy)' },
   share_with_clinic: { glyph: '👪', color: 'var(--color-text-secondary)' },

@@ -250,8 +250,8 @@ verified and labeled as judgment.
 | B2 (Q8) FDA AI/ML-SaMD framework (GMLP/PCCP) requirements | 🔎 Surfaced only — **not verified** |
 | C (Q9–Q10) Where durable moat forms; phased recommendation | ⚠️ Judgment, evidence-anchored |
 
-**Verification stats:** 5 search angles → 23 sources fetched → 106 claims extracted → 25 verified
-(24 confirmed, 1 refuted, 0 unverified); 7 findings after synthesis. One claim was **refuted** (a
+**Verification stats:** 5 search angles → 23 sources fetched → 106 claims extracted → 25 claims
+adjudicated (24 confirmed, 1 refuted, 0 unverified); 7 findings after synthesis. One claim was **refuted** (a
 specific "12 DPN-validated PRO studies" count from the Griffiths review, 1-2 vote) and is excluded.
 
 ## Immediate next actions (owner)

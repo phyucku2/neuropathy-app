@@ -27,6 +27,8 @@ import type {
   RegisterIn,
   TokenOut,
   Trajectory,
+  WearableImportOut,
+  WearableSampleIn,
 } from './types';
 
 // ---- auth ----
@@ -98,6 +100,12 @@ export function uploadBiomechReport(file: File): Promise<BiomechImportOut> {
   const formData = new FormData();
   formData.append('file', file);
   return request<BiomechImportOut>('/biomech/reports', { method: 'POST', formData });
+}
+
+// ---- wearable/phone mobility import (ADR-0035 Phase 1) ----
+
+export function importWearable(samples: WearableSampleIn[]): Promise<WearableImportOut> {
+  return request<WearableImportOut>('/wearable', { method: 'POST', body: { samples } });
 }
 
 // ---- capabilities ----

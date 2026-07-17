@@ -77,7 +77,7 @@ async def import_biomech_report(
     if is_ingestable(report):
         assert report.kind is not None and report.assessment_at is not None  # is_ingestable
         keys = [
-            biomech_import_key(report.kind, report.assessment_at, metric)
+            biomech_import_key(report.kind, report.assessment_at, metric, report.condition)
             for metric in report.metrics
         ]
         # ONE existence probe for the whole report (indexed column), not N queries.
@@ -93,7 +93,7 @@ async def import_biomech_report(
                     metric,
                     kind=report.kind,
                     assessment_at=report.assessment_at,
-                    device=report.device,
+                    condition=report.condition,
                     patient_id=current.patient_id,
                     import_key=key,
                 )

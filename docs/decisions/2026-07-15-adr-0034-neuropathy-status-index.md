@@ -2,9 +2,10 @@
 
 **Date:** 2026-07-15
 **Status:** Accepted
-**Supersedes:** **ADR-0033** (the composite *function-only* "30 Day Score"). This ADR replaces
-that function-only construct with a three-domain, symptom-forward composite and removes the
-contradiction defect ADR-0033 carried (see Decision §6).
+**Supersedes:** the prior **function-only "30 Day Score"** design — a UI construct that was never
+recorded as its own ADR (there is no ADR-0033 file). This ADR replaces that function-only
+construct with a three-domain, symptom-forward composite and removes the contradiction defect it
+carried (see Decision §6).
 **Builds on / relates to:** ADR-0003 (deterministic, explainable trajectory engine), ADR-0006
 (research-grade data standard — ALCOA+, append-only, provenance), ADR-0011/0012 (deterministic
 core; AI-narration guardrails), ADR-0013 (feature-toggle enforced-flag honesty), ADR-0015 (locked
@@ -14,6 +15,15 @@ ADR-0021 (PHI-free observability), ADR-0029/0030 (daily check-in + offline queue
 (all 17 §6 lenses + biostatistics / health-economics / equity) and the regulatory gap register
 `docs/compliance/gap-register/fda.md` (the algorithm is flagged **unvalidated**; this index leans
 toward SaMD and is kept **non-diagnostic v1**).
+
+> **Amendment (2026-07-16).** The concrete BioMech sub-measures named here (e.g. "postural sway",
+> gait speed, step-time symmetry) are **illustrative** and predate ground-truth of the real BioMech
+> report format. The real reports use a **different metric set** (Average Speed/Movement/Position,
+> Impact/Single-Support Symmetry, Support Ratio, Pelvic Tilt…) — see
+> `docs/product/biomech-data-streams.md` §2–§3 and the real catalog. The polarity/normalization
+> **mechanism** in this ADR stands; the specific Function sub-measures must be **realigned** to the
+> real catalog when BioMech ingestion is rebuilt (API-first). PROMIS references here are corrected
+> below: PROMIS is **not royalty-free for commercial use**.
 
 ## Context
 
@@ -43,7 +53,8 @@ anchored to a real **"as of" date**, presented as **non-diagnostic v1, pending c
      check-in, **anchored on NTSS-6** (covers the neuropathic pain descriptors *and*
      numbness/paresthesia in one short DPN-oriented instrument; *confirm exact items/scoring against
      source*). Recommended pain read for any added component: **PROMIS Pain Intensity / Interference
-     short forms** over **NPSI** for v1 — generic, freely available, standardized T-score metric,
+     short forms** over **NPSI** for v1 — generic, standardized T-score metric (commercial use is
+     **NOT royalty-free**: it needs HealthMeasures permission + HEAP — see instrument-licensing-research.md),
      responsive, and suited to repeated mobile administration; NPSI is held as a later
      phenotyping option. (Reconcile the NTSS-6 ~24h vs PROMIS 7-day recall windows; *confirm*.)
    - **Function (40%)** — balance + gait from **BioMech** (objective; `document_imported` v1,

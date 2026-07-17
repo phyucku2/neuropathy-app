@@ -27,6 +27,7 @@ class SourceType(enum.StrEnum):
     lab = "lab"  # patient-imported lab result (FHIR/LOINC/UCUM — ADR-0007)
     adl = "adl"  # activities-of-daily-living / functional status (patient-reported)
     biomech = "biomech"  # BioMech balance/gait report, PDF-ingested (ADR-0014, app/biomech)
+    wearable = "wearable"  # phone/watch mobility metrics from a health store (ADR-0035)
 
 
 class DataOrigin(enum.StrEnum):
