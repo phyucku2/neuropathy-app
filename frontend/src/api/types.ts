@@ -134,7 +134,9 @@ export interface BiomechImportOut {
 
 // ---- wearable.py (ADR-0035 Phase 1) ----
 
-/** The closed set of mobility metrics — kept in lockstep with the backend catalog. */
+/** The closed set of health-bridge metrics — kept in lockstep with the backend catalog.
+ *  The `wearable_*` codes are mobility (ADR-0035); `blood_glucose` is CGM (ADR-0038), sent
+ *  in canonical mg/dL (the native seam converts mmol/L at the edge). */
 export type WearableMetric =
   | 'wearable_walking_speed'
   | 'wearable_step_length'
@@ -142,7 +144,8 @@ export type WearableMetric =
   | 'wearable_walking_distance'
   | 'wearable_walking_asymmetry'
   | 'wearable_double_support'
-  | 'wearable_walking_steadiness';
+  | 'wearable_walking_steadiness'
+  | 'blood_glucose';
 
 export type HealthPlatform = 'apple_health' | 'health_connect';
 

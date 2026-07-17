@@ -77,6 +77,9 @@ const REGISTRY: Record<string, SignalMeta> = {
   wearable_walking_asymmetry: { polarity: 'lower_is_better', label: 'Walking asymmetry' },
   wearable_double_support: { polarity: 'lower_is_better', label: 'Double-support time' },
   wearable_walking_steadiness: { polarity: 'higher_is_better', label: 'Walking steadiness' },
+  // Continuous glucose (CGM) via the health bridge (source='wearable', ADR-0038). A high or
+  // low reading is worse, so in_range_is_better; mirrors the backend directionality registry.
+  blood_glucose: { polarity: 'in_range_is_better', label: 'Blood sugar' },
 };
 
 export function polarityFor(code: string): Polarity {

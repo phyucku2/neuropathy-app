@@ -14,6 +14,7 @@ describe('signalMeta', () => {
     expect(polarityFor('biomech_balance_score')).toBe('higher_is_better');
     expect(polarityFor('biomech_gait_score')).toBe('higher_is_better');
     expect(polarityFor('wearable_walking_asymmetry')).toBe('lower_is_better');
+    expect(polarityFor('blood_glucose')).toBe('in_range_is_better'); // CGM (ADR-0038)
     expect(polarityFor('4548-4')).toBe('lower_is_better'); // HbA1c by LOINC code
     expect(polarityFor('2132-9')).toBe('in_range_is_better'); // B12
     expect(polarityFor('biomech_cadence')).toBe('unknown');
@@ -44,6 +45,7 @@ describe('signalMeta', () => {
     expect(labelFor('anything', 'Server display')).toBe('Server display');
     expect(labelFor('4548-4')).toBe('Long-term blood sugar');
     expect(labelFor('adl_daily_score', null)).toBe('Daily function score');
+    expect(labelFor('blood_glucose')).toBe('Blood sugar'); // CGM (ADR-0038)
     expect(labelFor('grip_strength')).toBe('Grip strength');
     expect(labelFor('')).toBe('');
   });

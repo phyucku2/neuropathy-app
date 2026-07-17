@@ -19,13 +19,15 @@ import { importWearable } from '../api/endpoints';
 import { getPlatform, isNativePlatform } from '../auth/platform';
 import {
   HEALTH_METRICS,
+  MMOL_L_TO_MG_DL,
   healthPlatform,
   isHealthSyncAvailable,
   setHealthPlugin,
   syncHealth,
+  toGlucoseSample,
   toWearableSample,
 } from './health';
-import type { HealthMobilitySample, HealthPlugin } from './health';
+import type { HealthGlucoseSample, HealthMobilitySample, HealthPlugin } from './health';
 
 const nativeMock = vi.mocked(isNativePlatform);
 const platformMock = vi.mocked(getPlatform);
@@ -101,6 +103,53 @@ describe('toWearableSample', () => {
       phone_derived: true,
       external_id: null,
     });
+  });
+});
+
+describe('toGlucoseSample', () => {
+  function glucose(over: Partial<HealthGlucoseSample> = {}): HealthGlucoseSample {
+    return {
+      value: 6.5,
+      unit: 'mmol/L',
+      startISO: '2026-07-15T08:00:00.000Z',
+      endISO: '2026-07-15T08:00:00.000Z',
+      sourceDevice: 'iphone',
+      phoneDerived: true,
+      externalId: 'CGM-1',
+      ...over,
+    };
+  }
+
+  it('converts Health Connect mmol/L to canonical mg/dL at the edge', () => {
+    const out = toGlucoseSample(glucose({ value: 6.5, unit: 'mmol/L' }), 'health_connect');
+    expect(out.metric).toBe('blood_glucose');
+    expect(out.platform).toBe('health_connect');
+    // 6.5 mmol/L * 18.0182 = 117.1183 mg/dL — the client always sends mg/dL.
+    expect(out.value).toBeCloseTo(6.5 * MMOL_L_TO_MG_DL, 6);
+    expect(out.external_id).toBe('CGM-1');
+  });
+
+  it('passes a HealthKit mg/dL reading through unchanged and defaults external_id to null', () => {
+    const out = toGlucoseSample(
+      glucose({ value: 120, unit: 'mg/dL', externalId: undefined }),
+      'apple_health',
+    );
+    expect(out.value).toBe(120);
+    expect(out.metric).toBe('blood_glucose');
+    expect(out.external_id).toBeNull();
+  });
+
+  it('rejects an unknown unit WITHOUT echoing the reading (glucose is PHI)', () => {
+    const bad = glucose({ value: 137, unit: 'ng/mL' });
+    expect(() => toGlucoseSample(bad, 'apple_health')).toThrow(/Unsupported glucose unit/);
+    let message = '';
+    try {
+      toGlucoseSample(bad, 'apple_health');
+    } catch (err) {
+      message = String(err);
+    }
+    expect(message).toContain('ng/mL'); // names the offending unit
+    expect(message).not.toContain('137'); // but never the measured reading
   });
 });
 
