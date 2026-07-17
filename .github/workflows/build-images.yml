@@ -1,0 +1,83 @@
+name: Build & push container images (ACR)
+
+# Manual, on-demand build of the backend and frontend container images, pushed to Azure
+# Container Registry (ADR-0018 / docs/ops/deploy-azure.md §2.1). This exists because ACR
+# Tasks (`az acr build`) are unavailable on some subscription tiers (e.g. Free Trial) —
+# this builds the SAME images on GitHub's runners instead and pushes them to ACR, so the
+# Bicep deploy has images to pull without needing ACR Tasks.
+#
+# Secrets never touch the repo. Configure three repo secrets (Settings → Secrets and
+# variables → Actions), taken from `az acr credential show`:
+#   ACR_LOGIN_SERVER   e.g. neuropathyahwg2026.azurecr.io
+#   ACR_USERNAME       the registry admin username (= registry name)
+#   ACR_PASSWORD       one of the registry admin passwords
+# Admin user must be enabled on the ACR: `az acr update -n <acr> --admin-enabled true`.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag (blank = the short commit SHA)"
+        required: false
+        default: ""
+
+jobs:
+  build-push:
+    name: Build & push both images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve image tag
+        id: meta
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          TAG="$INPUT_TAG"
+          if [ -z "$TAG" ]; then TAG="$(git rev-parse --short HEAD)"; fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Building tag: $TAG"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Azure Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.ACR_LOGIN_SERVER }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Build & push backend
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          file: backend/Dockerfile
+          push: true
+          tags: ${{ secrets.ACR_LOGIN_SERVER }}/neuropathy-backend:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+
+      - name: Build & push frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          file: frontend/Dockerfile
+          push: true
+          tags: ${{ secrets.ACR_LOGIN_SERVER }}/neuropathy-frontend:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
+
+      - name: Summary
+        run: |
+          {
+            echo "### Images pushed to ACR"
+            echo ""
+            echo '```'
+            echo "${{ secrets.ACR_LOGIN_SERVER }}/neuropathy-backend:${{ steps.meta.outputs.tag }}"
+            echo "${{ secrets.ACR_LOGIN_SERVER }}/neuropathy-frontend:${{ steps.meta.outputs.tag }}"
+            echo '```'
+            echo ""
+            echo "Deploy with these as \`backendImage\` / \`frontendImage\` (deploy-azure.md §5)."
+          } >> "$GITHUB_STEP_SUMMARY"

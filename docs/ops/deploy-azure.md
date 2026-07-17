@@ -103,6 +103,34 @@ ACR_PASS=$(az acr credential show -n "$ACR" -g "$RG" --query 'passwords[0].value
 and skip the ACR credential params — the template omits the registry block when the server
 is blank.)
 
+#### 2.1a If `az acr build` fails with `TasksOperationsNotAllowed`
+
+ACR **Tasks** (the server-side builder behind `az acr build`) are disabled on some
+subscription tiers — notably **Free Trial**. Two ways past it:
+
+- **Upgrade the subscription to Pay-As-You-Go** (portal → *Subscriptions* → your
+  subscription → *Upgrade*). You keep any remaining free credit; this unlocks ACR Tasks and
+  the `az acr build` commands above work as written.
+- **Build on GitHub's runners instead** (no subscription change) — the
+  `.github/workflows/build-images.yml` workflow builds the *same* two images and pushes them
+  to your ACR:
+  1. Enable the registry admin user and read its credentials:
+     ```bash
+     az acr update -n "$ACR" --admin-enabled true
+     az acr credential show -n "$ACR" -g "$RG" \
+       --query '{server:@, user:username, pass:passwords[0].value}' -o json
+     # loginServer:
+     az acr show -n "$ACR" -g "$RG" --query loginServer -o tsv
+     ```
+  2. In the GitHub repo → *Settings* → *Secrets and variables* → *Actions*, add three repo
+     secrets: `ACR_LOGIN_SERVER` (e.g. `neuropathyahwg2026.azurecr.io`), `ACR_USERNAME`
+     (the registry name), `ACR_PASSWORD` (a registry password).
+  3. *Actions* tab → **Build & push container images (ACR)** → *Run workflow* (optionally set
+     a tag; blank uses the short commit SHA). The run summary prints the two image references
+     to use as `backendImage` / `frontendImage` in §5.
+
+  Either way, once the images are in ACR the rest of this runbook is unchanged.
+
 ---
 
 ## 3. Environment variables — who sets what
