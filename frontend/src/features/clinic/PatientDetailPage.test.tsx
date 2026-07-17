@@ -226,7 +226,7 @@ describe('PatientDetailPage — observations tab', () => {
   it('lists the page of raw records with values, sources, and dates', async () => {
     actAsClinician();
     await openTab('Observations');
-    expect(await screen.findByText('Showing 1–8 of 8')).toBeInTheDocument();
+    expect(await screen.findByText('Showing 1–10 of 10')).toBeInTheDocument();
     const labRow = screen.getByRole('row', { name: /Hemoglobin A1c/ });
     expect(labRow).toHaveTextContent('7.2 %');
     expect(labRow).toHaveTextContent('Lab');

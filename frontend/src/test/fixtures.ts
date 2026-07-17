@@ -185,6 +185,31 @@ export const OBSERVATIONS: ObservationItem[] = [
     source: 'lab',
     status: 'final',
   },
+  // EMR-sourced records (source='emr', ADR-0008/0028) — the raw labs pulled from the
+  // patient's health record. These power the read-only "Your records" surface (they
+  // render there with a "from your health record" provenance line, never judged). Dates
+  // sit BEFORE the newest BioMech reading so Trends' default-selected metric is unchanged;
+  // codes are distinct from the lab-sourced 4548-4 so no trend series merges across them.
+  {
+    code: '2345-7',
+    display: 'Glucose',
+    value: 101,
+    value_text: null,
+    unit: 'mg/dL',
+    effective_at: '2026-06-15T08:30:00Z',
+    source: 'emr',
+    status: 'final',
+  },
+  {
+    code: '2132-9',
+    display: 'Vitamin B12',
+    value: 420,
+    value_text: null,
+    unit: 'pg/mL',
+    effective_at: '2026-06-15T08:30:00Z',
+    source: 'emr',
+    status: 'final',
+  },
 ];
 
 export const CAPABILITIES: CapabilityStateOut[] = [

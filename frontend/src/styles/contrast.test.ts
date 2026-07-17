@@ -143,6 +143,24 @@ describe('WCAG 2.2 AA contrast locks', () => {
     ).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
   });
 
+  it('records value + meta pass AA on the white card', () => {
+    // The reading itself (brand-blue) and the date/provenance meta (secondary) both sit
+    // on the white record card — lock both so a token change can't silently drop them.
+    expect(
+      contrastRatio(resolveColor(declaration('.record-value', 'color')), WHITE),
+    ).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
+    expect(
+      contrastRatio(resolveColor(declaration('.record-meta', 'color')), WHITE),
+    ).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
+  });
+
+  it('records "coming soon" note passes AA on the muted placeholder fill', () => {
+    const background = resolveColor(declaration('.record-soon', 'background'));
+    expect(
+      contrastRatio(resolveColor(declaration('.record-soon-note', 'color')), background),
+    ).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
+  });
+
   it('learn video-slot placeholder label passes AA on the muted slot', () => {
     // The "▶ Watch (coming soon)" text and the featured "Next session" text both sit on
     // the muted slot fill — lock both pairs so a token change can't silently drop them.

@@ -102,6 +102,15 @@ const SLIDES = [
       'export; and account deletion. The patient is in control by construction.',
   },
   {
+    img: '07b-records',
+    eyebrow: 'Records',
+    title: 'Your records — read-only, as-is',
+    body:
+      'A read-only copy of what we pull from the patient’s medical record (EMR labs today), ' +
+      'shown with provenance and never re-interpreted or judged — plus clearly-marked ' +
+      '“coming soon” placeholders for conditions, medications, and allergies.',
+  },
+  {
     img: '08-about',
     eyebrow: 'Positioning',
     title: 'Non-diagnostic by design',
