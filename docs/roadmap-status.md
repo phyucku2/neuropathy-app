@@ -19,7 +19,7 @@ review findings fixed), **Merged** (on `main`).
 | AI narrative layer — validated, BAA-gated, off-request-path (ADR-0011) | ✅ | ✅ | ✅ |
 | Clinician surface — consent-gated panel/views, invitations (ADR-0012) | ✅ | ✅ 100% cov | ✅ PR #3 |
 | Feature toggles API — server-enforced capabilities, B2C + clinician-managed, consent-aware (ADR-0013) | ✅ | ✅ 100% cov | ✅ PR #4 |
-| BioMech PDF ingest module (V1) — balance/gait report PDFs into research-grade Observations (ADR-0014) | ✅ | ✅ | ⚠️ PR #5 — built & tested against an **assumed** report format; does **NOT** parse real BioMech reports (space-tabular, different metric set). Real-report support pending API-first pivot — see biomech-data-streams.md §3 |
+| BioMech PDF ingest module — balance/gait report PDFs into research-grade Observations (ADR-0014; **rebuilt to the real report format in ADR-0036**) | ✅ | ✅ | ✅ PR #5 (V1) → **ADR-0036** rebuild. V1 was built against an *assumed* format; ADR-0036 rebuilt the parser to the **real** pypdf line structure + real metric set (balance/gait scores + components), so it now parses real BioMech reports. See biomech-data-streams.md §3 + ADR-0036 |
 | Patient graphing/trends UI — from mockups/patient-app.html against the existing API (ADR-0015) | ✅ | ✅ | ✅ PR #6 |
 | Clinician UI — from mockups/clinician-app.html (panel, cross-source trend table, non-diagnostic) (ADR-0016) | ✅ | ✅ | ✅ PR #7 |
 | Hardening pass — invitation rate limiting, durable pending-auth store, encrypted token vault with deletion-on-revoke, hardened ops gate, blocking Python security/license scans (ADR-0017) | ✅ | ✅ 100% cov | ✅ PR #8 |
@@ -101,9 +101,33 @@ need no new backend surface.
 | 2 | Store-readiness polish (ADR-0032) — in-app **About + Privacy** screens (auth-less `/about` `/privacy`, reachable by a store reviewer + logged-out user; non-diagnostic disclaimer, build-time version, IP/licensee line, in-app privacy summary pointing to the counsel-reviewed full policy) + **route-level code-splitting** (`React.lazy`/`Suspense` per route + recharts/react vendor `manualChunks`) + top-level **ErrorBoundary** for lazy-chunk rejections | ✅ | ✅ | ✅ | Merged in PR #32. New `frontend/src/features/about/**` (exclusive surface); links added to the LoginPage footer + About/Privacy cross-links. Two-bucket vendor split (`charts` recharts/d3 + `vendor` React/router), largest chunk 299 KB; 500 KB warning gone (a first three-bucket split hit a circular chunk that broke React at runtime — caught by the E2E gate, fixed to two buckets); ErrorBoundary added so a post-deploy stale-chunk 404 offers a reload instead of white-screening. 275 unit tests ≥90% all four; 37 Playwright specs incl. `about-privacy.spec.ts` + the console-gate self-check; tsc/eslint/prettier clean; backend untouched; secret scan clean. |
 | 3 | Patient data export — "Download my data" (ADR-0031) — right-of-access sibling to account deletion: `GET /me/export` (patient-only, rate-limited per actor, `Cache-Control: no-store`, one PHI-free `export_account` audit event) returns the patient's **current** record (account/patient rows, current observations w/ provenance, trajectory snapshot, capability states, clinic + EMR connection metadata) as a typed `ExportOut` envelope (`exported_at`/`schema_version`/`subject_id`). NO secrets EVER — token-free projections, proven by ABSENCE (payload scanned for the token/`token_ref`/hash fixtures). "Download my data" card ABOVE the danger zone; web = JSON download + observations CSV (pure flattener), native = Filesystem cache write (deleted after Share) + OS Share sheet with cancel-is-not-error handling (`@capacitor/filesystem` + `@capacitor/share`, Cap-6 line, injectable seam). | ✅ | ✅ | ⏳ | Backend 100% coverage on new code (unit + live-Postgres, no-secrets proven over real vault ciphertext); 292 unit tests ≥90% all four; 38 Playwright specs (card renders + both `.json`/`.csv` downloads fire in the built bundle) zero console errors; `cap sync` warning-free (2 new MIT plugins registered in gradle); prod audit + license + secret scans clean. On-device Share-sheet UX is `npx cap run android` only. Analyzable-only export set is the documented boundary (ADR-0031). |
 
+## Recent additions — measurement science, data streams, modules & platform (2026-07-15 → 07-17)
+
+The wave after the reimbursement/patient-experience work, grounded in the owner's real BioMech
+materials and adversarially-verified research. One portion = one small PR, merged between each.
+
+| Portion | Decision | Merged | Notes |
+|---|---|---|---|
+| **Neuropathy Status Index (NSI)** — deterministic 0–100 composite (Symptoms/Function/Physiologic), per-measure normalization, missing-domain renormalization, fixed-point direction floor, Confidence from coverage+recency; hero card | ADR-0034 | ✅ | The single honest status number on top of the streams |
+| **BioMech real-report rebuild** — parser + metric catalog realigned to real balance/gait reports (pypdf line structure, real codes, eyes-open/closed condition) | ADR-0036 | ✅ | Closed the fictional-code audit findings across parser/directionality/composite |
+| **Phone-base ADL health bridge (Phase 1)** — wearable/phone mobility ingestion via Apple HealthKit / Android Health Connect; fidelity tiers; `ingest_wearable` opt-in; native seam | ADR-0035 | ✅ | Phone-base ADLs, watch optional; verified phone-gait reliability split |
+| **Frontend signal-registry realignment** — UI registry mirrored to the real ADR-0036 BioMech + ADR-0035 wearable codes; demo refreshed | (ADR-0036 follow) | ✅ PR #47 | Retired the fictional `sway_velocity` etc. from the UI/demo |
+| **CGM blood-glucose ingestion** — glucose via the health bridge (mg/dL, in-range polarity, excluded from NSI v1, no alarms/dosing) | ADR-0038 | ✅ PR #51 | Path A (platform-first); direct Dexcom/Abbott SDKs deferred |
+| **Education-module framework** — closed clinician-reviewed registry, `education` opt-in, PHI-free progress, general-not-individualized guardrail; DSMES-not-DPP framing | ADR-0037 | ✅ | Evidence-informed first module = exercise/balance |
+| **Backend deploy-readiness** — Render blueprint + vendor-neutral runbook (real login-and-use app; release-phase migrations) | `render.yaml` / `docs/ops/DEPLOY.md` | ✅ | Provisioning needs the owner's host account |
+| **Cited research** — AI-fusion evidence review + DPN→ADL/falls & module evidence | `docs/product/ai-fusion-evidence-review.md`, `dpn-adl-falls-and-education-evidence.md` | ✅ | Honest framing: association not validated prediction; moat = dataset, not model |
+| **Accessibility-first for the 60+ population** — standing design constraint (type/contrast/targets/simplicity), enforced by contrast tests | ADR-0039 | ✅ (this PR) | Records that all new UI is built to this bar |
+
+**In progress / next:** Learn section + Your Records read-only view (built to ADR-0039); NSI
+Function two-tier (fold fidelity-weighted wearable data into the score); BioMech eyes-open−closed
+gap; Android Health Connect connector; iOS + HealthKit (pending Mac + Apple account). Backlog
+detail in [`docs/product/roadmap-buildout-specs.md`](product/roadmap-buildout-specs.md).
+**V2:** AI photo food logging (honest ranged-estimate); derived glucose time-in-range → NSI
+Physiologic.
+
 ## Deferred (not scheduled)
 
-- BioMech API/SDK live ingestion (**superseded 2026-07-16**: real reports don't match the
-  V1 PDF parser's assumed format, so the recommendation is now **API-first**
-  (`device_measured`), PDF only as a to-be-rebuilt fallback — see biomech-data-streams.md
-  §3/§7; owner says API access is probably available)
+- BioMech API/SDK live ingestion — the recommendation remains **API-first** (`device_measured`)
+  when the owner's API access lands; the **PDF path is no longer a gap** (rebuilt to the real
+  report format in **ADR-0036**, so it ingests real reports today as the fallback). See
+  biomech-data-streams.md §3/§7 + ADR-0036.
