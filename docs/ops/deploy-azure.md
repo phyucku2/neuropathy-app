@@ -277,34 +277,30 @@ internal network, so the browser only ever talks to one origin and **no backend 
 is needed** (the backend ships none). Internal ingress serves plain HTTP on port 80, which
 nginx's `proxy_pass http://$backend_origin` targets by default.
 
-### 7.1 KNOWN CAVEAT — the nginx Docker resolver (open decision, needs a decision before prod)
+### 7.1 The nginx resolver + Host (handled for Container Apps)
 
-`frontend/nginx.conf.template` hardcodes **`resolver 127.0.0.11`** — Docker's embedded DNS —
-because it uses a *variable* in `proxy_pass` (which forces per-request DNS resolution). **That
-address does not exist in Azure Container Apps** (the platform is Kubernetes-based; DNS is the
-cluster resolver, not `127.0.0.11`). As delivered, the frontend's variable `proxy_pass` will
-therefore fail to resolve `BACKEND_ORIGIN` in Container Apps (typically a 502 on API paths;
-the SPA shell still loads). A secondary issue: the template sets `Host $host`, but Container
-Apps internal ingress routes by the **target FQDN** in the Host header.
+The frontend proxy uses a *variable* in `proxy_pass` (per-request DNS resolution), which needs
+an explicit `resolver`. Both Container-Apps prerequisites are now handled in the image itself:
 
-This infra work **does not modify frontend/backend application logic** (out of scope), so this
-is flagged as an **open decision**. Options, in order of preference:
+- **Resolver** — `frontend/docker-entrypoint.sh` **auto-detects the container's own nameserver**
+  from `/etc/resolv.conf` and injects it into the nginx config (`NGINX_RESOLVER`). That resolves
+  to `127.0.0.11` on Docker's embedded DNS and to the **cluster DNS on Azure Container Apps /
+  Kubernetes** automatically. Override with the `NGINX_RESOLVER` env var if a specific resolver
+  is required.
+- **Host header** — the proxy now sends `Host: $backend_origin` (the backend's FQDN) rather than
+  the client host, so **Container Apps internal ingress routes to the backend** correctly. This
+  is harmless on Docker/Render (the backend does not host-route), and safe because the backend
+  never derives URLs from `Host` (the OAuth `redirect_uri` is a configured setting).
 
-1. **Small frontend follow-up (recommended):** make the nginx `resolver` (and the proxied
-   `Host`) environment-driven — substitute the platform DNS at container start via the
-   existing `envsubst` entrypoint, and set `Host` to `$backend_origin`. One-line-ish change,
-   keeps the same-origin/no-CORS design intact on Azure. Owned by the frontend, tracked
-   separately.
-2. **Verify per-environment:** if a given Container Apps environment happens to expose a
-   compatible resolver, confirm end-to-end (§9) before relying on it. Do not assume.
-3. **Cross-origin (not recommended):** point the frontend `API_BASE_URL` at the backend's
-   public URL and give the backend an **external** ingress — but the backend has **no CORS
-   layer**, so browser calls are blocked until CORS is added to the backend. This trades the
-   resolver problem for a CORS problem; prefer option 1.
+So the same-origin, no-CORS reverse-proxy design works on Azure as-is. **Still verify end-to-end
+on first deploy** (§9): confirm an API path (e.g. `POST /auth/login`) succeeds *through the
+frontend origin*, not just against the backend directly — internal-ingress DNS/port specifics
+vary, and `NGINX_RESOLVER` / `BACKEND_ORIGIN` are the two knobs if a path 502s.
 
-Until option 1 lands, treat the Azure frontend reverse-proxy as **not yet verified for
-production**; the backend itself (auth, check-ins, migrations, health) is fully functional and
-directly testable from inside the environment.
+If you would rather not use the reverse-proxy at all, the alternative is cross-origin
+(`API_BASE_URL` = the backend's public URL + an **external** backend ingress) — but the backend
+ships **no CORS layer**, so browser calls are blocked until CORS is added. Prefer the
+reverse-proxy.
 
 ---
 
