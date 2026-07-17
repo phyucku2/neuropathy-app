@@ -199,3 +199,53 @@ def test_same_uuid_same_key_across_value_changes() -> None:
     a = wearable_import_key(_sample(value=1.1, external_id="HK-x"))
     b = wearable_import_key(_sample(value=1.2, external_id="HK-x"))
     assert a == b
+
+
+# --- continuous glucose (CGM, ADR-0038) ------------------------------------------------
+# Glucose rides the SAME seam as mobility: device-measured, canonical mg/dL (the native
+# seam converts mmol/L at the edge, so the backend only ever sees mg/dL), reliable fidelity,
+# in_range_is_better polarity, PHI-free validation. It is NOT folded into the NSI (see
+# test_trajectory_composite.py). No alarms, no dosing — a tracked signal only.
+
+
+def test_glucose_maps_to_a_reliable_mg_dl_row() -> None:
+    row = wearable_sample_to_observation(
+        _sample(WearableMetric.blood_glucose, 120.0, external_id="CGM-1"),
+        patient_id=PATIENT_ID,
+        import_key="k",
+    )
+    assert row.code == "blood_glucose"
+    assert row.source is SourceType.wearable
+    assert row.origin is DataOrigin.device_measured
+    assert row.status is ObservationStatus.final
+    assert row.recorded_by_role == "patient"
+    assert row.value_num == 120.0
+    # Canonical unit from the catalog, never the client — the backend only sees mg/dL.
+    assert row.unit == "mg/dL"
+    # Device-measured CGM reading -> reliable (unlike the advisory mobility metrics).
+    assert row.quality["fidelity"] == "reliable"
+    assert row.quality["platform"] == "apple_health"
+    assert row.payload["display"] == "Blood glucose"
+
+
+def test_glucose_polarity_is_in_range_via_registry() -> None:
+    # A high OR a low reading is worse: in_range_is_better, judged only by the registry.
+    assert polarity_for("blood_glucose") is Polarity.in_range_is_better
+    # Plain-language label, never the raw code (patient-facing).
+    assert signal_info("blood_glucose").label == "blood sugar"
+
+
+def test_glucose_out_of_range_is_skipped_with_a_value_free_warning() -> None:
+    # An implausible mg/dL reading (> 600) is rejected, never coerced — and the measured
+    # value is PHI, so it must not echo into the warning/error (audit contract, ADR-0038).
+    with pytest.raises(WearableValueError, match="outside the expected range") as exc:
+        wearable_sample_to_observation(
+            _sample(WearableMetric.blood_glucose, 999.0), patient_id=PATIENT_ID, import_key="k"
+        )
+    assert "999" not in str(exc.value)
+
+
+def test_glucose_import_key_prefers_platform_uuid() -> None:
+    # Idempotency by platform sample identity, exactly like the mobility metrics.
+    key = wearable_import_key(_sample(WearableMetric.blood_glucose, 120.0, external_id="CGM-9"))
+    assert key == "wearable:apple_health:id:CGM-9:blood_glucose"

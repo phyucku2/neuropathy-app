@@ -82,6 +82,10 @@ _WEARABLE_DISTANCE = SignalInfo(Polarity.higher_is_better, "walking distance")
 _WEARABLE_ASYMMETRY = SignalInfo(Polarity.lower_is_better, "walking asymmetry")
 _WEARABLE_DOUBLE_SUPPORT = SignalInfo(Polarity.lower_is_better, "double-support time")
 _WEARABLE_STEADINESS = SignalInfo(Polarity.higher_is_better, "walking steadiness")
+# Continuous glucose (CGM) via the health bridge (source='wearable', ADR-0038). Both a high
+# and a low reading are worse, so in_range_is_better — a trend is shown but a single reading
+# is never judged good/bad by direction alone, and never enters the NSI (excluded, ADR-0038).
+_BLOOD_GLUCOSE = SignalInfo(Polarity.in_range_is_better, "blood sugar")
 
 _REGISTRY: dict[str, SignalInfo] = {
     # Labs — LOINC codes first, then friendly keys.
@@ -139,6 +143,9 @@ _REGISTRY: dict[str, SignalInfo] = {
     "wearable_walking_asymmetry": _WEARABLE_ASYMMETRY,
     "wearable_double_support": _WEARABLE_DOUBLE_SUPPORT,
     "wearable_walking_steadiness": _WEARABLE_STEADINESS,
+    # Continuous glucose (CGM) via the health bridge (ADR-0038). Bare code (matches
+    # schemas/wearable.py); tracked + graphed, but excluded from the NSI composite.
+    "blood_glucose": _BLOOD_GLUCOSE,
 }
 
 

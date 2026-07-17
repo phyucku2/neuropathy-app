@@ -167,6 +167,26 @@ def test_duplicate_within_one_batch_is_deduped(
     assert resp == {"imported": 1, "skipped": 1}
 
 
+async def test_glucose_imports_gated_and_audit_carries_no_reading(
+    client: TestClient, enabled: CapabilityService, service: EmrService
+) -> None:
+    # CGM glucose (ADR-0038) rides the SAME gated endpoint as mobility. The reading is PHI:
+    # it lands as a research-grade row but never appears in the counts-only audit.
+    resp = _post(client, _sample(metric="blood_glucose", value=123.0, external_id="CGM-1"))
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"imported": 1, "skipped": 0}
+
+    rows = await service.observations.list_for_patient(PATIENT.patient_id)
+    assert [r.code for r in rows] == ["blood_glucose"]
+    assert rows[0].source is SourceType.wearable
+    assert rows[0].unit == "mg/dL"
+    assert rows[0].quality["fidelity"] == "reliable"
+
+    events = await service.audit.list_for_patient(PATIENT.patient_id)
+    assert [e.action for e in events] == ["import_wearable"]
+    assert "123" not in str(events[0].detail)  # the glucose reading never reaches the audit
+
+
 # --- validation ------------------------------------------------------------------------
 
 

@@ -105,6 +105,57 @@ export function toWearableSample(
   };
 }
 
+/** Exact molar-mass factor for glucose: 1 mmol/L = 18.0182 mg/dL (ADR-0038). Conversion
+ * happens at the edge so the client ALWAYS sends canonical mg/dL — the metric determines
+ * the unit, the client never names one (the BioMech feet-vs-cm lesson, ADR-0035). */
+export const MMOL_L_TO_MG_DL = 18.0182;
+
+/** One blood-glucose reading as a native health plugin hands it to us (HealthKit
+ * `bloodGlucose` / Health Connect `BloodGlucose`) — a single instant, carrying the
+ * platform's own source unit. Health Connect always stores mmol/L; HealthKit may report
+ * either, so the raw `unit` is a plain string we canonicalize here rather than trust. */
+export interface HealthGlucoseSample {
+  value: number;
+  /** The platform's reported unit — `'mg/dL'` or `'mmol/L'`; anything else is rejected. */
+  unit: string;
+  startISO: string;
+  endISO: string;
+  sourceDevice: WearableSourceDevice;
+  /** True when the phone produced this without a watch — the base tier (ADR-0035). */
+  phoneDerived: boolean;
+  /** The platform's stable sample id (HKSample.uuid / Health Connect metadata.id). */
+  externalId?: string | null;
+}
+
+/** Pure mapping: a raw platform glucose reading → the API payload, canonicalized to mg/dL.
+ * `mmol/L` is converted (× 18.0182); `mg/dL` passes through; any other unit is rejected.
+ * The thrown error names ONLY the offending unit, never the reading — glucose is PHI and
+ * must never cross into a log or error body (ADR-0038 / audit contract). */
+export function toGlucoseSample(
+  sample: HealthGlucoseSample,
+  platform: HealthPlatform,
+): WearableSampleIn {
+  let mgPerDl: number;
+  if (sample.unit === 'mg/dL') {
+    mgPerDl = sample.value;
+  } else if (sample.unit === 'mmol/L') {
+    mgPerDl = sample.value * MMOL_L_TO_MG_DL;
+  } else {
+    // PHI-safe: report only the unit label, never `sample.value`.
+    throw new Error(`Unsupported glucose unit: ${sample.unit}`);
+  }
+  return {
+    metric: 'blood_glucose',
+    value: mgPerDl,
+    effective_start: sample.startISO,
+    effective_end: sample.endISO,
+    platform,
+    source_device: sample.sourceDevice,
+    phone_derived: sample.phoneDerived,
+    external_id: sample.externalId ?? null,
+  };
+}
+
 export type HealthSyncResult =
   | { status: 'unavailable' }
   | { status: 'permission-denied' }

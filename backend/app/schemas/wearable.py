@@ -36,10 +36,12 @@ MAX_WEARABLE_BATCH = 500
 
 
 class WearableMetric(enum.StrEnum):
-    """The closed set of mobility metrics V1 ingests. Codes are prefixed `wearable_` so
-    they pool separately from BioMech (`biomech_`) and self-report (`adl_`) codes. The
-    canonical unit, valid range, polarity, and fidelity of each live in the catalog
-    (`app/ingestion/wearable.WEARABLE_METRICS`) — the single source of truth."""
+    """The closed set of health-bridge metrics V1 ingests. The mobility codes are prefixed
+    `wearable_` so they pool separately from BioMech (`biomech_`) and self-report (`adl_`)
+    codes; `blood_glucose` (ADR-0038) keeps its bare canonical code, matching the ADR and
+    the labs/CGM naming. The canonical unit, valid range, polarity, and fidelity of each
+    live in the catalog (`app/ingestion/wearable.WEARABLE_METRICS`) — the single source of
+    truth."""
 
     walking_speed = "wearable_walking_speed"
     step_length = "wearable_step_length"
@@ -48,6 +50,10 @@ class WearableMetric(enum.StrEnum):
     walking_asymmetry = "wearable_walking_asymmetry"
     double_support = "wearable_double_support"
     walking_steadiness = "wearable_walking_steadiness"
+    # Continuous glucose (CGM) via the same health bridge (ADR-0038). Not a mobility metric
+    # and not folded into the NSI in v1 — a tracked, graphed signal only. The native seam
+    # canonicalizes to mg/dL at the edge, so the backend only ever sees mg/dL.
+    blood_glucose = "blood_glucose"
 
 
 class HealthPlatform(enum.StrEnum):

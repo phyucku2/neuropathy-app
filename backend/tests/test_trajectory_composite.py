@@ -293,6 +293,22 @@ def test_non_registry_codes_do_not_enter_the_index() -> None:
     assert index.confidence_level is ConfidenceLevel.low
 
 
+def test_blood_glucose_is_excluded_from_the_index() -> None:
+    # CGM glucose (ADR-0038) is a TRACKED signal — it graphs and trends — but a single
+    # glucose reading is not a validated NSI input in v1, so it must NOT enter the composite
+    # (the same rule that excludes adl_daily_score). Deriving a validated glycemic summary
+    # (time-in-range/mean/variability) for the Physiologic tier is the defined follow-up.
+    points = _series("biomech_balance_score", [70, 70, 70, 70], source="biomech") + _series(
+        "blood_glucose", [110, 140, 180, 200], source="wearable"
+    )
+    index = _index(points)
+
+    # Only the function domain (balance = 70) is present -> score 70, Low confidence.
+    # If glucose leaked into the Index the score would move off 70.
+    assert index.score == 70
+    assert index.confidence_level is ConfidenceLevel.low
+
+
 def test_index_is_deterministic_regardless_of_point_order() -> None:
     points = _full_three_domain()
     assert _index(list(points)) == _index(list(reversed(points)))

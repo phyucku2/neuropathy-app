@@ -79,6 +79,14 @@ WEARABLE_METRICS: dict[WearableMetric, MetricSpec] = {
     WearableMetric.walking_steadiness: MetricSpec(
         "Walking steadiness", "%", 0.0, 100.0, Fidelity.advisory
     ),
+    # Continuous glucose (CGM) via the health bridge (ADR-0038). Device-measured, so
+    # `reliable`; unit is canonical mg/dL (the native seam converts mmol/L at the edge).
+    # The range rejects nonsense (a negative or absurd reading), NOT a clinical judgment —
+    # ~20-600 mg/dL spans severe hypo- to severe hyperglycemia; outliers are skipped with a
+    # warning, never coerced (like every other metric). No alarms, no dosing (ADR-0038).
+    WearableMetric.blood_glucose: MetricSpec(
+        "Blood glucose", "mg/dL", 20.0, 600.0, Fidelity.reliable
+    ),
 }
 
 
