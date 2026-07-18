@@ -361,6 +361,48 @@ it does not gate the core register/login/check-in flow.
 
 ---
 
+## 8a. EMR / SMART on FHIR patient connect (config-only; OFF until registered)
+
+The patient EMR-connect flow (ADR-0009/0028) is built and shipped: the patient signs in on
+**their own** health system's page (MyChart, etc.) and authorizes our app — a SMART
+standalone-launch, PKCE **public** client (no client secret). It stays OFF until you (a)
+register the app with each EMR vendor and (b) pass the vendor-issued client id(s) here. Full
+walkthrough: **`docs/emr/sandbox-registration-runbook.md`** (Epic + Oracle Health, sandbox →
+production, test patients, smoke test).
+
+The Bicep now carries these as **optional** params (all omit-when-blank, so a first bring-up
+passes none of them):
+
+| Param | Env var | Value |
+|---|---|---|
+| `smartClientIdEpic` | `SMART_CLIENT_ID_EPIC` | Epic Non-Production client id (sandbox), Production later |
+| `smartClientIdOracleHealth` | `SMART_CLIENT_ID_ORACLE_HEALTH` | Oracle Health (Cerner) client id |
+| `smartClientIdAthenahealth` / `…Meditech` / `…Nextgen` / `…Veradigm` | `SMART_CLIENT_ID_<VENDOR>` | that vendor's client id |
+| `smartClientId` | `SMART_CLIENT_ID` | generic fallback (custom fhir_base / unconfigured providers) |
+| `smartRedirectUri` | `SMART_REDIRECT_URI` | **the public frontend origin + `/emr/callback`** (see below) |
+
+**The redirect URI is the subtle part.** The backend has **internal** ingress; the vendor's
+browser redirect must hit a **public** URL. In our split topology the browser lands on the
+**frontend**, whose nginx reverse-proxies `/emr/callback` to the backend (same-origin). So the
+URI you register with each vendor — and pass as `smartRedirectUri` — is
+**`https://<frontend-public-fqdn>/emr/callback`**, byte-matching the registration. After the
+first deploy, read it straight from the deployment output **`suggestedSmartRedirectUri`**, then
+redeploy passing it plus the client id(s):
+
+```bash
+az deployment group show -g "$RG" -n neuropathy-azure \
+  --query properties.outputs.suggestedSmartRedirectUri.value -o tsv
+# → register THIS exact URL with Epic/Oracle, then redeploy adding:
+#   smartClientIdEpic="<epic non-production client id>" \
+#   smartRedirectUri="https://<frontend-fqdn>/emr/callback"
+```
+
+Client ids are low-sensitivity but stay env-only (never committed); they're passed as
+`@secure()` params → Container Apps secrets. EMR connect does not gate register/login/check-in
+— skip this section entirely for a first bring-up.
+
+---
+
 ## 9. Verify it's live (checklist)
 
 Backend (internal) is reachable from inside the environment; the frontend is public. Two

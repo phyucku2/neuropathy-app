@@ -103,6 +103,35 @@ param opsBootstrapToken string = ''
 @secure()
 param databaseUrlOverride string = ''
 
+// --- EMR / SMART on FHIR patient connect (ADR-0009/0028) ---------------------
+// All OPTIONAL: EMR connect stays OFF until configured, so a first bring-up passes none of
+// these. Each vendor issues its OWN client id at app registration (see
+// docs/emr/sandbox-registration-runbook.md); set the matching param per vendor you register.
+// smartClientId is the generic fallback for custom-fhir_base / unconfigured providers.
+@description('OPTIONAL generic SMART client id (fallback for custom fhir_base / unconfigured providers).')
+@secure()
+param smartClientId string = ''
+@description('OPTIONAL Epic (MyChart) SMART client id — Non-Production for sandbox, Production once live.')
+@secure()
+param smartClientIdEpic string = ''
+@description('OPTIONAL Oracle Health (Cerner) SMART client id.')
+@secure()
+param smartClientIdOracleHealth string = ''
+@description('OPTIONAL athenahealth SMART client id.')
+@secure()
+param smartClientIdAthenahealth string = ''
+@description('OPTIONAL MEDITECH SMART client id.')
+@secure()
+param smartClientIdMeditech string = ''
+@description('OPTIONAL NextGen SMART client id.')
+@secure()
+param smartClientIdNextgen string = ''
+@description('OPTIONAL Veradigm (Allscripts) SMART client id.')
+@secure()
+param smartClientIdVeradigm string = ''
+@description('OPTIONAL SMART redirect URI registered with the vendors. In this split topology the browser lands on the PUBLIC frontend, which reverse-proxies /emr/callback to the internal backend — so set this to https://<frontend-public-fqdn>/emr/callback (from the frontendUrl output), byte-matching each vendor registration. Blank = EMR connect stays off.')
+param smartRedirectUri string = ''
+
 // --- App runtime tuning ------------------------------------------------------
 @description('Gunicorn worker count (gunicorn.conf.py). Size to the backend container CPU.')
 param webConcurrency string = '2'
@@ -161,10 +190,37 @@ var optionalSecrets = concat(
   empty(secretStoreKey) ? [] : [ { name: 'secret-store-key', value: secretStoreKey } ],
   empty(opsBootstrapToken) ? [] : [ { name: 'ops-bootstrap-token', value: opsBootstrapToken } ]
 )
+
+// SMART client ids (ADR-0009/0028): one per vendor + a generic fallback. Only the
+// configured (non-blank) ones become Container Apps secrets and env vars — the rest are
+// omitted entirely, exactly like the optional secrets above (config.py treats absent as
+// blank), so no secretRef ever dangles. Uses the same proven concat(empty()?[]:[...])
+// gating as optionalSecrets. Adding a vendor = adding a param above + two rows here.
+var smartSecrets = concat(
+  empty(smartClientId) ? [] : [ { name: 'smart-client-id', value: smartClientId } ],
+  empty(smartClientIdEpic) ? [] : [ { name: 'smart-client-id-epic', value: smartClientIdEpic } ],
+  empty(smartClientIdOracleHealth) ? [] : [ { name: 'smart-client-id-oracle-health', value: smartClientIdOracleHealth } ],
+  empty(smartClientIdAthenahealth) ? [] : [ { name: 'smart-client-id-athenahealth', value: smartClientIdAthenahealth } ],
+  empty(smartClientIdMeditech) ? [] : [ { name: 'smart-client-id-meditech', value: smartClientIdMeditech } ],
+  empty(smartClientIdNextgen) ? [] : [ { name: 'smart-client-id-nextgen', value: smartClientIdNextgen } ],
+  empty(smartClientIdVeradigm) ? [] : [ { name: 'smart-client-id-veradigm', value: smartClientIdVeradigm } ]
+)
+var smartEnv = concat(
+  empty(smartClientId) ? [] : [ { name: 'SMART_CLIENT_ID', secretRef: 'smart-client-id' } ],
+  empty(smartClientIdEpic) ? [] : [ { name: 'SMART_CLIENT_ID_EPIC', secretRef: 'smart-client-id-epic' } ],
+  empty(smartClientIdOracleHealth) ? [] : [ { name: 'SMART_CLIENT_ID_ORACLE_HEALTH', secretRef: 'smart-client-id-oracle-health' } ],
+  empty(smartClientIdAthenahealth) ? [] : [ { name: 'SMART_CLIENT_ID_ATHENAHEALTH', secretRef: 'smart-client-id-athenahealth' } ],
+  empty(smartClientIdMeditech) ? [] : [ { name: 'SMART_CLIENT_ID_MEDITECH', secretRef: 'smart-client-id-meditech' } ],
+  empty(smartClientIdNextgen) ? [] : [ { name: 'SMART_CLIENT_ID_NEXTGEN', secretRef: 'smart-client-id-nextgen' } ],
+  empty(smartClientIdVeradigm) ? [] : [ { name: 'SMART_CLIENT_ID_VERADIGM', secretRef: 'smart-client-id-veradigm' } ]
+)
+// The redirect URI is a public URL, not a secret — a plain env var, omitted when blank.
+var smartRedirectEnv = empty(smartRedirectUri) ? [] : [ { name: 'SMART_REDIRECT_URI', value: smartRedirectUri } ]
+
 var backendAppSecrets = concat([
   { name: 'jwt-secret', value: jwtSecret }
   { name: 'database-url', value: databaseUrl }
-], optionalSecrets)
+], optionalSecrets, smartSecrets)
 
 var registrySecret = [
   { name: 'registry-password', value: registryPassword }
@@ -194,7 +250,7 @@ var backendEnv = concat([
   { name: 'WEB_CONCURRENCY', value: webConcurrency }
   // PORT defaults to 8000 in gunicorn.conf.py; set explicitly to match ingress.targetPort.
   { name: 'PORT', value: string(backendTargetPort) }
-], optionalBackendEnv)
+], optionalBackendEnv, smartEnv, smartRedirectEnv)
 
 // ------------------------------ Log Analytics --------------------------------
 // Container Apps environments require a Log Analytics workspace for app logs.
@@ -478,6 +534,9 @@ output postgresFqdn string = postgres.properties.fullyQualifiedDomainName
 
 @description('Name of the migration job to invoke with `az containerapp job start`.')
 output migrateJobName string = migrateJob.name
+
+@description('The SMART redirect URI to register with each EMR vendor and pass back as smartRedirectUri: the PUBLIC frontend origin + /emr/callback (the frontend reverse-proxies it to the internal backend). See docs/emr/sandbox-registration-runbook.md.')
+output suggestedSmartRedirectUri string = 'https://${frontendApp.properties.configuration.ingress.fqdn}/emr/callback'
 
 @description('Whether DATABASE_URL was built from the provisioned server (false = you passed databaseUrlOverride).')
 // This output is a BOOLEAN of whether the override was provided — `empty(...)` never emits the
