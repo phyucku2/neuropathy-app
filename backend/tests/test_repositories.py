@@ -144,9 +144,10 @@ async def test_pull_labs_persists_research_grade_observations_and_audits() -> No
     )
     await service.connections.add(record)
 
-    results, imported = await service.pull_labs(record.id)
+    results, imported, skipped = await service.pull_labs(record.id)
     assert len(results) == 1
     assert imported == 1
+    assert skipped == 0
 
     observations = await service.observations.list_for_patient(PATIENT_ID)
     assert len(observations) == 1
@@ -208,8 +209,8 @@ async def test_repeated_pulls_do_not_duplicate_observations() -> None:
     )
     await service.connections.add(record)
 
-    _, first = await service.pull_labs(record.id)
-    results, second = await service.pull_labs(record.id)
+    _, first, _ = await service.pull_labs(record.id)
+    results, second, _ = await service.pull_labs(record.id)
     assert (first, second) == (1, 0)  # second sync fetches but persists nothing new
     assert len(results) == 1
     assert len(await service.observations.list_for_patient(PATIENT_ID)) == 1
