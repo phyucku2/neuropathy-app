@@ -354,7 +354,25 @@ async def test_symptoms_on_stores_pain_and_numbness_with_polarity_and_provenance
     assert pain.value_num == 7.0
     assert numbness.value_num == 4.0
     midnight = datetime.combine(NOW.date(), datetime.min.time(), tzinfo=UTC)
-    for row, alignment in ((pain, "NRS-aligned"), (numbness, "NTSS-6-aligned")):
+    # Expected honest alignment + ADA construct mapping (ADR-0043) per item. The ADA
+    # modalities are CLINICIAN exams; ours are patient-reported symptoms mapped to the same
+    # fiber construct ("related to", not equivalent).
+    expected = {
+        "symptom_pain": (
+            "NRS-aligned",
+            "small_fiber_symptom",
+            "small_fiber",
+            "temperature/pinprick",
+        ),
+        "symptom_numbness": (
+            "NTSS-6-aligned",
+            "large_fiber_symptom",
+            "large_fiber",
+            "128-Hz vibration / 10-g monofilament",
+        ),
+    }
+    for row in (pain, numbness):
+        alignment, construct, fiber, modality = expected[row.code]
         # Research-grade provenance (ALCOA+, data-standards.md).
         assert row.source.value == "adl"
         assert row.origin is DataOrigin.patient_reported
@@ -371,6 +389,12 @@ async def test_symptoms_on_stores_pain_and_numbness_with_polarity_and_provenance
         assert row.quality["measure_alignment"] == alignment
         assert row.quality["validated_instrument"] is False
         assert row.quality["instrument"] == "symptom-check-in"
+        # ADA construct mapping — additive provenance (never read by the NSI).
+        assert row.quality["construct"] == construct
+        assert row.quality["ada_fiber_class"] == fiber
+        assert row.quality["ada_modality_related"] == modality
+        assert row.quality["patient_reported"] is True
+        assert "Rec 12.17" in row.quality["ada_reference"]
 
 
 async def test_symptoms_partial_answer_is_rejected_atomically(

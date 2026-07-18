@@ -118,10 +118,16 @@ materials and adversarially-verified research. One portion = one small PR, merge
 | **Cited research** — AI-fusion evidence review + DPN→ADL/falls & module evidence | `docs/product/ai-fusion-evidence-review.md`, `dpn-adl-falls-and-education-evidence.md` | ✅ | Honest framing: association not validated prediction; moat = dataset, not model |
 | **Accessibility-first for the 60+ population** — standing design constraint (type/contrast/targets/simplicity), enforced by contrast tests | ADR-0039 | ✅ (this PR) | Records that all new UI is built to this bar |
 
-**In progress / next:** Learn section + Your Records read-only view (built to ADR-0039); NSI
-Function two-tier (fold fidelity-weighted wearable data into the score); BioMech eyes-open−closed
-gap; Android Health Connect connector; iOS + HealthKit (pending Mac + Apple account). Backlog
-detail in [`docs/product/roadmap-buildout-specs.md`](product/roadmap-buildout-specs.md).
+**Measurement-rigor groundwork (ADR-0043):** symptom items now live in a single-source
+`psychometrics` item-bank with honest ADA construct mapping (Rec 12.17/12.18 — "related to,"
+not equivalent) and an uncalibrated IRT/CAT administration seam (Spec 4). Deterministic, no
+score change; honesty guards keep it from overclaiming. The #1 product gap from
+[`docs/product/market-position-and-gaps.md`](product/market-position-and-gaps.md).
+
+**In progress / next:** NSI Function two-tier (fold fidelity-weighted wearable data into the
+score); BioMech eyes-open−closed gap; Android Health Connect connector; iOS + HealthKit
+(pending Mac + Apple account). Backlog detail in
+[`docs/product/roadmap-buildout-specs.md`](product/roadmap-buildout-specs.md).
 **V2:** AI photo food logging (honest ranged-estimate) — architecture decided (**ADR-0042**):
 **GPT-4o-vision (Azure, under Microsoft's BAA) + free nutrition DBs** (Open Food Facts barcode /
 USDA text), image recognition reserved for plated meals, always a human confirm/edit step;
