@@ -30,6 +30,19 @@ class ObservationRepository(Protocol):
         """Persist a research-grade Observation (append-only; never an overwrite)."""
         ...
 
+    async def add_if_absent(self, observation: Observation) -> bool:
+        """Idempotent insert keyed on (patient_id, import_key): persist the row unless one
+        with the same import_key already exists for the patient. Returns True if this call
+        inserted, False if a matching row was already on file (sweep #3).
+
+        This is the concurrency-safe write for every import-keyed ingest path (labs,
+        biomech, wearable): the pre-write `existing_import_keys` probe narrows the common
+        case, but two concurrent pulls can both pass it, so the DB-level partial UNIQUE
+        index (`uq_observation_patient_import_key`) is the real invariant and this method
+        absorbs the resulting conflict as a skip rather than a 500. The row MUST carry a
+        non-null import_key (rows without one are deduped by supersession — use `add`)."""
+        ...
+
     async def list_for_patient(
         self,
         patient_id: uuid.UUID,
@@ -79,6 +92,18 @@ class InMemoryObservationRepository:
             observation.id = uuid.uuid4()
         self._observations.append(observation)
         return observation
+
+    async def add_if_absent(self, observation: Observation) -> bool:
+        # Mirror the DB partial-unique index: uniqueness on (patient_id, import_key) only
+        # when import_key is set (a null key never collides, matching WHERE import_key IS
+        # NOT NULL). Labs/biomech/wearable always set one; guard anyway.
+        if observation.import_key is not None and any(
+            o.patient_id == observation.patient_id and o.import_key == observation.import_key
+            for o in self._observations
+        ):
+            return False
+        await self.add(observation)
+        return True
 
     async def list_for_patient(
         self,

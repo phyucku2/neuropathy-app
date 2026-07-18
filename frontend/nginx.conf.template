@@ -12,10 +12,16 @@ worker_processes auto;
 pid /tmp/nginx.pid;
 # Real ops errors only (upstream failures, config faults). Raised from `warn` to `error`
 # so routine warn-level chatter never reaches captured logs. NOTE: on a hard proxy error
-# nginx appends the request line to its message (", request: \"GET /path HTTP/1.1\"") —
-# this is the ONE place a raw path could surface, and it cannot be suppressed by config.
-# It is acceptable only because at `error` level for these proxy paths the message never
-# carries the query string, and the access log below is fully PHI-free (ADR-0018 §4).
+# nginx appends the FULL request line to its message (", request: \"GET /path?query
+# HTTP/1.1\"") and this cannot be suppressed by config. CORRECTION (sweep #2): an earlier
+# note here claimed the error message omits the query string — that is WRONG. The request
+# line carries BOTH the path and the query, so a proxy error on /clinic/patients/<uuid>/…
+# writes the patient UUID, and one on /emr/callback?code=…&state=… writes the single-use
+# OAuth code+state. This error stream is therefore POTENTIALLY PHI-BEARING and must be
+# treated as such for retention/access-control — UNLIKE the access log below, which is
+# fully PHI-free by design (ADR-0018 §4). Remediation options (route the stream off the
+# app log pipeline, or relay the OAuth code/state off the query string) are tracked in
+# docs/compliance/sweep-2026-07-18.md (#2).
 error_log /dev/stderr error;
 
 events {

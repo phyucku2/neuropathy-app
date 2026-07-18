@@ -68,6 +68,43 @@ async def test_observation_repository_lists_analyzable_records_only() -> None:
     ]
 
 
+async def test_add_if_absent_is_idempotent_on_import_key() -> None:
+    """The DB-level import-idempotency invariant, mirrored in memory (sweep #3): a second
+    add of a row with an import_key already on file for the patient is a skip, not a
+    duplicate — and it reports which happened so callers count real inserts only."""
+    repo = InMemoryObservationRepository()
+
+    def _keyed(key: str, patient_id: uuid.UUID = PATIENT_ID) -> Any:
+        return lab_result_to_observation(
+            _lab("4548-4", 7.2),
+            patient_id=patient_id,
+            origin=DataOrigin.ehr_imported,
+            recorded_by_role="system",
+            quality={"source_system": "Synthetic Health"},
+            import_key=key,
+        )
+
+    assert await repo.add_if_absent(_keyed("labs:abc")) is True
+    assert await repo.add_if_absent(_keyed("labs:abc")) is False  # same key -> skipped
+    # A different key for the same patient still inserts...
+    assert await repo.add_if_absent(_keyed("labs:def")) is True
+    # ...and the SAME key for a DIFFERENT patient is not a collision (index is per-patient).
+    assert await repo.add_if_absent(_keyed("labs:abc", uuid.uuid4())) is True
+    assert await repo.count_for_patient(PATIENT_ID) == 2  # abc + def, the dup never landed
+
+
+async def test_add_if_absent_never_collides_on_a_null_import_key() -> None:
+    """Uniqueness is scoped to import-keyed rows (WHERE import_key IS NOT NULL): rows with
+    no import_key — ADL/symptom check-ins, deduped by supersession — always insert."""
+    repo = InMemoryObservationRepository()
+    first = _observation(_lab("4548-4", 7.2))  # helper leaves import_key None
+    second = _observation(_lab("4548-4", 7.2))
+    assert first.import_key is None
+    assert await repo.add_if_absent(first) is True
+    assert await repo.add_if_absent(second) is True  # no collision on NULL keys
+    assert await repo.count_for_patient(PATIENT_ID) == 2
+
+
 async def test_audit_repository_is_append_only_and_fills_defaults() -> None:
     repo = InMemoryAuditEventRepository()
     event = await repo.add(

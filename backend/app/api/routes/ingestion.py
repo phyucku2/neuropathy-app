@@ -97,7 +97,10 @@ async def import_labs(
             skipped += 1
             continue
         seen.add(key)
-        await service.observations.add(
+        # add_if_absent, not add: the on_file probe narrows the common case, but a
+        # concurrent upload of the same lab can slip between probe and write — the DB
+        # partial-unique index makes the duplicate impossible and this skips it (#3).
+        inserted = await service.observations.add_if_absent(
             lab_result_to_observation(
                 result,
                 patient_id=current.patient_id,
@@ -109,7 +112,10 @@ async def import_labs(
                 import_key=key,
             )
         )
-        imported += 1
+        if inserted:
+            imported += 1
+        else:
+            skipped += 1
     # PHI write — one audit event for the batch, counts only (CLAUDE.md §5).
     await service.audit.add(
         AuditEvent(
@@ -172,8 +178,12 @@ async def import_wearable(
     for key, row in prepared:
         if key in on_file:
             continue
-        await service.observations.add(row)
-        imported += 1
+        # add_if_absent, not add: the on_file probe narrows the common case, but a
+        # concurrent re-sync can slip between probe and write — the DB partial-unique
+        # index makes the duplicate impossible and this skips it (#3). skipped is derived
+        # (total - imported) below, so a lost race is absorbed there.
+        if await service.observations.add_if_absent(row):
+            imported += 1
     skipped = len(body.samples) - imported
     # PHI write — one audit event for the batch, counts + platforms only, never values.
     await service.audit.add(

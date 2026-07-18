@@ -88,7 +88,10 @@ async def import_biomech_report(
                 skipped += 1
                 continue
             seen.add(key)
-            await service.observations.add(
+            # add_if_absent, not add: the on_file probe narrows the common case, but a
+            # concurrent upload of the same report can slip between probe and write — the
+            # DB partial-unique index makes the duplicate impossible and this skips it (#3).
+            if await service.observations.add_if_absent(
                 biomech_metric_to_observation(
                     metric,
                     kind=report.kind,
@@ -97,8 +100,10 @@ async def import_biomech_report(
                     patient_id=current.patient_id,
                     import_key=key,
                 )
-            )
-            imported += 1
+            ):
+                imported += 1
+            else:
+                skipped += 1
 
     # PHI write — one audit event, counts + report kind only (CLAUDE.md §5). Warnings
     # can carry parsed values, so only their COUNT is audited, never their text.

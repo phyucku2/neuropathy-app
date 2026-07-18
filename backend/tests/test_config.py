@@ -76,3 +76,36 @@ def test_generated_secret_store_key_is_accepted() -> None:
 def test_unset_and_empty_secret_store_key_mean_in_memory_vault() -> None:
     assert _settings().secret_store_key is None
     assert _settings(secret_store_key="").secret_store_key is None
+
+
+# ---- JWT_SECRET fail-closed in DB mode (sweep #5) --------------------------------------
+
+VALID_DB_URL = "postgresql+asyncpg://u:p@localhost:5432/db?ssl=require"
+A_JWT_SECRET = "synthetic-jwt-secret-value-not-a-real-one"
+
+
+def test_blank_jwt_secret_reads_as_unset() -> None:
+    # A blank JWT_SECRET= (shell var unset behind JWT_SECRET: ${JWT_SECRET}) must be None,
+    # not a zero-length signing key, so the DB-mode rule below catches it.
+    assert _settings().jwt_secret is None
+    assert _settings(jwt_secret="").jwt_secret is None
+
+
+def test_db_mode_requires_a_jwt_secret() -> None:
+    # With DATABASE_URL set (durable multi-worker deployment) a missing JWT_SECRET must
+    # fail CLOSED at startup rather than boot into per-worker ephemeral keys (401 storm).
+    with pytest.raises(ValidationError) as exc_info:
+        _settings(database_url=VALID_DB_URL)  # jwt_secret unset
+    assert "JWT_SECRET" in str(exc_info.value)
+    with pytest.raises(ValidationError):
+        _settings(database_url=VALID_DB_URL, jwt_secret="")  # blank == unset
+
+
+def test_db_mode_with_a_jwt_secret_is_accepted() -> None:
+    settings = _settings(database_url=VALID_DB_URL, jwt_secret=A_JWT_SECRET)
+    assert settings.jwt_secret == A_JWT_SECRET
+
+
+def test_in_memory_mode_allows_an_unset_jwt_secret() -> None:
+    # No DATABASE_URL: unit tests / DB-less single-process dev keep the ephemeral-key path.
+    assert _settings().jwt_secret is None

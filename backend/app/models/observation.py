@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, String
+from sqlalchemy import DateTime, Enum, ForeignKey, Index, String, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -109,6 +109,22 @@ class Observation(UUIDPrimaryKey, Timestamps, Base):
         Index("ix_observation_status", "status"),
         # The superseded-row anti-join probes revises_id per candidate row (hot path).
         Index("ix_observation_patient_revises", "patient_id", "revises_id"),
-        # Import-idempotency existence probes (both ingest paths).
-        Index("ix_observation_patient_import_key", "patient_id", "import_key"),
+        # Import idempotency as a DB-LEVEL INVARIANT (sweep #3): a partial UNIQUE index on
+        # (patient_id, import_key) makes re-importing the same source record impossible in
+        # storage, not just in application code. The old read-then-write in every ingest
+        # path (labs/biomech/wearable) cannot hold under two concurrent pulls — both probe
+        # `existing_import_keys`, both see "absent", both insert a duplicate analyzable row.
+        # The unique index closes that race; `ObservationRepository.add_if_absent` turns the
+        # resulting conflict into a graceful skip instead of a 500. WHERE import_key IS NOT
+        # NULL scopes it to import-keyed rows only — ADL/symptom check-ins (import_key NULL,
+        # deduped by supersession) are untouched, and many NULLs never collide. This index
+        # also serves the batch existence probe (patient_id + import_key IN (...) implies
+        # NOT NULL), so it fully replaces the former non-unique ix_observation_patient_import_key.
+        Index(
+            "uq_observation_patient_import_key",
+            "patient_id",
+            "import_key",
+            unique=True,
+            postgresql_where=text("import_key IS NOT NULL"),
+        ),
     )
