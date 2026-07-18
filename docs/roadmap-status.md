@@ -124,6 +124,12 @@ not equivalent) and an uncalibrated IRT/CAT administration seam (Spec 4). Determ
 score change; honesty guards keep it from overclaiming. The #1 product gap from
 [`docs/product/market-position-and-gaps.md`](product/market-position-and-gaps.md).
 
+**Onboarding + clinician loop (ADR-0044):** shipped a first-run 60+ **welcome wizard**
+(full-screen, accessible, per-user localStorage flag). The **clinician feedback loop** (in-app
+data-gap signal + PRO-to-EHR write-back) is **specced** — a phased, gated design; trajectory
+"alerts" and write-back are deferred behind the FDA framework (ADR-0041) and per-vendor write
+support, not built blind.
+
 **In progress / next:** NSI Function two-tier (fold fidelity-weighted wearable data into the
 score); BioMech eyes-open−closed gap; Android Health Connect connector; iOS + HealthKit
 (pending Mac + Apple account). Backlog detail in

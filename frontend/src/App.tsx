@@ -1,9 +1,13 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useReducer } from 'react';
 import { Navigate, Outlet, Route, Routes } from 'react-router-dom';
 import { useAuth } from './auth/AuthContext';
 import { AppShell } from './components/AppShell';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Loading } from './components/StatusMessages';
+// First-run welcome (ADR-0044): a static import (not lazy) so the very first screen a new
+// patient sees never flashes a Suspense fallback while a chunk loads.
+import { OnboardingWizard } from './features/onboarding/OnboardingWizard';
+import { isOnboardingComplete } from './features/onboarding/onboardingState';
 // OfflineCheckInSync stays a static import (ADR-0030): it renders nothing, is always
 // mounted in the patient area, and isn't a route — code-splitting it would add a chunk
 // round-trip for no payload benefit.
@@ -78,11 +82,19 @@ function RequireAuth() {
  */
 function PatientArea() {
   const { user } = useAuth();
+  // Lets the onboarding gate re-render once the wizard finishes (the flag is now persisted).
+  const [, onOnboardingComplete] = useReducer((n: number) => n + 1, 0);
   if (user === null) {
     return <Loading label="Loading your account…" />;
   }
   if (user.role === 'clinician') {
     return <Navigate to="/clinic" replace />;
+  }
+  // First-run welcome (ADR-0044): a new patient sees the wizard once, full-screen (no tab
+  // bar), before the app. Persisted per user_id in localStorage — a returning patient skips
+  // straight through. Fails toward SHOWING the welcome if the flag can't be read.
+  if (!isOnboardingComplete(user.user_id)) {
+    return <OnboardingWizard userId={user.user_id} onComplete={onOnboardingComplete} />;
   }
   return (
     <>

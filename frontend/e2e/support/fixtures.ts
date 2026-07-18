@@ -115,7 +115,11 @@ export { expect };
  * refresh token in sessionStorage, GET /auth/me 401s (no access token yet), the
  * client refreshes once, and /auth/me returns the account — the REAL restore path.
  */
-export async function signedInApp(page: Page, scenario: Scenario = {}): Promise<MockApiState> {
+export async function signedInApp(
+  page: Page,
+  scenario: Scenario = {},
+  { onboarded = true }: { onboarded?: boolean } = {},
+): Promise<MockApiState> {
   const state = await installApiMocks(page, scenario);
   await page.addInitScript(
     ([key, token]) => {
@@ -123,5 +127,16 @@ export async function signedInApp(page: Page, scenario: Scenario = {}): Promise<
     },
     [REFRESH_TOKEN_KEY, SYNTHETIC_REFRESH_TOKEN] as const,
   );
+  // First-run welcome gate (ADR-0044): seed the per-user "onboarded" flag so specs boot
+  // straight into the app, like a returning patient. The onboarding spec passes
+  // { onboarded: false } to exercise the wizard. The id matches the mock patient's user_id.
+  if (onboarded) {
+    await page.addInitScript(
+      ([key, userId]) => {
+        window.localStorage.setItem(key, JSON.stringify([userId]));
+      },
+      ['neuropathy.onboarding_complete', '11111111-1111-4111-8111-111111111111'] as const,
+    );
+  }
   return state;
 }
