@@ -32,6 +32,12 @@ export function HomePage() {
         eyebrow="30 Day Score"
         ariaLabel="Your 30 day score"
       />
+      {/* Non-diagnostic note CO-LOCATED with the computed direction (ADR-0016/0041): every
+          surface that shows a direction carries the disclaimer right beside it, not only in
+          the footer. */}
+      <p className="disclaimer" role="note">
+        This is a wellness trend, not a diagnosis. Share it with your care team.
+      </p>
 
       {trajectory.signals.length > 0 && (
         <div className="card">

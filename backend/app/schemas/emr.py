@@ -54,4 +54,7 @@ class ConnectionOut(BaseModel):
 
 class PullOut(BaseModel):
     imported: int
+    # Un-mappable EHR search-set entries that were skipped (non-final status, panel with no
+    # value, non-LOINC code, missing unit/time, non-Observation) — reported, never fatal.
+    skipped: int = 0
     results: list[LabResultIn]

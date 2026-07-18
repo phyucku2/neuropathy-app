@@ -1,6 +1,6 @@
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ME } from '../../test/fixtures';
 import { renderApp } from '../../test/renderApp';
 import { ONBOARDING_COMPLETE_KEY, isOnboardingComplete } from './onboardingState';
@@ -8,6 +8,9 @@ import { ONBOARDING_COMPLETE_KEY, isOnboardingComplete } from './onboardingState
 describe('First-run onboarding wizard (ADR-0044)', () => {
   beforeEach(() => {
     localStorage.clear();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('shows the welcome wizard to a not-yet-onboarded patient (before the app)', async () => {
@@ -66,5 +69,15 @@ describe('First-run onboarding wizard (ADR-0044)', () => {
     ).not.toBeInTheDocument();
     // The flag was seeded by the harness.
     expect(localStorage.getItem(ONBOARDING_COMPLETE_KEY)).toContain(ME.user_id);
+  });
+
+  it('fails toward showing the welcome when localStorage access throws (private mode)', () => {
+    // Sweep finding #22: getItem itself can throw (Safari Private Mode / storage disabled).
+    // The gate must read "not onboarded" (show the welcome), never crash.
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new DOMException('denied', 'SecurityError');
+    });
+    expect(() => isOnboardingComplete(ME.user_id)).not.toThrow();
+    expect(isOnboardingComplete(ME.user_id)).toBe(false);
   });
 });

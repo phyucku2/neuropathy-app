@@ -258,11 +258,12 @@ class EmrService:
         await self.connections.update(record)
         return record
 
-    async def pull_labs(self, connection_id: uuid.UUID) -> tuple[list[LabResultIn], int]:
+    async def pull_labs(self, connection_id: uuid.UUID) -> tuple[list[LabResultIn], int, int]:
         """Fetch labs from the EMR and persist the ones not already imported.
 
-        Returns (fetched results, newly persisted count) — re-pulling never
-        duplicates the analyzable dataset (import is idempotent per source record).
+        Returns (fetched results, newly persisted count, skipped count) — re-pulling never
+        duplicates the analyzable dataset (import is idempotent per source record), and
+        un-mappable EHR search-set entries are skipped rather than aborting the pull.
         """
         record = await self.get_connection(connection_id)
         if record.status is not EmrConnectionStatus.active:
@@ -281,11 +282,11 @@ class EmrService:
                 status_code=409,
             )
         client = EmrClient(record.fhir_base, self.transport)
-        results = await client.fetch_lab_observations(
+        results, skipped = await client.fetch_lab_observations(
             patient_fhir_id=record.patient_fhir_id, access_token=tokens["access_token"]
         )
         imported = await self._persist_pulled_labs(record, results)
-        return results, imported
+        return results, imported, skipped
 
     async def _persist_pulled_labs(
         self, record: ConnectionRecord, results: list[LabResultIn]

@@ -44,6 +44,11 @@ describe('HomePage', () => {
     expect(screen.getByText('No lab results in the last 90 days')).toBeInTheDocument();
 
     expect(screen.getByText(/Not medical advice/)).toBeInTheDocument();
+    // A non-diagnostic note is co-located with the computed direction (ADR-0016/0041),
+    // not only in the footer — assert it sits right after the hero region.
+    const note = screen.getByRole('note');
+    expect(note).toHaveTextContent(/not a diagnosis/i);
+    expect(hero.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('renders the insufficient-data variant without a signals card', async () => {

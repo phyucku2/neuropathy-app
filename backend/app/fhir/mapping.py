@@ -7,6 +7,11 @@ docs/engineering/fhir-mapping.md.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any
+
+from pydantic import ValidationError
+
 from app.fhir.resources import (
     CATEGORY_SYSTEM,
     INTERPRETATION_SYSTEM,
@@ -146,5 +151,36 @@ def bundle_to_fhir(results: list[LabResultIn], *, subject_id: str | None = None)
 
 
 def bundle_from_fhir(bundle: Bundle) -> list[LabResultIn]:
-    """Extract all lab results from a FHIR Bundle of Observations."""
+    """Extract all lab results from a FHIR Bundle of Observations (strict — raises on any
+    un-mappable entry). Used for round-trip mapping of data WE produced; for parsing an
+    external EHR search-set, use `lab_results_from_bundle_payload` (lenient)."""
     return [from_fhir(entry.resource) for entry in bundle.entry]
+
+
+def lab_results_from_bundle_payload(payload: Mapping[str, Any]) -> tuple[list[LabResultIn], int]:
+    """Resiliently map an EHR search-set Bundle payload to lab results (ADR-0007/0008).
+
+    A real EHR ``Observation?category=laboratory`` search-set routinely contains entries we
+    cannot or should not import: a non-final status (``registered``/``cancelled``/``unknown``),
+    a panel/grouping Observation with no value, a lab coded only in a local (non-LOINC) system,
+    a missing unit or effectiveDateTime, or a non-Observation entry such as an ``OperationOutcome``.
+    Each such entry is **skipped**, never aborting the batch — the same reject-not-crash posture
+    as the BioMech and wearable ingestion paths, so one bad row can't poison every valid row.
+    No fabrication: a skipped entry simply does not enter the dataset.
+
+    Returns ``(results, skipped_count)``. Bundle paging is handled by the caller via the raw
+    payload's ``link`` (this function never touches the network).
+    """
+    results: list[LabResultIn] = []
+    skipped = 0
+    entries = payload.get("entry")
+    for entry in entries if isinstance(entries, list) else []:
+        resource = entry.get("resource") if isinstance(entry, Mapping) else None
+        if not isinstance(resource, Mapping) or resource.get("resourceType") != "Observation":
+            skipped += 1  # OperationOutcome or any non-Observation search-set entry
+            continue
+        try:
+            results.append(from_fhir(Observation.model_validate(resource)))
+        except (ValueError, ValidationError):
+            skipped += 1  # unmappable Observation (bad status / no value / non-LOINC / no time)
+    return results, skipped
