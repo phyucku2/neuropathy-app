@@ -335,6 +335,22 @@ class PostgresObservationRepository:
         await self._session.flush()
         return observation
 
+    async def add_if_absent(self, observation: Observation) -> bool:
+        # A savepoint scopes the flush: when uq_observation_patient_import_key fires (a
+        # concurrent pull already imported this source record), only THIS insert rolls
+        # back and the caller's transaction stays usable — the ingest handler still writes
+        # its batch audit event and returns a clean skip instead of a 500 (sweep #3). Any
+        # other IntegrityError (e.g. an FK violation) is a real fault and re-raises.
+        try:
+            async with self._session.begin_nested():
+                self._session.add(observation)
+                await self._session.flush()
+        except IntegrityError as exc:
+            if "uq_observation_patient_import_key" in str(exc.orig):
+                return False
+            raise
+        return True
+
     async def list_for_patient(
         self,
         patient_id: uuid.UUID,

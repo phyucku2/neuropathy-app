@@ -173,6 +173,53 @@ async def test_observation_repository_lists_analyzable_records_only(
         assert a1c_rows[0].origin is DataOrigin.ehr_imported
 
 
+async def test_add_if_absent_enforces_import_idempotency_across_sessions(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """The DB-level invariant behind sweep #3: uq_observation_patient_import_key makes a
+    second import of the same source record impossible even when it commits from a SEPARATE
+    transaction between another pull's existence-probe and its write. add_if_absent absorbs
+    the resulting unique-violation as a skip (False), leaving the session usable — never a
+    500 and never a duplicate analyzable row."""
+
+    def _obs(key: str | None, *, pid: uuid.UUID) -> object:
+        return lab_result_to_observation(
+            _lab("4548-4", 7.2, status=LabStatus.final, day=15),
+            patient_id=pid,
+            origin=DataOrigin.ehr_imported,
+            recorded_by_role="system",
+            quality={"source_system": "Synthetic Health"},
+            import_key=key,
+        )
+
+    async with session_factory() as session:
+        patient_id = await _new_patient(session)
+        other_patient_id = await _new_patient(session)
+        await session.commit()
+
+    # First pull imports the row and commits.
+    async with session_factory() as session:
+        repo = PostgresObservationRepository(session)
+        assert await repo.add_if_absent(_obs("labs:abc", pid=patient_id)) is True
+        await session.commit()
+
+    # A concurrent second pull that already probed "absent" now tries the same write in a
+    # fresh transaction: the unique index rejects it and add_if_absent returns False. The
+    # SAME key for a DIFFERENT patient still inserts (uniqueness is per-patient), and after
+    # the absorbed conflict the session is still usable for that follow-on write + commit.
+    async with session_factory() as session:
+        repo = PostgresObservationRepository(session)
+        assert await repo.add_if_absent(_obs("labs:abc", pid=patient_id)) is False
+        assert await repo.add_if_absent(_obs("labs:abc", pid=other_patient_id)) is True
+        await session.commit()
+
+    # Exactly one row for the first patient (the duplicate never landed); one for the other.
+    async with session_factory() as session:
+        repo = PostgresObservationRepository(session)
+        assert await repo.count_for_patient(patient_id) == 1
+        assert await repo.count_for_patient(other_patient_id) == 1
+
+
 async def test_audit_event_repository_round_trip(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:

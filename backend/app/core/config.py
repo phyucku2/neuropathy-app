@@ -154,14 +154,21 @@ class Settings(BaseSettings):
     biomech_max_pdf_text_chars: int = 5_000_000
 
     @field_validator(
-        "ops_bootstrap_token", "secret_store_key", "error_reporting_dsn", mode="before"
+        "jwt_secret",
+        "ops_bootstrap_token",
+        "secret_store_key",
+        "error_reporting_dsn",
+        mode="before",
     )
     @classmethod
     def _empty_env_is_unset(cls, value: object) -> object:
         """An empty env var means "not configured", never a zero-length credential.
 
         For ``error_reporting_dsn`` this keeps the seam fail-safe OFF when the env var is
-        present-but-blank, exactly as an absent var does."""
+        present-but-blank, exactly as an absent var does. For ``jwt_secret`` it makes a
+        blank ``JWT_SECRET=`` (common with ``JWT_SECRET: ${JWT_SECRET}`` and the shell var
+        unset) read as unset, so the serving-startup guard in app/main.py treats it as
+        missing rather than as a zero-length signing key (sweep #5)."""
         return None if value == "" else value
 
     @field_validator("ops_bootstrap_token")

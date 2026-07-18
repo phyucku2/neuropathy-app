@@ -6,7 +6,11 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
+import app.emr.client as client_module
 from app.emr.client import EmrClient
+from app.emr.service import EmrError
 
 
 class FakeTransport:
@@ -120,3 +124,33 @@ async def test_unmappable_entries_are_skipped_not_fatal() -> None:
     results, skipped = await client.fetch_lab_observations(patient_fhir_id="p1", access_token="tok")
     assert [r.loinc_code for r in results] == ["2339-0"]  # only the good row imported
     assert skipped == 4  # the other four skipped, no exception
+
+
+class _AlwaysNext:
+    """A pathological EHR that ALWAYS advertises a next link — an unbounded loop trap."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def get_json(self, url: str, *, access_token: str) -> dict[str, Any]:
+        self.calls += 1
+        return {
+            "resourceType": "Bundle",
+            "type": "searchset",
+            "link": [{"relation": "next", "url": "https://ehr.example/fhir/Observation?page=next"}],
+            "entry": [{"resource": _observation("2339-0", 1)}],
+        }
+
+
+async def test_pagination_is_bounded_against_a_pathological_ehr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A never-ending `next` chain must stop with a graceful 502, not pin the worker +
+    its DB connection forever (sweep #4)."""
+    monkeypatch.setattr(client_module, "MAX_LAB_PAGES", 3)
+    transport = _AlwaysNext()
+    client = EmrClient("https://ehr.example/fhir", transport)
+    with pytest.raises(EmrError) as exc:
+        await client.fetch_lab_observations(patient_fhir_id="p1", access_token="tok")
+    assert exc.value.status_code == 502
+    assert transport.calls == 3  # stopped at the bound; did not loop forever

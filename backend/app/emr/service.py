@@ -307,7 +307,11 @@ class EmrService:
             if import_key in on_file or import_key in seen:
                 continue
             seen.add(import_key)
-            await self.observations.add(
+            # add_if_absent, not add: the on_file probe above narrows the common case, but a
+            # concurrent pull of the same connection can commit between that probe and this
+            # write — the DB partial-unique index makes the duplicate impossible and this
+            # returns False rather than raising, so the race skips instead of 500ing (#3).
+            inserted = await self.observations.add_if_absent(
                 lab_result_to_observation(
                     result,
                     patient_id=record.patient_id,
@@ -317,7 +321,8 @@ class EmrService:
                     import_key=import_key,
                 )
             )
-            imported += 1
+            if inserted:
+                imported += 1
         await self.audit.add(
             AuditEvent(
                 actor_id=None,

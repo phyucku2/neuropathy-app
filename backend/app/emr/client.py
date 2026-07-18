@@ -7,11 +7,19 @@ without touching this logic.
 
 from __future__ import annotations
 
+import time
 from typing import Any, Protocol
 from urllib.parse import urlencode
 
 from app.fhir.mapping import lab_results_from_bundle_payload
 from app.schemas.lab import LabResultIn
+
+# Bounds on the FHIR paging loop (sweep #4): a slow, huge, or pathological EHR (e.g. one
+# that always advertises a `next` link, or a self-referential next URL) must not pin a
+# worker + its pooled DB connection indefinitely. Stop with a graceful 502 EmrError when
+# either bound is exceeded, rather than looping forever.
+MAX_LAB_PAGES = 100
+LAB_PULL_DEADLINE_SECONDS = 60.0
 
 
 class FhirTransport(Protocol):
@@ -35,12 +43,30 @@ class EmrClient:
         single non-final/panel/non-LOINC/OperationOutcome entry can't abort the whole pull.
         Returns ``(results, skipped_count)``.
         """
+        # Local import breaks the service<->client import cycle (service.py builds EmrClient).
+        from app.emr.service import EmrError
+
         query = urlencode({"patient": patient_fhir_id, "category": "laboratory"})
         url: str | None = f"{self._fhir_base}/Observation?{query}"
         results: list[LabResultIn] = []
         skipped = 0
+        pages = 0
+        started = time.monotonic()
 
         while url:
+            pages += 1
+            if pages > MAX_LAB_PAGES:
+                raise EmrError(
+                    "Your health record returned an unexpectedly large number of pages; "
+                    "please try again later",
+                    status_code=502,
+                )
+            if time.monotonic() - started > LAB_PULL_DEADLINE_SECONDS:
+                raise EmrError(
+                    "Fetching your labs from your health record took too long; "
+                    "please try again later",
+                    status_code=502,
+                )
             payload = await self._transport.get_json(url, access_token=access_token)
             page_results, page_skipped = lab_results_from_bundle_payload(payload)
             results.extend(page_results)

@@ -76,3 +76,18 @@ def test_generated_secret_store_key_is_accepted() -> None:
 def test_unset_and_empty_secret_store_key_mean_in_memory_vault() -> None:
     assert _settings().secret_store_key is None
     assert _settings(secret_store_key="").secret_store_key is None
+
+
+# ---- JWT_SECRET blank-is-unset normalization (sweep #5) ---------------------------------
+# The DB-mode/multi-worker REQUIREMENT itself is enforced on the serving-startup path
+# (app/main.py `_check_serving_secrets`), NOT at Settings construction — so that alembic and
+# other tooling that has DATABASE_URL but never signs a token can still load config. Those
+# startup semantics are tested in tests/test_health.py; config's only job here is to make a
+# blank env read as unset so that guard sees "missing," not a zero-length signing key.
+
+
+def test_blank_jwt_secret_reads_as_unset() -> None:
+    # A blank JWT_SECRET= (shell var unset behind JWT_SECRET: ${JWT_SECRET}) must be None,
+    # not a zero-length signing key, so the serving-startup guard treats it as missing.
+    assert _settings().jwt_secret is None
+    assert _settings(jwt_secret="").jwt_secret is None
