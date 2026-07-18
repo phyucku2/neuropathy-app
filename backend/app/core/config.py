@@ -10,7 +10,7 @@ land in boot-loop logs, and a nearly-valid secret printed there is still a secre
 from __future__ import annotations
 
 from cryptography.fernet import Fernet
-from pydantic import field_validator, model_validator
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Ops bootstrap tokens shorter than this are refused at startup (ADR-0017): a short
@@ -167,7 +167,8 @@ class Settings(BaseSettings):
         For ``error_reporting_dsn`` this keeps the seam fail-safe OFF when the env var is
         present-but-blank, exactly as an absent var does. For ``jwt_secret`` it makes a
         blank ``JWT_SECRET=`` (common with ``JWT_SECRET: ${JWT_SECRET}`` and the shell var
-        unset) read as unset, so the DB-mode requirement below catches it (sweep #5)."""
+        unset) read as unset, so the serving-startup guard in app/main.py treats it as
+        missing rather than as a zero-length signing key (sweep #5)."""
         return None if value == "" else value
 
     @field_validator("ops_bootstrap_token")
@@ -182,25 +183,6 @@ class Settings(BaseSettings):
                 "or leave it unset to disable clinician provisioning entirely"
             )
         return value
-
-    @model_validator(mode="after")
-    def _jwt_secret_required_in_db_mode(self) -> Settings:
-        """Fail closed at startup: in the durable (Postgres) deployment gunicorn runs
-        multiple WORKER PROCESSES, so a missing JWT_SECRET makes deps.py fall back to a
-        random per-process key — each worker then signs tokens with a different secret and a
-        token issued by worker A fails verification on worker B, producing an intermittent
-        401 / session-expiry storm that is very hard to diagnose (sweep #5). Require it
-        explicitly whenever DATABASE_URL is set (a blank env is already normalized to None
-        above). In-memory mode (no DATABASE_URL: unit tests / DB-less dev, single process)
-        keeps the ephemeral-key convenience."""
-        if self.database_url and not self.jwt_secret:
-            raise ValueError(
-                "JWT_SECRET must be set when DATABASE_URL is configured (durable "
-                "multi-worker deployment); generate one with "
-                '`python -c "import secrets; print(secrets.token_urlsafe(48))"`. '
-                "Rotating it later logs everyone out."
-            )
-        return self
 
     @field_validator("secret_store_key")
     @classmethod

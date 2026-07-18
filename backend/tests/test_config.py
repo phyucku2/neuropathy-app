@@ -78,34 +78,16 @@ def test_unset_and_empty_secret_store_key_mean_in_memory_vault() -> None:
     assert _settings(secret_store_key="").secret_store_key is None
 
 
-# ---- JWT_SECRET fail-closed in DB mode (sweep #5) --------------------------------------
-
-VALID_DB_URL = "postgresql+asyncpg://u:p@localhost:5432/db?ssl=require"
-A_JWT_SECRET = "synthetic-jwt-secret-value-not-a-real-one"
+# ---- JWT_SECRET blank-is-unset normalization (sweep #5) ---------------------------------
+# The DB-mode/multi-worker REQUIREMENT itself is enforced on the serving-startup path
+# (app/main.py `_check_serving_secrets`), NOT at Settings construction — so that alembic and
+# other tooling that has DATABASE_URL but never signs a token can still load config. Those
+# startup semantics are tested in tests/test_health.py; config's only job here is to make a
+# blank env read as unset so that guard sees "missing," not a zero-length signing key.
 
 
 def test_blank_jwt_secret_reads_as_unset() -> None:
     # A blank JWT_SECRET= (shell var unset behind JWT_SECRET: ${JWT_SECRET}) must be None,
-    # not a zero-length signing key, so the DB-mode rule below catches it.
+    # not a zero-length signing key, so the serving-startup guard treats it as missing.
     assert _settings().jwt_secret is None
     assert _settings(jwt_secret="").jwt_secret is None
-
-
-def test_db_mode_requires_a_jwt_secret() -> None:
-    # With DATABASE_URL set (durable multi-worker deployment) a missing JWT_SECRET must
-    # fail CLOSED at startup rather than boot into per-worker ephemeral keys (401 storm).
-    with pytest.raises(ValidationError) as exc_info:
-        _settings(database_url=VALID_DB_URL)  # jwt_secret unset
-    assert "JWT_SECRET" in str(exc_info.value)
-    with pytest.raises(ValidationError):
-        _settings(database_url=VALID_DB_URL, jwt_secret="")  # blank == unset
-
-
-def test_db_mode_with_a_jwt_secret_is_accepted() -> None:
-    settings = _settings(database_url=VALID_DB_URL, jwt_secret=A_JWT_SECRET)
-    assert settings.jwt_secret == A_JWT_SECRET
-
-
-def test_in_memory_mode_allows_an_unset_jwt_secret() -> None:
-    # No DATABASE_URL: unit tests / DB-less single-process dev keep the ephemeral-key path.
-    assert _settings().jwt_secret is None
