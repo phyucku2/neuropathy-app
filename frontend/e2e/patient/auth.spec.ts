@@ -14,7 +14,10 @@ const ONBOARDED = ['neuropathy.onboarding_complete', '11111111-1111-4111-8111-11
 test.describe('Auth', () => {
   test('registers a new account and lands on Home', async ({ page }) => {
     await installApiMocks(page);
-    await page.addInitScript(([k, id]) => window.localStorage.setItem(k, JSON.stringify([id])), ONBOARDED);
+    await page.addInitScript(
+      ([k, id]) => window.localStorage.setItem(k, JSON.stringify([id])),
+      ONBOARDED,
+    );
     await page.goto('/register');
 
     await page.getByLabel('Your name').fill('Pat Example');
@@ -28,7 +31,10 @@ test.describe('Auth', () => {
 
   test('signs in with valid credentials and lands on Home', async ({ page }) => {
     await installApiMocks(page);
-    await page.addInitScript(([k, id]) => window.localStorage.setItem(k, JSON.stringify([id])), ONBOARDED);
+    await page.addInitScript(
+      ([k, id]) => window.localStorage.setItem(k, JSON.stringify([id])),
+      ONBOARDED,
+    );
     await page.goto('/login');
 
     await page.getByLabel('Email').fill(SYNTHETIC_EMAIL);

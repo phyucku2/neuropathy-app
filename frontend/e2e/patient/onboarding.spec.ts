@@ -17,17 +17,17 @@ test.describe('First-run onboarding (ADR-0044)', () => {
 
     // The app (home) now renders; the wizard is gone.
     await expect(page.getByText('30 Day Score')).toBeVisible();
-    await expect(
-      page.getByRole('heading', { name: 'A clearer picture, over time' }),
-    ).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'A clearer picture, over time' })).toHaveCount(
+      0,
+    );
   });
 
   test('a returning (onboarded) patient boots straight into the app', async ({ page }) => {
     await signedInApp(page); // default: onboarded
     await page.goto('/');
     await expect(page.getByText('30 Day Score')).toBeVisible();
-    await expect(
-      page.getByRole('heading', { name: 'A clearer picture, over time' }),
-    ).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'A clearer picture, over time' })).toHaveCount(
+      0,
+    );
   });
 });

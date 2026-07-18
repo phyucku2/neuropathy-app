@@ -77,7 +77,12 @@ export function OnboardingWizard({
     <div className="app-frame">
       <header className="status-bar">
         <span className="mark">◍ Neuropathy</span>
-        <button type="button" className="link" onClick={finish} style={{ color: 'var(--color-text-on-dark)' }}>
+        <button
+          type="button"
+          className="link"
+          onClick={finish}
+          style={{ color: 'var(--color-text-on-dark)' }}
+        >
           Skip for now
         </button>
       </header>
@@ -99,9 +104,8 @@ export function OnboardingWizard({
 
         {isLast && (
           <p className="disclaimer" role="note">
-            This app helps you track and understand your information. It does not diagnose,
-            treat, or prevent any disease, and it is not a substitute for professional medical
-            advice.
+            This app helps you track and understand your information. It does not diagnose, treat,
+            or prevent any disease, and it is not a substitute for professional medical advice.
           </p>
         )}
 

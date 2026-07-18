@@ -13,7 +13,9 @@ describe('First-run onboarding wizard (ADR-0044)', () => {
   it('shows the welcome wizard to a not-yet-onboarded patient (before the app)', async () => {
     renderApp('/', { onboarded: false });
     // The wizard renders...
-    expect(await screen.findByRole('heading', { name: 'A clearer picture, over time' })).toBeVisible();
+    expect(
+      await screen.findByRole('heading', { name: 'A clearer picture, over time' }),
+    ).toBeVisible();
     expect(screen.getByText('Step 1 of 3')).toBeInTheDocument();
     // ...instead of the home page.
     expect(screen.queryByRole('heading', { name: /Neuropathy status/i })).not.toBeInTheDocument();
