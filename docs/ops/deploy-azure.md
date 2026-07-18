@@ -332,21 +332,32 @@ reverse-proxy.
 
 ---
 
-## 8. AI layer → Azure OpenAI (wiring point only — not implemented here)
+## 8. AI layer → Azure OpenAI (config-only; still OFF by default)
 
 The narrative layer (ADR-0011) is **gated OFF by default** and stays off until a covered
 entity both supplies a provider key **and** sets the explicit BAA attestation
 (`AI_BAA_CONFIRMED`) — the LLM is never in the request path, and it sends only the computed
 Trajectory, never raw PHI (`docs/compliance/baa-inventory.md`).
 
-On Azure the natural provider is **Azure OpenAI**, which is **covered by your Microsoft BAA**
-(no separate Anthropic BAA needed for that path). The wiring point is config only
-(`backend/app/core/config.py`): `AI_PROVIDER`, `AI_API_KEY`, `AI_MODEL`, and the
-`AI_BAA_CONFIRMED=true` attestation, provided as additional Container App secrets/env on the
-backend. **Do not enable it as part of this deploy** — and note that `api/deps.py` currently
-selects the narrator on an `anthropic` provider check, so pointing at Azure OpenAI is a
-**separate application change** (a provider adapter), not a config-only swap. This runbook only
-records where the switch lives; the model swap is out of scope.
+On Azure the provider is **Azure OpenAI**, **covered by your Microsoft BAA** (no separate
+Anthropic BAA needed for that path). As of **ADR-0040 the Azure OpenAI narrator is
+implemented** — enabling it is now **config only** (no code change). Set these as backend
+Container App env/secrets:
+
+| Var | Value |
+|---|---|
+| `AI_PROVIDER` | `azure_openai` |
+| `AI_API_KEY` | the Azure OpenAI resource key (secret) |
+| `AI_AZURE_ENDPOINT` | `https://<resource>.openai.azure.com` |
+| `AI_AZURE_DEPLOYMENT` | your chat deployment name (e.g. `gpt-4o`); defaults to `AI_MODEL` if blank |
+| `AI_MODEL` | the underlying model label for cache/audit (e.g. `gpt-4o`) |
+| `AI_AZURE_API_VERSION` | optional; defaults to `2024-10-21` |
+| `AI_BAA_CONFIRMED` | `true` — the operator attestation; without it the layer stays OFF even with a key |
+
+Fail-safe holds: a missing endpoint, an unknown provider, or a missing attestation keeps the
+narrator OFF and `/trajectory` fully deterministic. **You can deploy without any of these**
+(the default is OFF) and turn it on later once the Azure OpenAI resource + BAA are in place —
+it does not gate the core register/login/check-in flow.
 
 ---
 

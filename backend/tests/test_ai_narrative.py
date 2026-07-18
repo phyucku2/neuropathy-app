@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from app.ai.narrative import (
     NARRATIVE_CACHE,
     AnthropicNarrator,
+    AzureOpenAINarrator,
     narrative_is_safe,
 )
 from app.api.deps import CurrentUser, get_current_user, get_emr_service, get_narrator
@@ -135,6 +136,57 @@ async def test_provider_error_falls_back_to_none() -> None:
     assert await narrator.narrate(_trajectory()) is None
 
 
+def _mock_azure_narrator(handler: httpx.MockTransport) -> AzureOpenAINarrator:
+    return AzureOpenAINarrator(
+        api_key="azure-key",
+        endpoint="https://res.openai.azure.com/",  # trailing slash must be normalized
+        deployment="gpt-4o",
+        api_version="2024-10-21",
+        client=httpx.AsyncClient(transport=handler),
+    )
+
+
+async def test_azure_request_shape_and_acceptance() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url == (
+            "https://res.openai.azure.com/openai/deployments/gpt-4o"
+            "/chat/completions?api-version=2024-10-21"
+        )
+        assert request.headers["api-key"] == "azure-key"
+        assert "x-api-key" not in request.headers  # not the Anthropic auth scheme
+        body = request.read().decode()
+        assert '"messages"' in body
+        assert "blood sugar" in body  # computed facts, not raw observations
+        reply = "Your blood sugar is looking better."
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"role": "assistant", "content": reply}}]},
+        )
+
+    narrator = _mock_azure_narrator(httpx.MockTransport(handler))
+    assert await narrator.narrate(_trajectory()) == "Your blood sugar is looking better."
+    assert narrator._model == "gpt-4o"  # noqa: SLF001 — cache/audit label == deployment
+
+
+async def test_azure_provider_error_falls_back_to_none() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, json={"error": "rate limited"})
+
+    narrator = _mock_azure_narrator(httpx.MockTransport(handler))
+    assert await narrator.narrate(_trajectory()) is None
+
+
+async def test_azure_unsafe_output_falls_back_to_none() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "Take 500 mg of B12 daily."}}]},
+        )
+
+    narrator = _mock_azure_narrator(httpx.MockTransport(handler))
+    assert await narrator.narrate(_trajectory()) is None  # invented dosage number
+
+
 async def test_unsafe_model_output_falls_back_to_none() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -231,6 +283,59 @@ def test_key_with_baa_attestation_activates_the_anthropic_narrator(
         narrator = deps.get_narrator()
         assert isinstance(narrator, AnthropicNarrator)  # both gates open -> ON
         assert narrator._model == settings.ai_model  # noqa: SLF001 — wiring assertion
+    finally:
+        deps._default_narrator.cache_clear()
+
+
+def test_azure_provider_activates_the_azure_narrator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.api import deps
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "ai_api_key", "azure-key")
+    monkeypatch.setattr(settings, "ai_baa_confirmed", True)
+    monkeypatch.setattr(settings, "ai_provider", "azure_openai")
+    monkeypatch.setattr(settings, "ai_azure_endpoint", "https://res.openai.azure.com")
+    monkeypatch.setattr(settings, "ai_azure_deployment", "gpt-4o")
+    deps._default_narrator.cache_clear()
+    try:
+        narrator = deps.get_narrator()
+        assert isinstance(narrator, AzureOpenAINarrator)  # provider routed to Azure
+        assert narrator._model == "gpt-4o"  # noqa: SLF001 — deployment == cache/audit label
+    finally:
+        deps._default_narrator.cache_clear()
+
+
+def test_azure_provider_without_endpoint_stays_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A misconfigured Azure provider (no endpoint) fails safe to OFF, even with the
+    key + BAA gates satisfied — never a half-configured provider call."""
+    from app.api import deps
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "ai_api_key", "azure-key")
+    monkeypatch.setattr(settings, "ai_baa_confirmed", True)
+    monkeypatch.setattr(settings, "ai_provider", "azure_openai")
+    monkeypatch.setattr(settings, "ai_azure_endpoint", None)
+    deps._default_narrator.cache_clear()
+    try:
+        assert deps.get_narrator() is None
+    finally:
+        deps._default_narrator.cache_clear()
+
+
+def test_unknown_provider_stays_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.api import deps
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "ai_api_key", "some-key")
+    monkeypatch.setattr(settings, "ai_baa_confirmed", True)
+    monkeypatch.setattr(settings, "ai_provider", "totally-unknown")
+    deps._default_narrator.cache_clear()
+    try:
+        assert deps.get_narrator() is None  # unknown provider fails safe
     finally:
         deps._default_narrator.cache_clear()
 

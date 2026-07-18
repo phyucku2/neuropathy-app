@@ -37,12 +37,23 @@ class Settings(BaseSettings):
     database_url: str | None = None
 
     # External providers — must be BAA-covered before any PHI flows (ADR-0003).
+    # ai_provider selects the narrator: unset/"anthropic" → Anthropic Messages API;
+    # "azure_openai" (aka "azure") → Azure OpenAI, the HIPAA-eligible path under
+    # Microsoft's BAA once Claude is off the PHI layer (ADR-0040).
     ai_provider: str | None = None
     ai_api_key: str | None = None
     # Explicit operator attestation that a BAA covers the AI provider account.
     # The narrative layer stays OFF without it, even with a key (ADR-0011).
     ai_baa_confirmed: bool = False
+    # Logical model label — used for BOTH the Anthropic model id AND (provider-neutral)
+    # the narrative cache key + disclosure-audit label. For Azure set this to the model
+    # behind the deployment (e.g. "gpt-4o") so audits read cleanly.
     ai_model: str = "claude-haiku-4-5-20251001"
+    # Azure OpenAI narrator (ADR-0040) — only read when ai_provider is Azure. Azure routes
+    # by DEPLOYMENT, not model id. ai_azure_deployment defaults to ai_model when blank.
+    ai_azure_endpoint: str | None = None  # e.g. https://<resource>.openai.azure.com
+    ai_azure_deployment: str | None = None
+    ai_azure_api_version: str = "2024-10-21"  # a GA data-plane version; override as needed
     ocr_provider: str | None = None
 
     jwt_secret: str | None = None
