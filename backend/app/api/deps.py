@@ -34,7 +34,7 @@ from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai.narrative import AnthropicNarrator, Narrator
+from app.ai.narrative import AnthropicNarrator, AzureOpenAINarrator, Narrator
 from app.core.config import settings
 from app.core.errors import ErrorReporter, HttpErrorReporter
 from app.core.security import AuthError, TokenKind, decode_token
@@ -479,15 +479,31 @@ def require_capability(key: str) -> Callable[[CurrentUser, CapabilityService], A
 
 
 @lru_cache(maxsize=1)
-def _default_narrator() -> AnthropicNarrator | None:
+def _default_narrator() -> Narrator | None:
     """The AI narrative layer activates ONLY with a key AND the operator's explicit
-    BAA attestation (ADR-0011) — a key alone keeps it off, fail-safe."""
-    provider_ok = settings.ai_provider in (None, "", "anthropic")
-    if settings.ai_api_key and settings.ai_baa_confirmed and provider_ok:
+    BAA attestation (ADR-0011) — a key alone keeps it off, fail-safe. The BAA
+    attestation is bound to the provider actually called, so both gates are checked
+    before ANY provider is constructed.
+
+    Provider is chosen by settings.ai_provider (ADR-0040): unset/"anthropic" →
+    Anthropic; "azure_openai"/"azure" → Azure OpenAI (HIPAA-eligible under Microsoft's
+    BAA). A misconfigured or unknown provider stays OFF — fail-safe."""
+    if not (settings.ai_api_key and settings.ai_baa_confirmed):
+        return None
+    provider = (settings.ai_provider or "anthropic").lower()
+    if provider in ("", "anthropic"):
         return AnthropicNarrator(api_key=settings.ai_api_key, model=settings.ai_model)
-    # Any other configured provider: stay off — the BAA attestation is bound to the
-    # endpoint actually called, and we only ship an Anthropic narrator (review finding).
-    return None
+    if provider in ("azure", "azure_openai", "azureopenai"):
+        # Azure needs an endpoint; without it the provider is misconfigured — stay off.
+        if not settings.ai_azure_endpoint:
+            return None
+        return AzureOpenAINarrator(
+            api_key=settings.ai_api_key,
+            endpoint=settings.ai_azure_endpoint,
+            deployment=settings.ai_azure_deployment or settings.ai_model,
+            api_version=settings.ai_azure_api_version,
+        )
+    return None  # unknown provider: stay off, fail-safe
 
 
 def get_narrator() -> Narrator | None:

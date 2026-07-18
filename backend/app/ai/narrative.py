@@ -23,6 +23,7 @@ ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
 REQUEST_TIMEOUT_S = 6.0  # narration is decorative; never let it drag the endpoint
 MAX_NARRATIVE_CHARS = 360
+MAX_OUTPUT_TOKENS = 200  # a 1-3 sentence rephrasing; shared across providers
 
 _PROMPT = """\
 You rewrite a health-trend summary for a patient in warm, plain language
@@ -158,39 +159,101 @@ def narrative_is_safe(text: str, trajectory: Trajectory, facts: str) -> bool:
     return not any(word in words and word not in facts_lowered for word in _NUMBER_WORDS)
 
 
-class AnthropicNarrator:
-    """Narrator over the Anthropic Messages API (ADR-0011: BAA-gated by the caller)."""
+class _HttpNarrator:
+    """Shared narration flow for HTTP LLM providers (ADR-0011: BAA-gated by the caller).
 
-    def __init__(self, api_key: str, model: str, client: httpx.AsyncClient | None = None) -> None:
-        self._api_key = api_key
+    The flow is provider-independent: build the computed FACTS, send the one fixed
+    prompt, then run the output through `narrative_is_safe`. Subclasses only implement
+    `_complete` (the provider request/response shape). ANY exception — network, HTTP
+    status, malformed body — falls back to None so the deterministic template always
+    stands; narration can never break the endpoint. `_model` is the logical model label
+    the caller uses for the cache key and the disclosure audit (never PHI).
+    """
+
+    def __init__(self, model: str, client: httpx.AsyncClient | None = None) -> None:
         self._model = model
         self._client = client or httpx.AsyncClient(timeout=REQUEST_TIMEOUT_S)
+
+    async def _complete(self, prompt: str) -> str:  # pragma: no cover - abstract
+        raise NotImplementedError
 
     async def narrate(self, trajectory: Trajectory) -> str | None:
         facts = _facts_for(trajectory)
         try:
-            response = await self._client.post(
-                ANTHROPIC_URL,
-                headers={
-                    "x-api-key": self._api_key,
-                    "anthropic-version": ANTHROPIC_VERSION,
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": self._model,
-                    "max_tokens": 200,
-                    "messages": [{"role": "user", "content": _PROMPT.format(facts=facts)}],
-                },
-            )
-            response.raise_for_status()
-            payload: dict[str, Any] = response.json()
-            text = str(payload["content"][0]["text"])
+            text = await self._complete(_PROMPT.format(facts=facts))
         except Exception:  # noqa: BLE001 — narration is decorative; ANY failure falls back
             return None
         return text.strip() if narrative_is_safe(text, trajectory, facts) else None
 
     async def aclose(self) -> None:
         await self._client.aclose()
+
+
+class AnthropicNarrator(_HttpNarrator):
+    """Narrator over the Anthropic Messages API (ADR-0011: BAA-gated by the caller)."""
+
+    def __init__(self, api_key: str, model: str, client: httpx.AsyncClient | None = None) -> None:
+        super().__init__(model, client)
+        self._api_key = api_key
+
+    async def _complete(self, prompt: str) -> str:
+        response = await self._client.post(
+            ANTHROPIC_URL,
+            headers={
+                "x-api-key": self._api_key,
+                "anthropic-version": ANTHROPIC_VERSION,
+                "content-type": "application/json",
+            },
+            json={
+                "model": self._model,
+                "max_tokens": MAX_OUTPUT_TOKENS,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+        )
+        response.raise_for_status()
+        payload: dict[str, Any] = response.json()
+        return str(payload["content"][0]["text"])
+
+
+class AzureOpenAINarrator(_HttpNarrator):
+    """Narrator over an Azure OpenAI chat-completions deployment (ADR-0040).
+
+    The HIPAA-eligible provider once Claude is off the PHI layer: Microsoft signs a BAA
+    covering Azure OpenAI (still gated on the operator's `ai_baa_confirmed` attestation,
+    exactly like the Anthropic path). Azure routes by DEPLOYMENT, not model id, and
+    authenticates with an `api-key` header. `deployment` is used for the request URL and
+    also passed up as `_model` so the cache key / disclosure audit label is stable and
+    provider-neutral (set it to match `settings.ai_model`).
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        endpoint: str,
+        deployment: str,
+        api_version: str,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        super().__init__(deployment, client)
+        self._api_key = api_key
+        self._url = (
+            f"{endpoint.rstrip('/')}/openai/deployments/{deployment}"
+            f"/chat/completions?api-version={api_version}"
+        )
+
+    async def _complete(self, prompt: str) -> str:
+        response = await self._client.post(
+            self._url,
+            headers={"api-key": self._api_key, "content-type": "application/json"},
+            json={
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": MAX_OUTPUT_TOKENS,
+                "temperature": 0.4,  # controlled rephrasing, not free generation
+            },
+        )
+        response.raise_for_status()
+        payload: dict[str, Any] = response.json()
+        return str(payload["choices"][0]["message"]["content"])
 
 
 def narrative_cache_key(trajectory: Trajectory, model: str) -> str:

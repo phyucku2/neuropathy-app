@@ -249,12 +249,12 @@ resource postgres 'Microsoft.DBforPostgreSQL/flexibleServers@2022-12-01' = {
     highAvailability: {
       mode: 'Disabled'
     }
-    // Public access with an "allow Azure services" firewall rule (below) is the simplest
-    // wire that lets Container Apps reach the DB. For a hardened PHI posture prefer PRIVATE
-    // access (VNet integration / Private DNS) — see the runbook's "open decisions".
-    network: {
-      publicNetworkAccess: 'Enabled'
-    }
+    // Public access is the server default when no delegated subnet is given, and an
+    // "allow Azure services" firewall rule (below) is the simplest wire that lets Container
+    // Apps reach the DB. `network.publicNetworkAccess` is a read-only/computed property at
+    // this API version (setting it raises BCP073), so we rely on the default rather than
+    // assigning it. For a hardened PHI posture prefer PRIVATE access (VNet integration /
+    // Private DNS) — see the runbook's "open decisions".
   }
 }
 
@@ -480,4 +480,8 @@ output postgresFqdn string = postgres.properties.fullyQualifiedDomainName
 output migrateJobName string = migrateJob.name
 
 @description('Whether DATABASE_URL was built from the provisioned server (false = you passed databaseUrlOverride).')
+// This output is a BOOLEAN of whether the override was provided — `empty(...)` never emits the
+// secret value itself. The linter conservatively flags any output touching a secure param, so
+// disable the rule on just this line.
+#disable-next-line outputs-should-not-contain-secrets
 output databaseUrlWasBuilt bool = empty(databaseUrlOverride)
