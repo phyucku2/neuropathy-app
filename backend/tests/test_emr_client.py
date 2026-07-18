@@ -96,13 +96,23 @@ async def test_unmappable_entries_are_skipped_not_fatal() -> None:
         "entry": [
             {"resource": _observation("2339-0", 95)},  # good
             {"resource": {**_observation("2339-0", 1), "status": "cancelled"}},  # non-final
-            {"resource": {"resourceType": "Observation", "status": "final",  # panel, no value
-                          "code": {"coding": [{"system": "http://loinc.org", "code": "58410-2"}]},
-                          "effectiveDateTime": "2026-06-15T08:30:00+00:00"}},
-            {"resource": {"resourceType": "Observation", "status": "final",  # non-LOINC only
-                          "code": {"coding": [{"system": "urn:local", "code": "X"}]},
-                          "effectiveDateTime": "2026-06-15T08:30:00+00:00",
-                          "valueQuantity": {"value": 1, "unit": "mg/dL"}}},
+            {
+                "resource": {
+                    "resourceType": "Observation",
+                    "status": "final",  # panel, no value
+                    "code": {"coding": [{"system": "http://loinc.org", "code": "58410-2"}]},
+                    "effectiveDateTime": "2026-06-15T08:30:00+00:00",
+                }
+            },
+            {
+                "resource": {
+                    "resourceType": "Observation",
+                    "status": "final",  # non-LOINC only
+                    "code": {"coding": [{"system": "urn:local", "code": "X"}]},
+                    "effectiveDateTime": "2026-06-15T08:30:00+00:00",
+                    "valueQuantity": {"value": 1, "unit": "mg/dL"},
+                }
+            },
             {"resource": {"resourceType": "OperationOutcome", "issue": []}},  # not an Observation
         ],
     }
