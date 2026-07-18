@@ -4,6 +4,7 @@ import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { AdlCheckInIn } from '../../api/types';
 import { enqueueCheckIn, listQueuedCheckIns } from '../../features/checkin/offlineQueue';
+import { markOnboardingComplete } from '../../features/onboarding/onboardingState';
 import { ME, TEST_EMAIL, TEST_PASSWORD, TEST_REFRESH_TOKEN } from '../../test/fixtures';
 import { renderApp } from '../../test/renderApp';
 import { server } from '../../test/server';
@@ -13,6 +14,10 @@ const QUEUED = { walking: 1, stairs: 2, balance_confidence: 3, check_in_date: '2
 
 beforeEach(() => {
   localStorage.clear();
+  // These specs exercise auth mechanics (landing in the app, session restore, queue purge),
+  // not the first-run wizard (ADR-0044) — treat the user as already onboarded so login/
+  // register land on the home screen. The wizard has its own test (features/onboarding).
+  markOnboardingComplete(ME.user_id);
 });
 
 describe('auth screens', () => {
