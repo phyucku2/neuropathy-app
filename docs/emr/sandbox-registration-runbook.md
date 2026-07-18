@@ -345,6 +345,12 @@ as fallback.
 | Production per-org FHIR bases | resolved later from `endpoint_directory` entries | per-org, at production enrollment |
 | Client secrets | **none — public PKCE client for both vendors** | if Epic forces a secret for refresh tokens, that's a deliberate ADR-level change, not a config tweak |
 
+> **On Azure**, these env vars are wired as optional Bicep params (`smartClientIdEpic`,
+> `smartClientIdOracleHealth`, …, `smartRedirectUri`) → Container Apps secrets — see
+> `docs/ops/deploy-azure.md` §8a. The redirect URI to register is the **public frontend
+> origin + `/emr/callback`** (the frontend reverse-proxies it to the internal backend); the
+> deployment output `suggestedSmartRedirectUri` prints the exact value.
+
 ---
 
 ## 5. Smoke test (sandbox, per vendor)
