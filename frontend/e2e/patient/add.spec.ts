@@ -20,9 +20,14 @@ test.describe('Patient Add data', () => {
 
     await expect(page.getByText('3 of 3 values imported from your balance report')).toBeVisible();
 
-    // The EMR connect stub and its clinic connections render.
-    await expect(page.getByText('Coming soon').first()).toBeVisible();
-    await expect(page.getByText('Regional Medical Center')).toBeVisible();
+    // The connect-records card points to Sources (the real EMR-connect flow lives there,
+    // ADR-0028) — no dead "Coming soon" stub, no duplicated clinic-connections list here.
+    await expect(page.getByRole('link', { name: 'Connect under Sources' })).toHaveAttribute(
+      'href',
+      '/settings',
+    );
+    await expect(page.getByText('Coming soon')).toHaveCount(0);
+    await expect(page.getByText('Regional Medical Center')).toHaveCount(0);
   });
 
   test('renders parser warnings as plain text', async ({ page }) => {
