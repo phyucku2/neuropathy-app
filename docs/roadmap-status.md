@@ -122,12 +122,18 @@ materials and adversarially-verified research. One portion = one small PR, merge
 Function two-tier (fold fidelity-weighted wearable data into the score); BioMech eyes-open−closed
 gap; Android Health Connect connector; iOS + HealthKit (pending Mac + Apple account). Backlog
 detail in [`docs/product/roadmap-buildout-specs.md`](product/roadmap-buildout-specs.md).
-**V2:** AI photo food logging (honest ranged-estimate) — architecture decided: **GPT-4o-vision
-(Azure, under Microsoft's BAA) + free nutrition DBs** (Open Food Facts barcode / USDA text),
-image recognition reserved for plated meals, always a human confirm/edit step; not clinical-
-grade, positioned as estimation not measurement. Build-vs-buy analysis in
+**V2:** AI photo food logging (honest ranged-estimate) — architecture decided (**ADR-0042**):
+**GPT-4o-vision (Azure, under Microsoft's BAA) + free nutrition DBs** (Open Food Facts barcode /
+USDA text), image recognition reserved for plated meals, always a human confirm/edit step;
+capability-gated, NSI-excluded, never for dosing; not clinical-grade, positioned as estimation
+not measurement. Build-vs-buy analysis in
 [`docs/product/food-ai-build-vs-buy.md`](product/food-ai-build-vs-buy.md). Also: derived glucose
 time-in-range → NSI Physiologic.
+
+**Regulatory gate:** the FDA device-status decision is now framed and governed by **ADR-0041**
+(decision framework; classification itself deferred to a qualified FDA regulatory professional,
+decision D2) — the single highest-leverage owner action per
+[`docs/product/market-position-and-gaps.md`](product/market-position-and-gaps.md).
 
 ## Deferred (not scheduled)
 
