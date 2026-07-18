@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -108,21 +108,16 @@ describe('AddDataPage — BioMech upload', () => {
   });
 });
 
-describe('AddDataPage — EMR connect stub', () => {
-  it('presents the provider-portal stub and the connections list', async () => {
+describe('AddDataPage — connect-records pointer', () => {
+  it('points to the real EMR-connect flow on Sources — no dead stub, no duplicate list', async () => {
     renderApp('/add');
     expect(await screen.findByText('Connect your records')).toBeInTheDocument();
-    expect(screen.getByText(/connect via your provider portal/)).toBeInTheDocument();
-    expect(screen.getByText('Coming soon')).toBeInTheDocument();
-    await waitFor(() => {
-      expect(screen.getByText('Advanced Health & Wellness')).toBeInTheDocument();
-    });
-    expect(screen.getByText('Regional Medical Center')).toBeInTheDocument();
-  });
-
-  it('shows an empty state when there are no connections', async () => {
-    server.use(http.get('/connections', () => HttpResponse.json([])));
-    renderApp('/add');
-    expect(await screen.findByText(/No clinic connections yet/)).toBeInTheDocument();
+    // Links to Sources (the real EMR-connect + clinic-connections home) instead of
+    // showing a non-interactive "Coming soon" stub.
+    const link = screen.getByRole('link', { name: /Connect under Sources/ });
+    expect(link).toHaveAttribute('href', '/settings');
+    // The dead stub and the duplicated clinic-connections list are gone from this page.
+    expect(screen.queryByText('Coming soon')).not.toBeInTheDocument();
+    expect(screen.queryByText('Advanced Health & Wellness')).not.toBeInTheDocument();
   });
 });

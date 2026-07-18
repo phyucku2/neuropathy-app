@@ -1,18 +1,20 @@
 /**
  * Add data — BioMech report PDF upload (multipart to /biomech/reports, field
- * 'file'; imported/skipped/warnings shown, warnings as plain TEXT) and the EMR
- * connect stub (the OAuth redirect needs a registered client, so for now:
- * connect via your provider portal) with the clinic connections list.
+ * 'file'; imported/skipped/warnings shown, warnings as plain TEXT) plus a pointer
+ * to the REAL EMR-connect flow, which lives on the Sources surface (ADR-0028):
+ * this page used to carry a duplicate, non-interactive "Coming soon" EMR card and a
+ * second copy of the clinic-connections list — both already live under Sources, so
+ * they were removed here (one place to manage a connection; less clutter for the
+ * 60+ persona, ADR-0039). This card just links there.
  */
 
 import { useState, type ChangeEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { ApiError, messageFor } from '../../api/client';
-import { getConnections, uploadBiomechReport } from '../../api/endpoints';
+import { uploadBiomechReport } from '../../api/endpoints';
 import type { BiomechImportOut } from '../../api/types';
-import { ErrorNotice, Loading, SuccessNotice } from '../../components/StatusMessages';
+import { ErrorNotice, SuccessNotice } from '../../components/StatusMessages';
 import { formatDayYear } from '../../lib/format';
-import { useApi } from '../../lib/useApi';
-import { ConnectionRow } from '../settings/ConnectionRow';
 
 function UploadResult({ result }: { result: BiomechImportOut }) {
   const kind = result.report_kind === null ? 'report' : `${result.report_kind} report`;
@@ -104,40 +106,18 @@ function BiomechUploadCard() {
   );
 }
 
-function EmrConnectCard() {
-  const { data: connections, error, loading, reload } = useApi(getConnections);
-
+function ConnectRecordsCard() {
   return (
     <div className="card">
       <div className="eyebrow">Your medical records</div>
       <h2>Connect your records</h2>
       <p className="muted" style={{ marginTop: 0 }}>
-        Soon you&apos;ll pull labs straight from your health system here — no PDFs to hunt for.
-        Until then, connect via your provider portal or ask your clinic to invite you.
+        Link your health system to bring in your labs — you sign in on <b>your provider&apos;s</b>
+        own page, and we never see your password. You manage the connection under Sources.
       </p>
-      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }} className="muted">
-        <span aria-hidden="true" style={{ fontSize: 20 }}>
-          🔒
-        </span>
-        <p style={{ margin: 0, fontSize: 14 }}>
-          When it opens, you&apos;ll sign in on <b>your health system&apos;s</b> own page. We never
-          see your password — and you can disconnect anytime.
-        </p>
-      </div>
-      <span className="pill warn" style={{ display: 'inline-block', marginTop: 12 }}>
-        Coming soon
-      </span>
-
-      <h2 style={{ marginTop: 18 }}>Your clinic connections</h2>
-      {loading && <Loading label="Loading connections…" />}
-      {error !== null && <ErrorNotice>{error}</ErrorNotice>}
-      {connections !== null && connections.length === 0 && (
-        <p className="muted">No clinic connections yet. Your clinic can invite you.</p>
-      )}
-      {connections !== null &&
-        connections.map((connection) => (
-          <ConnectionRow key={connection.id} connection={connection} onChanged={reload} />
-        ))}
+      <Link className="btn-inline" to="/settings">
+        Connect under Sources
+      </Link>
     </div>
   );
 }
@@ -147,7 +127,7 @@ export function AddDataPage() {
     <div>
       <h1>Add data</h1>
       <BiomechUploadCard />
-      <EmrConnectCard />
+      <ConnectRecordsCard />
     </div>
   );
 }
