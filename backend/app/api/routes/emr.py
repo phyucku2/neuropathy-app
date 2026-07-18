@@ -143,12 +143,13 @@ async def pull_labs(
 ) -> PullOut:
     await _owned_connection(service, connection_id, current)
     try:
-        results, imported = await service.pull_labs(connection_id)
+        results, imported, skipped = await service.pull_labs(connection_id)
     except EmrError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.reason) from exc
     # `imported` counts newly persisted Observations; re-pulls are idempotent, so a
     # second sync of the same records reports imported=0 while still returning them.
-    return PullOut(imported=imported, results=results)
+    # `skipped` counts un-mappable EHR entries that were passed over (never fatal).
+    return PullOut(imported=imported, skipped=skipped, results=results)
 
 
 @router.delete("/connections/{connection_id}", response_model=ConnectionOut)

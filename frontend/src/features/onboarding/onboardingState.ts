@@ -14,17 +14,21 @@
 export const ONBOARDING_COMPLETE_KEY = 'neuropathy.onboarding_complete';
 
 function readCompletedIds(): string[] {
-  const raw = localStorage.getItem(ONBOARDING_COMPLETE_KEY);
-  if (raw === null) {
-    return [];
-  }
+  // The WHOLE read is guarded: `localStorage.getItem` itself throws in some browsers
+  // (Safari Private Mode, storage disabled) — not just `JSON.parse`. A throwing store must
+  // read as "nobody onboarded yet" so the gate FAILS TOWARD SHOWING the welcome, never
+  // toward a white screen.
   try {
+    const raw = localStorage.getItem(ONBOARDING_COMPLETE_KEY);
+    if (raw === null) {
+      return [];
+    }
     const parsed: unknown = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.every((id) => typeof id === 'string')) {
       return parsed as string[];
     }
   } catch {
-    // Corrupt entry — treat as "nobody onboarded yet"; the wizard simply shows again.
+    // Unreadable/absent store — treat as "not yet onboarded"; the wizard simply shows again.
   }
   return [];
 }
@@ -38,5 +42,10 @@ export function markOnboardingComplete(userId: string): void {
   if (ids.includes(userId)) {
     return;
   }
-  localStorage.setItem(ONBOARDING_COMPLETE_KEY, JSON.stringify([...ids, userId]));
+  try {
+    localStorage.setItem(ONBOARDING_COMPLETE_KEY, JSON.stringify([...ids, userId]));
+  } catch {
+    // A throwing/full store can't persist the flag — the wizard reappears next launch, which
+    // is a harmless degradation (never a crash). Nothing else to do.
+  }
 }

@@ -10,8 +10,7 @@ from __future__ import annotations
 from typing import Any, Protocol
 from urllib.parse import urlencode
 
-from app.fhir.mapping import bundle_from_fhir
-from app.fhir.resources import Bundle
+from app.fhir.mapping import lab_results_from_bundle_payload
 from app.schemas.lab import LabResultIn
 
 
@@ -28,22 +27,27 @@ class EmrClient:
 
     async def fetch_lab_observations(
         self, *, patient_fhir_id: str, access_token: str
-    ) -> list[LabResultIn]:
+    ) -> tuple[list[LabResultIn], int]:
         """Fetch laboratory Observations for the patient and map them to lab results.
 
-        Follows Bundle `next` links to page through all results.
+        Follows Bundle `next` links to page through all results. Parsing is LENIENT
+        (`lab_results_from_bundle_payload`): un-mappable entries are skipped, not fatal, so a
+        single non-final/panel/non-LOINC/OperationOutcome entry can't abort the whole pull.
+        Returns ``(results, skipped_count)``.
         """
         query = urlencode({"patient": patient_fhir_id, "category": "laboratory"})
         url: str | None = f"{self._fhir_base}/Observation?{query}"
         results: list[LabResultIn] = []
+        skipped = 0
 
         while url:
             payload = await self._transport.get_json(url, access_token=access_token)
-            bundle = Bundle.model_validate(payload)
-            results.extend(bundle_from_fhir(bundle))
+            page_results, page_skipped = lab_results_from_bundle_payload(payload)
+            results.extend(page_results)
+            skipped += page_skipped
             url = _next_link(payload)
 
-        return results
+        return results, skipped
 
 
 def _next_link(bundle_payload: dict[str, Any]) -> str | None:
