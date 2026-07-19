@@ -70,8 +70,9 @@ non-diagnostic guardrail):**
 | **Balance & gait** | BioMech (`document_imported`) | Latest vs. prior, per the real catalog. |
 | **Labs** | labs (patient-upload or EMR-pulled) | Most recent per analyte + prior, unit-safe (no cross-unit deltas — ADR-0015). |
 | **Activity / glucose** | wearable / CGM | Summary stats only. |
-| **Medications** | *Phase 2* | Placeholder row rendered "not yet tracked" so the layout is stable. |
-| **Notes & events** | *Phase 2* | Same. |
+| **Medications & supplements** | *Phase 2* | Placeholder row rendered "not yet tracked" so the layout is stable. |
+| **EMR clinician notes** | *Phase 2 (inbound `DocumentReference`)* | What other clinicians documented. Same placeholder until built. |
+| **Patient notes & events** | *Phase 2* | Same. |
 | **Nutrition** | *Phase 3 / ADR-0042* | Same. |
 | **Questions to ask** | derived, template-driven | Change-surfacing prompts (see below). |
 
@@ -128,7 +129,22 @@ effects clinicians rarely hear about). **Three** capture modes, all provenance-t
   interactions, or recommends** an item (hard non-diagnostic line — interaction-checking would
   be a distinct device-status question and is explicitly out of scope).
 
-**Notes & events** — lightweight patient capture of the things clinicians never hear:
+**EMR clinician notes (inbound pull — owner clarification 2026-07-19).** Distinct from the
+patient-authored notes below: pull the *clinician's own* documentation from the patient's EMR
+via **FHIR `DocumentReference`** (US Core Clinical Notes — progress / consult / discharge
+notes), over the existing SMART connection. `origin = ehr_imported`. This closes the gap the
+other direction: the treating clinician (and the patient, exercising right-of-access) sees what
+a **different** clinician documented.
+- **Display/store only, never interpret** (hard non-diagnostic line): the app surfaces the note
+  text with its author/date/type; it does not summarize, extract findings from, or act on it.
+- **Design note:** clinical notes are large free-text **documents**, not coded Observations, so
+  they warrant a **separate document store** (author, date, type, source system, text) rather
+  than being forced into the Observation model — and they are **sensitive PHI** (may mention
+  unrelated conditions), so the pull is scoped by the patient's SMART consent and audited like
+  every other PHI read. Gated on EMR registration (same as the labs/meds pull).
+
+**Patient-authored notes & events** — lightweight patient capture of the things clinicians
+never hear:
 - **Structured events** (a small closed vocabulary): fall, ER/urgent-care visit, new provider
   seen, hospitalization, new OTC/supplement. Each with a date. `origin = patient_reported`.
 - **Free-text note** (optional, short). It is **PHI** → same PHI rules as everything else:
