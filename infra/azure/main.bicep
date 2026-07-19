@@ -350,7 +350,13 @@ resource backendApp 'Microsoft.App/containerApps@2024-03-01' = {
         external: false
         targetPort: backendTargetPort
         transport: 'auto'
-        allowInsecure: false
+        // Internal ingress MUST accept plain HTTP. The frontend nginx reverse-proxies to this
+        // backend over http:// (proxy_pass http://$backend_origin). With allowInsecure=false
+        // the internal ingress 301-redirects HTTP->HTTPS; nginx passes that redirect back to
+        // the browser and every proxied API call breaks (verified on the eastus2 bring-up).
+        // Traffic is internal-only within the Container Apps environment network, so plain
+        // HTTP here is the documented same-origin-proxy pattern (external frontend stays HTTPS).
+        allowInsecure: true
       }
       registries: registriesBlock
       secrets: backendSecrets
