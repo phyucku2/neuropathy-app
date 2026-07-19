@@ -52,10 +52,12 @@ Adopt a **consent-gated, non-urgent, audited patient↔clinician communication s
   (ADR-0012/0020). Message bodies are **PHI**: audited as reads/writes (counts/refs, never
   values — CLAUDE.md §5), never in structured/observability logs (ADR-0021), retained under the
   ADR-0027/0031 retention + right-of-access rules.
-- **Non-urgent by construction (non-negotiable, mirrors ADR-0045 notes):** point-of-send copy —
-  *"Messages are reviewed by your clinician when they can — not monitored in real time. Urgent?
-  Call your clinic. Emergency? Call 911."* **No red-flag text scanning / triage** (that is an
-  interpretive/device function and a promise the channel can't keep).
+- **Non-urgent by construction (non-negotiable, mirrors ADR-0045 notes):** a **persistent,
+  always-visible banner** on the message-compose surface (not a one-time dismissible notice),
+  shown every time, in plain 60+ type (ADR-0039): *"Messages are reviewed by your clinician when
+  they can — not monitored in real time. **If this is an emergency, call 911;** if it's urgent,
+  call your clinic."* **No red-flag text scanning / triage** (that is an interpretive/device
+  function and a promise the channel can't keep).
 - **Read state + acknowledgment** reuse the ADR-0045 pattern (team-wide, audited who/when).
 - **Non-diagnostic:** the app transports and stores messages; it does not summarize, interpret,
   or auto-respond. (Any AI drafting/summarizing of clinical messages is out of scope and would

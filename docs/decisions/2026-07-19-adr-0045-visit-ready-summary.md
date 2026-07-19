@@ -158,9 +158,11 @@ never hear:
   accountability that stops notes from being missed.
 - **The acknowledgment queue creates a duty-to-review expectation, so this is designed
   defensively (safety + liability):**
-  - **Expectation copy at the point of writing (non-negotiable):** "Notes are reviewed by your
-    clinician when they can — **this is not monitored in real time.** If it's urgent, call your
-    clinic; if it's an emergency, call 911." The unread state must never read as "sent to my
+  - **Emergency language — a PERSISTENT, always-visible banner on the note-compose surface
+    (owner decision 2026-07-19), not a one-time dismissible notice** — shown every time a note
+    is written, in plain 60+ type (ADR-0039): "Notes are reviewed by your clinician when they
+    can — **this is not monitored in real time. If this is an emergency, call 911;** if it's
+    urgent, call your clinic." The unread state must never read as "sent to my
     doctor now."
   - **No emergency detection or triage.** The app does **not** scan note text for red-flag
     phrases and prioritize/route it — that is an interpretive/device function and a promise the
