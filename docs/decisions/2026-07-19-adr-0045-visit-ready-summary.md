@@ -39,11 +39,16 @@ something no other artifact in the visit has.
 
 ## Decision
 
-Adopt the **Visit-Ready Summary**: one windowed (default **60-day**, configurable) projection
-of a patient's record, rendered as (1) a **patient-held print/PDF** and (2) a **clinician-side
-view** in the consent-gated panel — plus the new capture that fills the between-visit gaps.
-Phased so Phase 1 ships under today's posture and the interpretive/new-capture/delivery pieces
-are gated.
+Adopt the **Visit-Ready Summary**: one windowed projection of a patient's record, rendered as
+(1) a **patient-held print/PDF** and (2) a **clinician-side view** in the consent-gated panel —
+plus the new capture that fills the between-visit gaps. Phased so Phase 1 ships under today's
+posture and the interpretive/new-capture/delivery pieces are gated.
+
+**Window (owner decision 2026-07-19):** selectable **30 / 60 / 90 / 120 / 365 days**, default
+**60**. At the long windows (120/365) the "what changed" diff loses meaning — everything
+changed — so those windows lead with the **trajectory over time** (the existing per-signal
+trend) and demote the diff; the short windows lead with the diff. Same data, window-appropriate
+emphasis.
 
 ### Phase 1 — Assemble + render from existing streams (buildable now)
 
@@ -59,7 +64,7 @@ non-diagnostic guardrail):**
 | Section | Source (today) | Notes |
 |---|---|---|
 | **Status at a glance** | NSI + trajectory (derived) | The 0–100 index + direction/confidence, non-diagnostic note co-located. Leads the page. |
-| **What changed (last 60d)** | derived delta | The diff, not the dump (see below). |
+| **What changed (selected window)** | derived delta | The diff, not the dump (see below). Leads on short windows; demoted under the trajectory view at 120/365. |
 | **Symptoms trend** | ADL symptoms (pain 0–10 NRS, numbness NTSS-6-aligned) | Sparkline + start→now. |
 | **Function / daily living** | ADL (walking, stairs, balance-confidence) | The data a clinician almost never gets between visits. |
 | **Balance & gait** | BioMech (`document_imported`) | Latest vs. prior, per the real catalog. |
@@ -92,16 +97,36 @@ data behind both.
 
 ### Phase 2 — Capture the between-visit gaps (new models; the differentiator)
 
-**Medications** — new `SourceType.medication`. Two capture modes, both provenance-tagged:
-- **Patient-entered med list + change log**: current meds, and *change events* (started /
-  stopped / dose-changed) with prescriber (free text), date, and optional reason. `origin =
+**Medications & supplements** — new `SourceType.medication`, with a `kind` of
+`prescription | otc | supplement` (owner decision 2026-07-19: capture **all three** — both
+prescription and OTC/supplements, since supplements drive interactions and B12/neuropathy
+effects clinicians rarely hear about). **Three** capture modes, all provenance-tagged:
+- **Patient-entered list + change log**: current items, and *change events* (started / stopped
+  / dose-changed) with prescriber (free text), date, and optional reason. `origin =
   patient_reported`.
 - **FHIR pull** (optional, via the existing SMART connection): `MedicationStatement` /
   `MedicationRequest`, which aggregate meds **across providers**. `origin = ehr_imported`.
-- The handout then surfaces **"medications recorded since last visit that may not be in your
-  chart"** — the different-provider safety win (polypharmacy / interaction the treating
-  clinician can catch). The app **lists and logs; it never adjusts, reconciles, or
-  recommends** a medication (hard non-diagnostic line).
+- **Camera capture with mandatory patient confirmation (owner decision 2026-07-19):** the
+  patient photographs a pill bottle / supplement label; OCR **prepopulates a draft** (name,
+  dose, date); the patient **reviews and confirms** before it becomes a final record. This
+  reuses the codebase's existing *human-confirm-before-final* pattern exactly:
+  - The draft is written as `ObservationStatus.preliminary` ("captured, not yet confirmed —
+    e.g. unconfirmed OCR", already in the model) and only the patient's confirm promotes it to
+    `final` with a `human_confirmed: True` quality flag — the same contract the lab-OCR path
+    already uses. **A misread label never silently enters the record.**
+  - **The photo is extract-and-discard:** OCR parses it, the draft is populated, the image is
+    **deleted** — the app stores the structured med item, never the picture. (A retained label
+    photo is PHI-at-rest with no ongoing purpose.)
+  - **OCR route (V1 recommendation): on-device OCR** (e.g. ML Kit via Capacitor) so the photo
+    never leaves the phone — avoids sending PHI to a cloud OCR seam. The existing `ocr_provider`
+    config seam remains for a **BAA-covered** cloud OCR alternative; cloud OCR is gated on that
+    BAA exactly like the AI narrator (ADR-0011/0020). Either way, confirmation and
+    extract-and-discard are unconditional.
+- The handout then surfaces **"medications/supplements recorded since last visit that may not
+  be in your chart"** — the different-provider safety win (polypharmacy / interaction the
+  treating clinician can catch). The app **lists and logs; it never adjusts, reconciles, checks
+  interactions, or recommends** an item (hard non-diagnostic line — interaction-checking would
+  be a distinct device-status question and is explicitly out of scope).
 
 **Notes & events** — lightweight patient capture of the things clinicians never hear:
 - **Structured events** (a small closed vocabulary): fall, ER/urgent-care visit, new provider
@@ -110,8 +135,24 @@ data behind both.
   audit-logged (counts/refs, never values), **not fed to AI narration by default** (only under
   a BAA, and even then never used to generate clinical content), and included on the handout
   verbatim under a clear "patient's own words" label.
+- **Clinician read-acknowledgment (owner decision 2026-07-19).** A posted note carries its
+  day/time and shows as **"unreviewed"** on the clinician panel; it persists until **any**
+  clinician on the patient's care team marks it reviewed (team-wide, so one person's absence
+  can't build a stale queue), and the acknowledgment is **audit-logged** (who, when) — the
+  accountability that stops notes from being missed.
+- **The acknowledgment queue creates a duty-to-review expectation, so this is designed
+  defensively (safety + liability):**
+  - **Expectation copy at the point of writing (non-negotiable):** "Notes are reviewed by your
+    clinician when they can — **this is not monitored in real time.** If it's urgent, call your
+    clinic; if it's an emergency, call 911." The unread state must never read as "sent to my
+    doctor now."
+  - **No emergency detection or triage.** The app does **not** scan note text for red-flag
+    phrases and prioritize/route it — that is an interpretive/device function and a promise the
+    channel cannot keep. The note channel is explicitly non-urgent, stated in the copy.
+  - The unread→read transition is a **workflow/accountability** state, not a clinical judgment;
+    it asserts nothing about the note's content.
 
-Both require: new model fields/enums, a **files-only Alembic migration** matching
+All of the above require: new model fields/enums, a **files-only Alembic migration** matching
 `Base.metadata` (the parity test), capture UI, and import-idempotency on the same
 `add_if_absent` invariant as every other ingest path (ADR-0045 follows the sweep-#3 rule).
 
@@ -173,12 +214,22 @@ Both require: new model fields/enums, a **files-only Alembic migration** matchin
   useful handout from existing streams immediately; Phase 2 capture deepens it without blocking
   the flagship.
 
-## Open questions (for the owner / reviewers)
+## Resolved by owner (2026-07-19)
 
-1. **Window default** — 60 days as specced, or clinician-configurable per patient (30/60/90)?
-2. **Medication capture priority** — patient-entered first (works with no EMR registration), or
-   wait for the FHIR pull (richer, cross-provider, but gated on registration)?
-3. **Notes to AI** — keep free-text notes strictly out of the AI path even under a BAA (safest),
-   or allow rephrasing later? (Spec defaults to *out*.)
-4. **"Questions to ask"** — ship the data-completeness prompts in Phase 1 and hold the
+- **Window** — selectable 30 / 60 / 90 / 120 / 365, default 60 (§Decision).
+- **Medication capture** — build **all three** modes (patient-entered, FHIR pull, camera +
+  mandatory confirm) and include **supplements**; patient-entered + camera work with no EMR
+  registration, the FHIR pull layers in once registered.
+- **Notes** — add **clinician read-acknowledgment** (team-wide, audited, with non-real-time
+  expectation copy and no emergency triage).
+
+## Open questions (still for the owner / reviewers)
+
+1. **Notes to AI** — keep free-text notes strictly out of the AI path even under a BAA (safest,
+   the spec default), or allow rephrasing later?
+2. **"Questions to ask"** — ship the data-completeness prompts in Phase 1 and hold the
    change-pointed questions for the D2 opinion, or hold the whole questions block until D2?
+3. **OCR route** — confirm on-device OCR for V1 (photo never leaves the phone), with cloud OCR
+   only as a later BAA-gated option?
+4. **Note SLA** — do we surface any "unread for N days" escalation to the clinic (an ops nudge,
+   not a clinical one), or leave the queue un-timed to avoid implying a monitored channel?
