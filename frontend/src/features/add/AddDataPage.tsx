@@ -122,10 +122,44 @@ function ConnectRecordsCard() {
   );
 }
 
+function MedsCard() {
+  return (
+    <div className="card">
+      <div className="eyebrow">Medications &amp; supplements</div>
+      <h2>Keep your medication list</h2>
+      <p className="muted" style={{ marginTop: 0 }}>
+        A list you keep of what you take, with dose changes and stops. The app never adjusts,
+        checks, or recommends medicines — it just records your list.
+      </p>
+      <Link className="btn-inline" to="/meds">
+        Open medications
+      </Link>
+    </div>
+  );
+}
+
+function EventsCard() {
+  return (
+    <div className="card">
+      <div className="eyebrow">Between visits</div>
+      <h2>Notes &amp; events</h2>
+      <p className="muted" style={{ marginTop: 0 }}>
+        Record a fall, an ER visit, a new provider, or a note in your own words to share at your
+        next visit.
+      </p>
+      <Link className="btn-inline" to="/events">
+        Open notes &amp; events
+      </Link>
+    </div>
+  );
+}
+
 export function AddDataPage() {
   return (
     <div>
       <h1>Add data</h1>
+      <MedsCard />
+      <EventsCard />
       <BiomechUploadCard />
       <ConnectRecordsCard />
     </div>

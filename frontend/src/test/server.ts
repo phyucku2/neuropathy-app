@@ -17,8 +17,10 @@ import {
   EMR_PROVIDERS,
   EMR_PULL,
   EMR_STATE,
+  EVENTS,
   EXPORT,
   ME,
+  MEDICATIONS,
   OBSERVATIONS,
   PANEL,
   PANEL_PATIENT_ID,
@@ -167,6 +169,75 @@ export const handlers = [
       skipped: 0,
       warnings: [],
     });
+  }),
+
+  // Medications & supplements (ADR-0045 P2): the folded list read + the append-only writes.
+  // Reads mirror the real PHI response (Cache-Control: no-store).
+  http.get('/medications', ({ request }) =>
+    isAuthorized(request)
+      ? HttpResponse.json(MEDICATIONS, { headers: { 'Cache-Control': 'no-store' } })
+      : unauthorized(),
+  ),
+
+  http.post('/medications', async ({ request }) => {
+    if (!isAuthorized(request)) {
+      return unauthorized();
+    }
+    const body = (await request.json()) as { started_on: string };
+    return HttpResponse.json(
+      {
+        medication_id: 'med:99999999-9999-4999-8999-999999999999',
+        change_type: 'added',
+        effective_at: `${body.started_on}T00:00:00Z`,
+        skipped: false,
+      },
+      { status: 201 },
+    );
+  }),
+
+  http.post('/medications/:medicationId/changes', async ({ request, params }) => {
+    if (!isAuthorized(request)) {
+      return unauthorized();
+    }
+    const body = (await request.json()) as { change_type: string; effective_date: string };
+    return HttpResponse.json(
+      {
+        medication_id: String(params['medicationId']),
+        change_type: body.change_type,
+        effective_at: `${body.effective_date}T00:00:00Z`,
+        skipped: false,
+      },
+      { status: 201 },
+    );
+  }),
+
+  // Between-visit events & notes (ADR-0045 P2): newest-first list + append-only record.
+  http.get('/events', ({ request }) =>
+    isAuthorized(request)
+      ? HttpResponse.json(EVENTS, { headers: { 'Cache-Control': 'no-store' } })
+      : unauthorized(),
+  ),
+
+  http.post('/events', async ({ request }) => {
+    if (!isAuthorized(request)) {
+      return unauthorized();
+    }
+    const body = (await request.json()) as {
+      type: string;
+      effective_date: string;
+      note: string | null;
+    };
+    return HttpResponse.json(
+      {
+        event_id: 'aaaaaaaa-0000-4000-8000-0000000000ff',
+        type: body.type,
+        effective_at: `${body.effective_date}T00:00:00Z`,
+        note: body.note,
+        reviewed: false,
+        skipped: false,
+      },
+      { status: 201 },
+    );
   }),
 
   http.get('/capabilities', ({ request }) => {

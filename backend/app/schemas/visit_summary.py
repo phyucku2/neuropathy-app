@@ -15,7 +15,7 @@ there is no token/hash field to leak.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Literal
 
@@ -24,8 +24,10 @@ from pydantic import BaseModel, Field
 from app.schemas.trajectory import Direction, Trajectory
 
 # Bump on any breaking shape change so a printed/rendered Summary stays interpretable
-# by later tooling (forward-compat, mirrors ADR-0031's export envelope).
-VISIT_SUMMARY_SCHEMA_VERSION: str = "1.0"
+# by later tooling (forward-compat, mirrors ADR-0031's export envelope). 1.1 adds the
+# folded medications + patient_notes sections and the what-changed medication delta
+# (ADR-0045 P2), replacing the P1 placeholders for those two rows.
+VISIT_SUMMARY_SCHEMA_VERSION: str = "1.1"
 
 # The window is validated against this fixed set in-handler (mirrors the ingestion
 # validation style); anything else is a 422. 60 is the default (owner, 2026-07-19).
@@ -64,6 +66,16 @@ NEW_LAB_QUESTION = (
 COVERAGE_GAP_QUESTION = (
     "Function or symptom check-ins are missing for {missing} of the last {window} days "
     "— the between-visit picture is partial."
+)
+# Medication/event completeness (ADR-0045 P2, clearly safe): both point ONLY at what the
+# patient recorded and ask the clinician to confirm the chart — no reconciliation,
+# interaction check, or recommendation (the hard non-diagnostic line).
+MED_CHANGE_QUESTION = (
+    "A medication or supplement change was recorded in this window "
+    "— confirm it's reflected in the chart."
+)
+EVENT_RECORDED_QUESTION = (
+    "Between-visit events or notes were recorded in this window — review them with the patient."
 )
 # change_pointed (edges toward decision support — HELD FOR D2, feature-gated OFF via
 # settings.include_change_questions default False, ADR-0045 open question #2):
@@ -182,6 +194,25 @@ class SymptomTrendChange(BaseModel):
     changed: bool
 
 
+class MedicationChangeDelta(BaseModel):
+    """One medication CHANGE ROW whose effective_at falls in the current window (ADR-0045 P2).
+
+    The "recorded since last visit that may not be in your chart" safety surfacing. Purely
+    descriptive: it names WHAT the patient recorded (drug, kind, change_type, dose, date) —
+    NO reconciliation, interaction check, or recommendation (hard non-diagnostic line).
+    """
+
+    medication_id: str
+    name: str
+    kind: str
+    change_type: str
+    dose_amount: float | None
+    dose_unit: str | None
+    dose_text: str | None
+    effective_at: datetime
+    provenance: str = "patient-entered"
+
+
 class WhatChanged(BaseModel):
     """The window's deterministic diff against the prior window — the diff, not the dump."""
 
@@ -189,6 +220,7 @@ class WhatChanged(BaseModel):
     symptom_trend: list[SymptomTrendChange] = Field(default_factory=list)
     adherence: AdherenceGap
     latest_biomech: list[PriorDelta] = Field(default_factory=list)
+    medication_changes: list[MedicationChangeDelta] = Field(default_factory=list)
 
 
 class QuestionsToAsk(BaseModel):
@@ -202,8 +234,42 @@ class QuestionsToAsk(BaseModel):
     change_pointed: list[str] = Field(default_factory=list)
 
 
+class MedicationItem(BaseModel):
+    """A medication folded to its current state for the handout (ADR-0045 P2).
+
+    Descriptive only — the app never adjusts, checks, or recommends medicines. Both the
+    patient print and the consented-clinician view render this same section (one assembly).
+    """
+
+    medication_id: str
+    name: str
+    kind: str
+    status: str
+    current_dose_amount: float | None
+    current_dose_unit: str | None
+    current_dose_text: str | None
+    prescriber: str | None
+    started_on: date
+    last_change_at: datetime
+    provenance: str = "patient-entered"
+
+
+class PatientEventItem(BaseModel):
+    """One between-visit event/note in the window (ADR-0045 P2), newest-first.
+
+    `note` is the patient's own words, verbatim. Descriptive; no triage or red-flag scan.
+    """
+
+    type: str
+    display: str
+    effective_at: datetime
+    note: str | None
+    reviewed: bool
+    provenance: str = "patient-entered"
+
+
 class PlaceholderRow(BaseModel):
-    """A forward-stable layout row for a section not yet captured (render-only, P1)."""
+    """A forward-stable layout row for a section not yet captured (render-only)."""
 
     key: str
     label: str
@@ -211,12 +277,11 @@ class PlaceholderRow(BaseModel):
     phase: str
 
 
-# The placeholder sections (ADR-0045): render-only in P1 — NO SourceType, model, enum,
-# or migration until the capture phases land. Constants keep the layout stable.
+# The remaining placeholder sections (ADR-0045): render-only until their capture phases
+# land. Medications & patient notes are now CAPTURED (P2) and dropped from here; emr_notes
+# (Phase 2b FHIR DocumentReference) and nutrition (Phase 3) stay render-only.
 PLACEHOLDER_ROWS: tuple[PlaceholderRow, ...] = (
-    PlaceholderRow(key="medications", label="Medications & supplements", phase="Phase 2"),
-    PlaceholderRow(key="emr_notes", label="EMR clinician notes", phase="Phase 2"),
-    PlaceholderRow(key="patient_notes", label="Patient notes & events", phase="Phase 2"),
+    PlaceholderRow(key="emr_notes", label="EMR clinician notes", phase="Phase 2b"),
     PlaceholderRow(key="nutrition", label="Nutrition", phase="Phase 3"),
 )
 
@@ -242,6 +307,8 @@ class VisitSummary(BaseModel):
     balance_gait: list[PriorDelta] = Field(default_factory=list)
     labs: list[LabDelta] = Field(default_factory=list)
     activity: list[ActivityStat] = Field(default_factory=list)
+    medications: list[MedicationItem] = Field(default_factory=list)
+    patient_notes: list[PatientEventItem] = Field(default_factory=list)
     placeholders: list[PlaceholderRow] = Field(default_factory=list)
     questions: QuestionsToAsk
     disclaimer: str = NON_DIAGNOSTIC_NOTE

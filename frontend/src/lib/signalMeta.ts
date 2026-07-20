@@ -144,6 +144,10 @@ export function sourceLabel(source: string): string {
       return 'Phone/watch';
     case 'emr':
       return 'Your records';
+    case 'medication':
+    case 'event':
+      // Patient-entered (ADR-0045 P2) — a friendly "you entered" chip, never a device/lab claim.
+      return 'You entered';
     default:
       return source.charAt(0).toUpperCase() + source.slice(1);
   }

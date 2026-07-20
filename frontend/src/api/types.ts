@@ -170,12 +170,57 @@ export interface SymptomTrendChange {
   changed: boolean;
 }
 
+/** MedicationChangeDelta — one medication CHANGE ROW whose effective_at falls in the current
+ *  window (ADR-0045 P2). The "recorded since last visit that may not be in your chart" safety
+ *  surfacing. Purely descriptive: it names WHAT the patient recorded — NO reconciliation,
+ *  interaction check, or recommendation (the hard non-diagnostic line). */
+export interface MedicationChangeDelta {
+  medication_id: string;
+  name: string;
+  kind: string;
+  change_type: string;
+  dose_amount: number | null;
+  dose_unit: string | null;
+  dose_text: string | null;
+  effective_at: string;
+  provenance: string;
+}
+
 /** WhatChanged — the window's deterministic diff against the prior window (the diff, not the dump). */
 export interface WhatChanged {
   new_labs: LabDelta[];
   symptom_trend: SymptomTrendChange[];
   adherence: AdherenceGap;
   latest_biomech: PriorDelta[];
+  medication_changes: MedicationChangeDelta[];
+}
+
+/** MedicationItem — a medication folded to its current state for the handout (ADR-0045 P2).
+ *  Descriptive only; both the patient print and the consented-clinician view render this same
+ *  section (one assembly, so they can never drift). */
+export interface MedicationItem {
+  medication_id: string;
+  name: string;
+  kind: string;
+  status: string;
+  current_dose_amount: number | null;
+  current_dose_unit: string | null;
+  current_dose_text: string | null;
+  prescriber: string | null;
+  started_on: string;
+  last_change_at: string;
+  provenance: string;
+}
+
+/** PatientEventItem — one between-visit event/note in the window (ADR-0045 P2), newest-first.
+ *  `note` is the patient's own words, verbatim. Descriptive; no triage or red-flag scan. */
+export interface PatientEventItem {
+  type: string;
+  display: string;
+  effective_at: string;
+  note: string | null;
+  reviewed: boolean;
+  provenance: string;
 }
 
 /** QuestionsToAsk — change-surfacing prompts about the patient's own data, templates never
@@ -212,6 +257,8 @@ export interface VisitSummary {
   balance_gait: PriorDelta[];
   labs: LabDelta[];
   activity: ActivityStat[];
+  medications: MedicationItem[];
+  patient_notes: PatientEventItem[];
   placeholders: PlaceholderRow[];
   questions: QuestionsToAsk;
   disclaimer: string;
@@ -258,6 +305,112 @@ export interface AdlCheckInOut {
   check_in_date: string;
   daily_score: number;
   superseded: boolean;
+}
+
+// ---- medication.py (ADR-0045 P2 — patient-entered medication change log) ----
+
+/** MedicationKind — closed vocabulary so the log never carries free-text categories. */
+export type MedicationKind = 'prescription' | 'otc' | 'supplement';
+
+/** MedicationChangeType — `added` is minted at registration; `dose_changed`/`stopped` append
+ *  later. None supersedes another — the set of entries IS the history. */
+export type MedicationChangeType = 'added' | 'dose_changed' | 'stopped';
+
+/** MedicationStatus — current folded state; a stopped med is still shown (never dropped). */
+export type MedicationStatus = 'active' | 'stopped';
+
+/** MedicationRegisterIn — register a NEW medication/supplement (emits the `added` entry). The
+ *  `client_entry_id` idempotency key is minted by the endpoint client, not the caller. */
+export interface MedicationRegisterIn {
+  name: string;
+  kind: MedicationKind;
+  dose_amount: number | null;
+  dose_unit: string | null;
+  dose_text: string | null;
+  prescriber: string | null;
+  reason: string | null;
+  started_on: string;
+  client_entry_id: string;
+}
+
+/** MedicationChangeIn — append a `dose_changed` or `stopped` entry to an existing med's log. */
+export interface MedicationChangeIn {
+  change_type: Exclude<MedicationChangeType, 'added'>;
+  dose_amount: number | null;
+  dose_unit: string | null;
+  dose_text: string | null;
+  reason: string | null;
+  effective_date: string;
+  client_entry_id: string;
+}
+
+/** MedicationChangeOut — one appended entry's outcome. `skipped` is true on an idempotent
+ *  retry (client_entry_id already on file), so no new row was written. */
+export interface MedicationChangeOut {
+  medication_id: string;
+  change_type: MedicationChangeType;
+  effective_at: string;
+  skipped: boolean;
+}
+
+/** MedicationChangeEntry — one entry in a medication's append-only change log. */
+export interface MedicationChangeEntry {
+  change_type: MedicationChangeType;
+  effective_at: string;
+  dose_amount: number | null;
+  dose_unit: string | null;
+  dose_text: string | null;
+  reason: string | null;
+}
+
+/** MedicationOut — a medication folded to its current state, plus its full change log. */
+export interface MedicationOut {
+  medication_id: string;
+  name: string;
+  kind: MedicationKind;
+  status: MedicationStatus;
+  current_dose_amount: number | null;
+  current_dose_unit: string | null;
+  current_dose_text: string | null;
+  prescriber: string | null;
+  started_on: string;
+  last_change_at: string;
+  changes: MedicationChangeEntry[];
+}
+
+/** MedicationLog — the patient's folded current medication list + per-med log, active-first. */
+export interface MedicationLog {
+  items: MedicationOut[];
+}
+
+// ---- event.py (ADR-0045 P2 — patient-entered between-visit events & notes) ----
+
+/** EventType — the closed vocabulary of between-visit events (plus a plain note). */
+export type EventType =
+  'fall' | 'er_visit' | 'new_provider' | 'hospitalization' | 'new_supplement' | 'note';
+
+/** EventIn — record one between-visit event or note. `type='note'` requires a non-empty note.
+ *  The `client_entry_id` idempotency key is minted by the endpoint client, not the caller. */
+export interface EventIn {
+  type: EventType;
+  effective_date: string;
+  note: string | null;
+  client_entry_id: string;
+}
+
+/** EventOut — one recorded event. `skipped` is true on an idempotent retry. */
+export interface EventOut {
+  event_id: string;
+  type: EventType;
+  effective_at: string;
+  note: string | null;
+  reviewed: boolean;
+  skipped: boolean;
+}
+
+/** EventList — the patient's between-visit events & notes, newest-first. */
+export interface EventList {
+  items: EventOut[];
 }
 
 // ---- biomech.py ----

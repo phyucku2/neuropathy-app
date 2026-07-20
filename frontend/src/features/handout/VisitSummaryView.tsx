@@ -16,6 +16,9 @@ import type {
   ActivityStat,
   Direction,
   LabDelta,
+  MedicationChangeDelta,
+  MedicationItem,
+  PatientEventItem,
   PriorDelta,
   TrendSeries,
   VisitSummary,
@@ -147,6 +150,84 @@ function ActivityStatRow({ stat }: { stat: ActivityStat }) {
   );
 }
 
+/** Friendly labels for the patient-entered medication vocabulary (ADR-0045 P2). Fall back to the
+ *  raw value so an unknown future kind/type/change still renders rather than vanishing. */
+const KIND_LABEL: Record<string, string> = {
+  prescription: 'Prescription',
+  otc: 'Over-the-counter',
+  supplement: 'Supplement',
+};
+const CHANGE_LABEL: Record<string, string> = {
+  added: 'Added',
+  dose_changed: 'Dose changed',
+  stopped: 'Stopped',
+};
+
+/** "50 mg" / "1 tablet twice daily" / null — the descriptive dose line, no judgment attached. */
+function medDose(amount: number | null, unit: string | null, text: string | null): string | null {
+  if (text !== null && text.trim() !== '') {
+    return text;
+  }
+  if (amount !== null) {
+    const value = formatValue(amount);
+    return unit !== null && unit.trim() !== '' ? `${value} ${unit}` : value;
+  }
+  return null;
+}
+
+function MedicationRow({ item }: { item: MedicationItem }) {
+  const dose = medDose(item.current_dose_amount, item.current_dose_unit, item.current_dose_text);
+  return (
+    <div className="handout-row">
+      <div className="handout-row-head">
+        <span className="handout-metric">{item.name}</span>
+        <span className="chip">{KIND_LABEL[item.kind] ?? item.kind}</span>
+        <span className={item.status === 'active' ? 'pill on' : 'pill off'}>
+          {item.status === 'active' ? 'Active' : 'Stopped'}
+        </span>
+        <span className="chip">{sourceLabel('medication')}</span>
+      </div>
+      <p className="handout-span">
+        {dose === null ? 'No dose recorded.' : `Current dose: ${dose}.`}
+        {item.prescriber !== null &&
+          item.prescriber.trim() !== '' &&
+          ` Prescriber: ${item.prescriber}.`}{' '}
+        Started {formatDayYear(Date.parse(item.started_on))}.
+      </p>
+    </div>
+  );
+}
+
+function PatientEventRow({ item }: { item: PatientEventItem }) {
+  return (
+    <div className="handout-row">
+      <div className="handout-row-head">
+        <span className="handout-metric">{item.display}</span>
+        <span className="chip">{formatDayYear(Date.parse(item.effective_at))}</span>
+        <span className="chip">{sourceLabel('event')}</span>
+      </div>
+      {item.note !== null && item.note.trim() !== '' && (
+        <p className="handout-span">
+          <span className="muted">In their own words: </span>
+          {/* The note is the patient's own words — rendered verbatim as plain text. */}
+          {item.note}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function MedicationChangeDeltaRow({ change }: { change: MedicationChangeDelta }) {
+  const dose = medDose(change.dose_amount, change.dose_unit, change.dose_text);
+  return (
+    <p className="handout-span">
+      <b>{change.name}</b> — {CHANGE_LABEL[change.change_type] ?? change.change_type}
+      {dose !== null && ` (${dose})`} on {formatDayYear(Date.parse(change.effective_at))}{' '}
+      <span className="chip">{sourceLabel('medication')}</span>
+    </p>
+  );
+}
+
 /** A titled card that renders only when it has rows — an empty account shows no empty cards. */
 function SeriesCard({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -158,7 +239,8 @@ function SeriesCard({ title, children }: { title: string; children: ReactNode })
 }
 
 function WhatChangedSection({ summary }: { summary: VisitSummary }) {
-  const { new_labs, symptom_trend, adherence, latest_biomech } = summary.what_changed;
+  const { new_labs, symptom_trend, adherence, latest_biomech, medication_changes } =
+    summary.what_changed;
   const changedSymptoms = symptom_trend.filter((entry) => entry.changed);
   const gapLabel =
     adherence.days_since_last_checkin === null
@@ -169,7 +251,10 @@ function WhatChangedSection({ summary }: { summary: VisitSummary }) {
             adherence.days_since_last_checkin === 1 ? '' : 's'
           } ago.`;
   const hasHighlights =
-    new_labs.length > 0 || changedSymptoms.length > 0 || latest_biomech.length > 0;
+    new_labs.length > 0 ||
+    changedSymptoms.length > 0 ||
+    latest_biomech.length > 0 ||
+    medication_changes.length > 0;
 
   return (
     <section className="card handout-section" aria-labelledby="what-changed-heading">
@@ -205,6 +290,20 @@ function WhatChangedSection({ summary }: { summary: VisitSummary }) {
           <h3>Latest balance &amp; gait vs prior</h3>
           {latest_biomech.map((item) => (
             <PriorDeltaRow key={`${item.source}:${item.code}`} item={item} />
+          ))}
+        </div>
+      )}
+
+      {medication_changes.length > 0 && (
+        <div className="handout-change">
+          <h3>Medications recorded this window</h3>
+          {/* Descriptive only (ADR-0045 P2): what the patient recorded, so the clinician can
+              confirm it's in the chart — never a reconciliation, interaction check, or advice. */}
+          {medication_changes.map((change) => (
+            <MedicationChangeDeltaRow
+              key={`${change.medication_id}:${change.change_type}:${change.effective_at}`}
+              change={change}
+            />
           ))}
         </div>
       )}
@@ -257,6 +356,23 @@ function TrendSections({ summary }: { summary: VisitSummary }) {
         <SeriesCard title="Activity & glucose">
           {summary.activity.map((stat) => (
             <ActivityStatRow key={`${stat.source}:${stat.code}`} stat={stat} />
+          ))}
+        </SeriesCard>
+      )}
+      {summary.medications.length > 0 && (
+        <SeriesCard title="Medications & supplements">
+          {summary.medications.map((item) => (
+            <MedicationRow key={item.medication_id} item={item} />
+          ))}
+        </SeriesCard>
+      )}
+      {summary.patient_notes.length > 0 && (
+        <SeriesCard title="Patient notes & events">
+          {summary.patient_notes.map((item, index) => (
+            <PatientEventRow
+              key={`${item.type}:${item.effective_at}:${String(index)}`}
+              item={item}
+            />
           ))}
         </SeriesCard>
       )}

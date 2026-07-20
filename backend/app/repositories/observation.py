@@ -13,7 +13,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Protocol
 
-from app.models.observation import Observation
+from app.models.observation import Observation, SourceType
 from app.services.observation import counts_toward_analysis
 
 
@@ -51,6 +51,7 @@ class ObservationRepository(Protocol):
         limit: int | None = None,
         offset: int = 0,
         newest_first: bool = False,
+        source: SourceType | None = None,
     ) -> list[Observation]:
         """Analyzable records for one patient (optionally one code), oldest first by
         default (newest first for display pagination).
@@ -58,7 +59,10 @@ class ObservationRepository(Protocol):
         "Analyzable" = non-errored status AND not superseded by a newer row's
         revises_id (data-standards.md: current records only). `since` bounds the
         lookback (hot-path budget); `limit`/`offset` push pagination into storage so
-        a 50-row page never materializes a multi-year history (standards.md).
+        a 50-row page never materializes a multi-year history (standards.md). `source`
+        scopes the read to one SourceType — the medication current-state fold reads the
+        full (unbounded) medication history via the (patient_id, source, effective_at)
+        index (ADR-0045 P2).
         """
         ...
 
@@ -113,6 +117,7 @@ class InMemoryObservationRepository:
         limit: int | None = None,
         offset: int = 0,
         newest_first: bool = False,
+        source: SourceType | None = None,
     ) -> list[Observation]:
         superseded = {
             o.revises_id
@@ -124,6 +129,7 @@ class InMemoryObservationRepository:
             for o in self._observations
             if o.patient_id == patient_id
             and (code is None or o.code == code)
+            and (source is None or o.source == source)
             and counts_toward_analysis(o.status)
             and o.id not in superseded
             and (since is None or _aware(o.effective_at) >= since)

@@ -18,9 +18,16 @@ import type {
   EmrConnectStartOut,
   EmrProviderOut,
   EmrPullOut,
+  EventIn,
+  EventList,
+  EventOut,
   ExportOut,
   InvitationOut,
   LoginIn,
+  MedicationChangeIn,
+  MedicationChangeOut,
+  MedicationLog,
+  MedicationRegisterIn,
   MeOut,
   ObservationPage,
   PanelOut,
@@ -111,6 +118,58 @@ export function uploadBiomechReport(file: File): Promise<BiomechImportOut> {
   const formData = new FormData();
   formData.append('file', file);
   return request<BiomechImportOut>('/biomech/reports', { method: 'POST', formData });
+}
+
+// ---- medications & between-visit events/notes (ADR-0045 P2) ----
+
+/**
+ * Idempotency key for one compose action (ADR-0045 P2). The client mints it so a single
+ * network retry (e.g. the 401-refresh replay in client.ts, which resends the SAME serialized
+ * body) folds to a graceful `add_if_absent` skip; a fresh user submission is a fresh action.
+ */
+function clientEntryId(): string {
+  return crypto.randomUUID();
+}
+
+/** Register a NEW medication/supplement — the server mints `med:{uuid}` and writes the
+ * `added` entry. Patient role only, capability-gated (`ingest_medications`, 409 when off). */
+export function postMedication(
+  body: Omit<MedicationRegisterIn, 'client_entry_id'>,
+): Promise<MedicationChangeOut> {
+  return request<MedicationChangeOut>('/medications', {
+    method: 'POST',
+    body: { ...body, client_entry_id: clientEntryId() },
+  });
+}
+
+/** Append a `dose_changed` or `stopped` entry to an existing medication's log. 404 (never
+ * 403) when the patient owns no medication with this id (no existence leak). */
+export function postMedicationChange(
+  medicationId: string,
+  body: Omit<MedicationChangeIn, 'client_entry_id'>,
+): Promise<MedicationChangeOut> {
+  return request<MedicationChangeOut>(`/medications/${encodeURIComponent(medicationId)}/changes`, {
+    method: 'POST',
+    body: { ...body, client_entry_id: clientEntryId() },
+  });
+}
+
+/** The patient's folded current medication list + per-med change log, active-first. PHI. */
+export function getMedications(): Promise<MedicationLog> {
+  return request<MedicationLog>('/medications');
+}
+
+/** Record one between-visit event/note. Capability-gated (`ingest_events`, 409 when off). */
+export function postEvent(body: Omit<EventIn, 'client_entry_id'>): Promise<EventOut> {
+  return request<EventOut>('/events', {
+    method: 'POST',
+    body: { ...body, client_entry_id: clientEntryId() },
+  });
+}
+
+/** The patient's between-visit events & notes, newest-first. PHI. */
+export function getEvents(): Promise<EventList> {
+  return request<EventList>('/events');
 }
 
 // ---- wearable/phone mobility import (ADR-0035 Phase 1) ----

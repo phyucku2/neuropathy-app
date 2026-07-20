@@ -809,7 +809,9 @@ h2 {
   margin-bottom: 6px;
 }
 
-.field input {
+.field input,
+.field select,
+.field textarea {
   width: 100%;
   font-family: var(--font-body);
   font-size: var(--text-body);
@@ -821,7 +823,14 @@ h2 {
   min-height: var(--min-touch-target);
 }
 
-.field input:focus {
+.field textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.field input:focus,
+.field select:focus,
+.field textarea:focus {
   outline: 2px solid var(--color-brand-blue-bright);
   outline-offset: 1px;
 }
@@ -1057,6 +1066,40 @@ h2 {
   padding: 12px 14px;
   font-size: var(--text-small);
   margin: 12px 0;
+}
+
+/*
+ * Persistent between-visit emergency banner (ADR-0045 P2). Always visible, non-dismissible on
+ * the note/event compose surface: the note channel is NOT monitored in real time. Reuses the
+ * verified danger pair from .form-error (#8f2d37 on #faeaec) with a heavier left rule for
+ * emphasis, so no new unverified color pair is introduced.
+ */
+.emergency-banner {
+  background: #faeaec;
+  border: 1px solid var(--color-status-danger);
+  border-left: 6px solid var(--color-status-danger);
+  color: #8f2d37;
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  font-size: var(--text-small);
+  margin: 0 0 var(--space-md);
+}
+
+.emergency-banner b {
+  font-weight: 700;
+}
+
+/* Medication / event change log: a compact, dated, provenance-labelled history list. */
+.log-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.log-list li {
+  padding: 8px 0;
+  border-top: 1px solid var(--color-border);
+  font-size: var(--text-small);
 }
 
 /* Order renewal (ADR-0013): the date is a supporting note, warn-toned. */

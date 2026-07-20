@@ -69,12 +69,63 @@ describe('VisitSummaryView', () => {
     expect(screen.getByRole('heading', { name: 'Activity & glucose' })).toBeInTheDocument();
     expect(screen.getByText(/24 readings\. Average 6\.8 \(range 6\.1–7\.6\)/)).toBeInTheDocument();
 
-    // Placeholder rows (render-only), all "Not yet tracked".
-    expect(screen.getByText('Medications & supplements')).toBeInTheDocument();
-    expect(screen.getAllByText('Not yet tracked')).toHaveLength(4);
+    // Placeholder rows (render-only) — medications & patient notes are now CAPTURED (P2), so
+    // only emr_notes + nutrition remain "Not yet tracked".
+    expect(screen.getAllByText('Not yet tracked')).toHaveLength(2);
+    expect(screen.getByText('EMR clinician notes')).toBeInTheDocument();
+    expect(screen.getByText('Nutrition')).toBeInTheDocument();
 
     // The disclosure honesty sheet label.
     expect(screen.getByText(new RegExp(VISIT_SUMMARY_SHEET_LABEL))).toBeInTheDocument();
+  });
+
+  it('renders the captured medications & patient-notes sections and the what-changed medication delta (P2)', () => {
+    renderView(VISIT_SUMMARY);
+
+    // Medications section: folded current state with a kind chip, active/stopped, dose, and the
+    // "You entered" provenance chip (never a device/lab claim).
+    const meds = screen
+      .getByRole('heading', { name: 'Medications & supplements' })
+      .closest('section');
+    expect(meds).not.toBeNull();
+    expect(within(meds as HTMLElement).getByText('Alpha-lipoic acid')).toBeInTheDocument();
+    expect(within(meds as HTMLElement).getByText('Supplement')).toBeInTheDocument();
+    expect(within(meds as HTMLElement).getByText('Active')).toBeInTheDocument();
+    expect(within(meds as HTMLElement).getByText('Stopped')).toBeInTheDocument();
+    expect(within(meds as HTMLElement).getByText(/Current dose: 600 mg/)).toBeInTheDocument();
+    expect(within(meds as HTMLElement).getAllByText('You entered').length).toBeGreaterThan(0);
+
+    // Patient notes & events section: the fall with its verbatim note under the "own words" label.
+    const notes = screen
+      .getByRole('heading', { name: 'Patient notes & events' })
+      .closest('section');
+    expect(notes).not.toBeNull();
+    expect(within(notes as HTMLElement).getByText('Fall')).toBeInTheDocument();
+    expect(
+      within(notes as HTMLElement).getByText(/Lost my balance stepping off the curb/),
+    ).toBeInTheDocument();
+    expect(within(notes as HTMLElement).getByText(/In their own words:/)).toBeInTheDocument();
+
+    // What-changed medication delta (descriptive only): names what was recorded, no advice.
+    const whatChanged = screen
+      .getByRole('heading', { name: 'Medications recorded this window' })
+      .closest('.handout-change');
+    expect(whatChanged).not.toBeNull();
+    expect(
+      within(whatChanged as HTMLElement).getByText(/Dose changed \(600 mg\)/),
+    ).toBeInTheDocument();
+  });
+
+  it('renders the medication & event data-completeness questions (P2)', () => {
+    renderView(VISIT_SUMMARY);
+    const questions = screen.getByRole('heading', { name: 'Questions to ask' }).closest('section');
+    expect(questions).not.toBeNull();
+    expect(
+      within(questions as HTMLElement).getByText(/confirm it's reflected in the chart/),
+    ).toBeInTheDocument();
+    expect(
+      within(questions as HTMLElement).getByText(/review them with the patient/),
+    ).toBeInTheDocument();
   });
 
   it('renders the data-completeness question and NO change-pointed question by default', () => {

@@ -14,6 +14,7 @@ from app.api.routes import (
     health,
     ingestion,
     me,
+    medications,
     ops,
     trajectory,
 )
@@ -24,6 +25,7 @@ api_router.include_router(auth.router)
 api_router.include_router(me.router)
 api_router.include_router(emr.router)
 api_router.include_router(ingestion.router)
+api_router.include_router(medications.router)
 api_router.include_router(biomech.router)
 api_router.include_router(trajectory.router)
 api_router.include_router(ops.router)

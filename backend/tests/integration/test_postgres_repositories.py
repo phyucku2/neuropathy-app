@@ -468,6 +468,116 @@ async def test_patient_capability_repository_upsert_round_trip(
         assert await repo.list_for_patient(uuid.uuid4()) == []
 
 
+async def test_medication_and_event_source_scoped_reads_and_append_only(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """The source-scoped read (ix_observation_patient_source_time) returns only the named
+    source, and the medication change log persists append-only across add_if_absent — a
+    retry of the same client_entry_id skips via uq_observation_patient_import_key, while a
+    genuine second change (distinct key) endures (ADR-0045 P2)."""
+    from datetime import date
+
+    from app.ingestion.events import event_import_key, event_to_observation
+    from app.ingestion.medications import (
+        medication_change_to_observation,
+        medication_import_key,
+        medication_register_to_observation,
+        mint_medication_id,
+    )
+    from app.models.observation import SourceType
+    from app.schemas.event import EventIn, EventType
+    from app.schemas.medication import (
+        MedicationChangeIn,
+        MedicationChangeType,
+        MedicationKind,
+        MedicationRegisterIn,
+    )
+
+    now = datetime.now(UTC)
+    async with session_factory() as session:
+        patient_id = await _new_patient(session)
+        repo = PostgresObservationRepository(session)
+        med_id = mint_medication_id()
+        retry_cid = uuid.uuid4()
+
+        added = medication_register_to_observation(
+            MedicationRegisterIn(
+                name="Gabapentin",
+                kind=MedicationKind.prescription,
+                dose_amount=300.0,
+                dose_unit="mg",
+                started_on=date(2026, 5, 1),
+                client_entry_id=retry_cid,
+            ),
+            patient_id=patient_id,
+            medication_id=med_id,
+            import_key=medication_import_key(retry_cid),
+            recorded_at=now,
+        )
+        assert await repo.add_if_absent(added) is True
+        # A dose change is its OWN append-only row (distinct key) — the log, not a correction.
+        changed = medication_change_to_observation(
+            MedicationChangeIn(
+                change_type=MedicationChangeType.dose_changed,
+                dose_amount=600.0,
+                dose_unit="mg",
+                effective_date=date(2026, 6, 15),
+                client_entry_id=uuid.uuid4(),
+            ),
+            patient_id=patient_id,
+            medication_id=med_id,
+            display="Gabapentin",
+            kind="prescription",
+            prescriber=None,
+            import_key=medication_import_key(uuid.uuid4()),
+            recorded_at=now,
+        )
+        assert await repo.add_if_absent(changed) is True
+        # An event row of a different source.
+        event = event_to_observation(
+            EventIn(
+                type=EventType.fall, effective_date=date(2026, 6, 20), client_entry_id=uuid.uuid4()
+            ),
+            patient_id=patient_id,
+            import_key=event_import_key(uuid.uuid4()),
+            recorded_at=now,
+        )
+        assert await repo.add_if_absent(event) is True
+        await session.commit()
+
+    async with session_factory() as session:
+        repo = PostgresObservationRepository(session)
+        # Source-scoped read returns ONLY that source (both med rows, append-only log intact).
+        meds = await repo.list_for_patient(patient_id, source=SourceType.medication)
+        assert {r.code for r in meds} == {med_id}
+        assert len(meds) == 2  # added + dose_changed both endure (the log)
+        assert all(r.revises_id is None for r in meds)  # none supersedes another
+        events = await repo.list_for_patient(patient_id, source=SourceType.event)
+        assert [r.code for r in events] == ["event_fall"]
+
+        # A retry of the `added` entry (same client_entry_id -> same import_key) skips.
+        retry = medication_register_to_observation(
+            MedicationRegisterIn(
+                name="Gabapentin",
+                kind=MedicationKind.prescription,
+                dose_amount=300.0,
+                dose_unit="mg",
+                started_on=date(2026, 5, 1),
+                client_entry_id=retry_cid,
+            ),
+            patient_id=patient_id,
+            medication_id=mint_medication_id(),
+            import_key=medication_import_key(retry_cid),
+            recorded_at=now,
+        )
+        assert await repo.add_if_absent(retry) is False
+        await session.commit()
+
+    async with session_factory() as session:
+        repo = PostgresObservationRepository(session)
+        assert len(await repo.list_for_patient(patient_id, source=SourceType.medication)) == 2
+
+
 def _autogenerate_diff(connection: Connection) -> list[object]:
     context = MigrationContext.configure(connection)
     return list(compare_metadata(context, Base.metadata))
