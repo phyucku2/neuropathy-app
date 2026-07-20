@@ -79,6 +79,32 @@ aspires to.
 
 ## 1. Epic
 
+> **✅ Status (2026-07-19): the app IS registered in the Epic sandbox** (app name "Advanced
+> Health and Wellness Group", **Draft** state — which is the normal, correct state for a
+> non-production/sandbox app). The **Non-Production Client ID** was issued and wired into the
+> live backend (`SMART_CLIENT_ID_EPIC`, via env on the staging deployment — value is env-only,
+> never committed). The settings that worked on the "Create an App" form:
+> - **Application Audience:** Patients · **Automatic Client Distribution:** None (USCDI v1 is
+>   the production auto-distribution lever, revisit at go-live)
+> - **Incoming APIs:** `Observation.Read (Labs) (R4)` only (matches `patient/Observation.read`
+>   + the `category=laboratory` query — least privilege)
+> - **SMART on FHIR Version:** R4 · **SMART Scope Version:** SMART v1 · **FHIR ID Scheme:**
+>   Unconstrained · **Confidential Client:** **unchecked** (we are a PUBLIC/PKCE client) ·
+>   **Dynamic Clients:** unchecked
+> - **Endpoint URI (redirect):** the **public frontend** origin + `/emr/callback` (byte-exact),
+>   NOT the internal backend — the browser lands on the frontend, whose nginx proxies
+>   `/emr/callback` to the backend (ADR-0028 / deploy-azure §8a).
+> - Saved with **"Save & Ready for Sandbox"** (NOT production — production is irreversible and
+>   makes the app un-editable + customer-visible).
+>
+> **⚠️ The ~1-hour sync gotcha (verified live):** immediately after registering/wiring the
+> client, an Epic authorize attempt returns **"OAuth2 Error — Something went wrong trying to
+> authorize the client."** This is Epic's sandbox client-sync lag (records sync on a schedule,
+> ~1h), **not** a bug — our authorize request was verified to carry the correct
+> `client_id`/`redirect_uri`/`scope`/`aud`/PKCE. Wait ~1h and retry the same Connect flow.
+> **Production checklist still open:** Terms & Conditions secure URL, Privacy/disclosure URL,
+> the 2 Data Use Questionnaires, screenshots + thumbnail, accepting open.epic terms of use.
+
 ### 1.1 Program signup
 
 - **Portal:** [fhir.epic.com](https://fhir.epic.com/) ("Epic on FHIR"). Create a
