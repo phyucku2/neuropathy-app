@@ -19,6 +19,7 @@ import { DownloadDataCard } from './DownloadDataCard';
 import { EmrConnectCard } from './EmrConnectCard';
 import { RecordsLinkCard } from './RecordsLinkCard';
 import { ReminderCard } from './ReminderCard';
+import { VisitSummaryLinkCard } from './VisitSummaryLinkCard';
 
 const CAPABILITY_ICONS: Record<string, { glyph: string; color: string }> = {
   ingest_biomech: { glyph: '◔', color: 'var(--color-brand-blue)' },
@@ -200,6 +201,9 @@ export function SettingsPage() {
           connection card, since the connection is what brings the record in. Not a
           sixth nav tab (ADR-0039: five is the accessible max). */}
       <RecordsLinkCard />
+      {/* Visit-Ready Summary (ADR-0045): the printable appointment handout, grouped with the
+          other take-your-data-out affordances, above the danger zone. */}
+      <VisitSummaryLinkCard />
       {/* Right-of-access export (ADR-0031): the safe counterpart to deletion, placed
           ABOVE the danger zone and clearly separated from it. */}
       <DownloadDataCard />

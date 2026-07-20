@@ -21,7 +21,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi.responses import JSONResponse
 
 from app.api.deps import (
@@ -32,6 +32,8 @@ from app.api.deps import (
     OpsUserDep,
 )
 from app.api.routes.ingestion import observation_to_item
+from app.api.routes.me import _validate_window
+from app.core.config import settings
 from app.models.audit import AuditEvent
 from app.models.connection import ClinicConnection
 from app.schemas.clinic import (
@@ -44,10 +46,12 @@ from app.schemas.clinic import (
 )
 from app.schemas.ingestion import ObservationPage
 from app.schemas.trajectory import Trajectory
+from app.schemas.visit_summary import DEFAULT_WINDOW_DAYS, VisitSummary
 from app.services.auth import AuthApiError
 from app.services.clinic import ClinicService
 from app.services.rate_limit import RateLimitExceededError
 from app.services.trajectory import compute_patient_trajectory
+from app.services.visit_summary import build_visit_summary
 
 router = APIRouter(prefix="/clinic", tags=["clinic"])
 
@@ -203,6 +207,46 @@ async def patient_trajectory(
         )
     )
     return trajectory
+
+
+@router.get("/patients/{patient_id}/visit-summary", response_model=VisitSummary)
+async def patient_visit_summary(
+    patient_id: uuid.UUID,
+    current: ClinicianUserDep,
+    service: ClinicServiceDep,
+    response: Response,
+    window: Annotated[int, Query()] = DEFAULT_WINDOW_DAYS,
+) -> VisitSummary:
+    """The consented patient's Visit-Ready Summary — the SAME assembly and data the
+    patient's own print answers from (services/visit_summary.py), never the AI narrator
+    (ADR-0012: `narrative_source` stays "deterministic"). 404 — never 403 — without a
+    consented connection. `now` is resolved once here; the body is PHI, so `no-store`."""
+    connection = await _consented_connection(service, current, patient_id)
+    _validate_window(window)
+    response.headers["Cache-Control"] = "no-store"
+    now = datetime.now(UTC)
+    summary, observation_count = await build_visit_summary(
+        service.observations,
+        patient_id,
+        window=window,
+        now=now,
+        include_change_questions=settings.include_change_questions,
+    )
+    # PHI read — clinician as actor, patient as subject, counts only + the connection ref.
+    await service.audit.add(
+        AuditEvent(
+            actor_id=current.user_id,
+            actor_role=current.role.value,
+            action="read_visit_summary",
+            patient_id=patient_id,
+            detail={
+                "observations": observation_count,
+                "window_days": window,
+                "connection_id": str(connection.id),
+            },
+        )
+    )
+    return summary
 
 
 @router.get("/patients/{patient_id}/observations", response_model=ObservationPage)

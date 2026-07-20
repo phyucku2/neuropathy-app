@@ -79,6 +79,145 @@ export interface Trajectory {
   data_is_stale: boolean;
 }
 
+// ---- visit_summary.py (ADR-0045 — the Visit-Ready Summary / clinician handout) ----
+
+/** LeadSection — which section leads the page, computed from the window (never branched
+ *  in the UI). Short windows (30/60/90) lead with the diff; 120/365 lead with the trend. */
+export type LeadSection = 'what_changed' | 'trajectory';
+
+/** SparkPoint — one plotted datum for a dependency-free sparkline. */
+export interface SparkPoint {
+  at: string;
+  value: number;
+}
+
+/** TrendSeries — a windowed series for one signal: sparkline points + start→now, sourced.
+ *  `direction` is the trajectory engine's per-signal judgment (reused, never a new stat). */
+export interface TrendSeries {
+  code: string;
+  label: string;
+  source: string;
+  origin: string;
+  points: SparkPoint[];
+  start_value: number | null;
+  start_at: string | null;
+  latest_value: number | null;
+  latest_at: string | null;
+  direction: Direction;
+}
+
+/** PriorDelta — latest-in-window vs latest-before-window for one signal (e.g. BioMech).
+ *  `direction` is the polarity-judged step prior→latest (`insufficient_data` with no prior). */
+export interface PriorDelta {
+  code: string;
+  label: string;
+  source: string;
+  origin: string;
+  latest_value: number | null;
+  latest_at: string | null;
+  prior_value: number | null;
+  prior_at: string | null;
+  direction: Direction;
+}
+
+/** LabDelta — most-recent-per-analyte vs the prior value, UNIT-SAFE (ADR-0015). `delta` is
+ *  null whenever the prior is absent OR its unit differs (no cross-unit subtraction, ever);
+ *  `unit_changed` flags the latter so the UI can say so rather than silently drop it. */
+export interface LabDelta {
+  code: string;
+  label: string;
+  source: string;
+  origin: string;
+  unit: string | null;
+  latest_value: number | null;
+  latest_at: string | null;
+  prior_value: number | null;
+  prior_at: string | null;
+  prior_unit: string | null;
+  delta: number | null;
+  unit_changed: boolean;
+}
+
+/** ActivityStat — wearable / CGM summary statistics only (count + mean/min/max). */
+export interface ActivityStat {
+  code: string;
+  label: string;
+  source: string;
+  origin: string;
+  count: number;
+  mean: number | null;
+  min: number | null;
+  max: number | null;
+  latest_at: string | null;
+}
+
+/** AdherenceGap — check-in adherence facts: recency of the last ADL check-in + per-window counts. */
+export interface AdherenceGap {
+  last_checkin_at: string | null;
+  days_since_last_checkin: number | null;
+  checkins_in_window: number;
+  checkins_in_prior_window: number;
+}
+
+/** SymptomTrendChange — a symptom's current-window trend direction vs the prior window's. */
+export interface SymptomTrendChange {
+  code: string;
+  label: string;
+  source: string;
+  origin: string;
+  current_direction: Direction;
+  prior_direction: Direction;
+  changed: boolean;
+}
+
+/** WhatChanged — the window's deterministic diff against the prior window (the diff, not the dump). */
+export interface WhatChanged {
+  new_labs: LabDelta[];
+  symptom_trend: SymptomTrendChange[];
+  adherence: AdherenceGap;
+  latest_biomech: PriorDelta[];
+}
+
+/** QuestionsToAsk — change-surfacing prompts about the patient's own data, templates never
+ *  advice. `change_pointed` is EMPTY unless the backend feature flag is on (FDA D2 gate). */
+export interface QuestionsToAsk {
+  data_completeness: string[];
+  change_pointed: string[];
+}
+
+/** PlaceholderRow — a forward-stable layout row for a section not yet captured (render-only, P1). */
+export interface PlaceholderRow {
+  key: string;
+  label: string;
+  status: 'not_yet_tracked';
+  phase: string;
+}
+
+/** VisitSummary — the Visit-Ready Summary envelope for one patient over one window (ADR-0045 P1).
+ *  It carries PHI by design and is served no-store; it makes NO clinical claim — each datum is
+ *  labeled with source + origin + date, and the disclaimer/sheet-label ride in the envelope. */
+export interface VisitSummary {
+  generated_at: string;
+  schema_version: string;
+  subject_id: string;
+  window_days: number;
+  window_end: string;
+  current_window_start: string;
+  prior_window_start: string;
+  lead_section: LeadSection;
+  status: Trajectory;
+  what_changed: WhatChanged;
+  symptoms: TrendSeries[];
+  function: TrendSeries[];
+  balance_gait: PriorDelta[];
+  labs: LabDelta[];
+  activity: ActivityStat[];
+  placeholders: PlaceholderRow[];
+  questions: QuestionsToAsk;
+  disclaimer: string;
+  sheet_label: string;
+}
+
 // ---- ingestion.py ----
 
 /** ObservationItem */

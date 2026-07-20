@@ -28,6 +28,7 @@ import {
   TEST_REFRESH_TOKEN,
   TEST_REFRESHED_ACCESS_TOKEN,
   TRAJECTORY_IMPROVING,
+  visitSummaryForWindow,
 } from './fixtures';
 
 export function isAuthorized(request: Request): boolean {
@@ -113,6 +114,19 @@ export const handlers = [
   http.get('/me/export', ({ request }) =>
     isAuthorized(request) ? HttpResponse.json(EXPORT) : unauthorized(),
   ),
+
+  // Visit-Ready Summary (ADR-0045): the patient-held handout over a selectable window. The
+  // mock echoes window_days and computes lead_section exactly like the backend so the picker
+  // changes the payload; Cache-Control: no-store mirrors the real PHI response.
+  http.get('/me/visit-summary', ({ request }) => {
+    if (!isAuthorized(request)) {
+      return unauthorized();
+    }
+    const window = Number(new URL(request.url).searchParams.get('window') ?? '60');
+    return HttpResponse.json(visitSummaryForWindow(window), {
+      headers: { 'Cache-Control': 'no-store' },
+    });
+  }),
 
   http.get('/trajectory', ({ request }) =>
     isAuthorized(request) ? HttpResponse.json(TRAJECTORY_IMPROVING) : unauthorized(),
@@ -278,6 +292,21 @@ export const handlers = [
     return params['patientId'] === PANEL_PATIENT_ID
       ? HttpResponse.json(TRAJECTORY_IMPROVING)
       : patientNotFound();
+  }),
+
+  // Clinician-side Visit-Ready Summary (ADR-0045): SAME shape/data as the patient print,
+  // behind the consented-connection gate → non-enumerating 404 for any other id.
+  http.get('/clinic/patients/:patientId/visit-summary', ({ request, params }) => {
+    if (!isAuthorized(request)) {
+      return unauthorized();
+    }
+    if (params['patientId'] !== PANEL_PATIENT_ID) {
+      return patientNotFound();
+    }
+    const window = Number(new URL(request.url).searchParams.get('window') ?? '60');
+    return HttpResponse.json(visitSummaryForWindow(window), {
+      headers: { 'Cache-Control': 'no-store' },
+    });
   }),
 
   http.get('/clinic/patients/:patientId/observations', ({ request, params }) => {

@@ -56,6 +56,13 @@ class Settings(BaseSettings):
     ai_azure_api_version: str = "2024-10-21"  # a GA data-plane version; override as needed
     ocr_provider: str | None = None
 
+    # Visit-Ready Summary (ADR-0045). The change-pointed "questions to ask" edge toward
+    # decision support and are HELD for the FDA D2 opinion (ADR-0041, ADR-0045 open
+    # question #2): OFF by default, so Phase 1 renders only the clearly-safe
+    # data-completeness prompts. Flip ON only after owner/D2 sign-off. Deterministic
+    # either way — the flag never routes anything through the AI narrator.
+    include_change_questions: bool = False
+
     jwt_secret: str | None = None
 
     # FIRST-OPS bootstrap token (ADR-0019 narrows ADR-0012/0017's role). It no longer

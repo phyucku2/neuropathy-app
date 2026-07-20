@@ -218,6 +218,42 @@ def test_observations_persist_and_flow_through_the_trajectory_api(db_url: str) -
 
 
 @requires_postgres
+def test_observations_flow_through_the_visit_summary_api(db_url: str) -> None:
+    """Repository-ingested observations flow through GET /me/visit-summary and the PHI
+    read is durably audited (ADR-0045, mirrors the trajectory persist test).
+
+    The visit-summary rides the function-path assembly (services/visit_summary.py) — it
+    adds NO lru_cache singleton to deps.py, so no _reset_process_singletons change is
+    needed. Assert that explicitly: the deps module gained no new cached provider.
+    """
+    # The function path is stateless: no new process-level singleton was introduced.
+    assert not hasattr(deps, "_default_visit_summary_service")
+
+    email = f"summary-{uuid.uuid4().hex[:12]}@example.com"
+    with TestClient(create_app()) as client:
+        tokens = _register(client, email, SYNTHETIC_PASSWORD)
+        me = client.get("/auth/me", headers=_auth_header(tokens["access_token"]))
+        patient_id = uuid.UUID(me.json()["patient_id"])
+        user_id = uuid.UUID(me.json()["user_id"])
+
+        asyncio.run(_seed_observations(db_url, patient_id))
+
+        resp = client.get("/me/visit-summary", headers=_auth_header(tokens["access_token"]))
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["window_days"] == 60
+        assert body["subject_id"] == str(patient_id)
+        # The seeded HbA1c series read back as a labs delta (source + date labeled).
+        lab_codes = {lab["code"] for lab in body["labs"]}
+        assert "4548-4" in lab_codes
+        assert resp.headers.get("cache-control") == "no-store"
+
+    # The PHI read was committed by the request-scoped transaction and is durable.
+    events = asyncio.run(_audit_events(db_url, patient_id))
+    assert ("read_visit_summary", user_id) in events
+
+
+@requires_postgres
 def test_duplicate_email_rolls_back_and_stays_registrable_once(db_url: str) -> None:
     """The request-scoped transaction maps a unique violation to 409 (no half-writes)."""
     email = f"dup-{uuid.uuid4().hex[:12]}@example.com"
