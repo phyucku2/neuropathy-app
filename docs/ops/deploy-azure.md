@@ -494,3 +494,64 @@ resolve §7.1.
   (`docs/ops/backup-restore.md`).
 - **Log Analytics** — app logs are engineered PHI-free (ADR-0018 §4), but the workspace is in
   BAA scope; confirm Azure Monitor is covered (§0).
+
+## 10. CI/CD — automated deploy (GitHub Actions + Azure OIDC)
+
+`.github/workflows/deploy.yml` removes the manual Cloud Shell step: it builds the SHA-tagged
+images, pushes them to ACR, runs the migration **job first** (§6), then rolls the **backend** and
+**frontend** Container Apps to the new image and verifies health. Auth is **Azure OIDC (a
+federated credential)** — no long-lived cloud secret is stored in the repo.
+
+`build-images.yml` remains for build-only (produce images without deploying). Full-Bicep infra
+changes still go through §5 (`az deployment group create`); `deploy.yml` is for routine
+code/image rollouts.
+
+### 10.1 One-time setup — federated credential (no stored cloud secret)
+
+```sh
+RG=neuropathy-rg2                      # your resource group
+REPO=phyucku2/neuropathy-app           # owner/repo
+
+# 1. App registration + service principal
+APP_ID=$(az ad app create --display-name "neuropathy-gh-deploy" --query appId -o tsv)
+az ad sp create --id "$APP_ID"
+
+# 2. Federated credentials — one per trigger you use.
+#    workflow_dispatch runs on a branch ref, so authorize the branch you dispatch from:
+az ad app federated-credential create --id "$APP_ID" --parameters '{
+  "name":"gh-main","issuer":"https://token.actions.githubusercontent.com",
+  "subject":"repo:'"$REPO"':ref:refs/heads/main",
+  "audiences":["api://AzureADTokenExchange"]}'
+#    (add another with subject repo:<REPO>:ref:refs/heads/<your-deploy-branch> if you dispatch
+#     from a non-main branch, or repo:<REPO>:environment:<env> if you gate on an Environment.)
+
+# 3. Grant Contributor on the resource group only (least privilege)
+SUB=$(az account show --query id -o tsv)
+az role assignment create --assignee "$APP_ID" --role Contributor \
+  --scope "/subscriptions/$SUB/resourceGroups/$RG"
+
+# 4. Values you'll paste into GitHub:
+echo "AZURE_CLIENT_ID=$APP_ID"
+echo "AZURE_TENANT_ID=$(az account show --query tenantId -o tsv)"
+echo "AZURE_SUBSCRIPTION_ID=$SUB"
+```
+
+### 10.2 Repo configuration (Settings → Secrets and variables → Actions)
+
+**Secrets:** `ACR_LOGIN_SERVER`, `ACR_USERNAME`, `ACR_PASSWORD` (as in §2.1), plus
+`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` (from step 4 above).
+
+**Variables:** `AZURE_RESOURCE_GROUP` (e.g. `neuropathy-rg2`); optional `NAME_PREFIX`
+(default `neuropathy`); optional `FRONTEND_FQDN` (the frontend `*.azurecontainerapps.io` host —
+when set, the workflow health-checks `https://<FRONTEND_FQDN>/healthz` after rolling).
+
+### 10.3 Deploy
+
+Actions → **Deploy to Azure (Container Apps)** → **Run workflow** (leave *tag* blank to use the
+current commit SHA). To auto-deploy on every merge, uncomment the `push: branches: [main]`
+trigger in `deploy.yml`.
+
+**Note:** the migration job is discovered by name (`*migrat*`) and its image is bumped to the new
+tag before it runs, so schema migrations apply before the backend serves the new code. The deploy
+is image-roll only — it does **not** re-provision Postgres/networking (use §5 for infra changes),
+and it never sets application secrets (those already live on the apps / in Bicep params).

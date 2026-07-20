@@ -1,0 +1,155 @@
+name: Deploy to Azure (Container Apps)
+
+# End-to-end deploy with NO manual Cloud Shell step: build the SHA-tagged images, push
+# them to ACR, run DB migrations (job first, per docs/ops/deploy-azure.md §6), then roll
+# the backend and frontend Container Apps to the new image, and verify health.
+#
+# Auth is Azure OIDC (a federated credential) — NO long-lived cloud secret in the repo.
+# One-time setup is documented in docs/ops/deploy-azure.md §10.
+#
+# Required repo SECRETS:  ACR_LOGIN_SERVER, ACR_USERNAME, ACR_PASSWORD,
+#                         AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID
+# Required repo VARIABLES: AZURE_RESOURCE_GROUP (e.g. neuropathy-rg2)
+#                         NAME_PREFIX (optional, default "neuropathy")
+#                         FRONTEND_FQDN (optional; when set, the health check runs)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to build & deploy (blank = short commit SHA)"
+        required: false
+        default: ""
+  # To auto-deploy every merge to the default branch, uncomment:
+  # push:
+  #   branches: [main]
+
+concurrency:
+  group: deploy-azure
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    name: Build, migrate, and roll Container Apps
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # required for Azure OIDC login
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve image tag
+        id: meta
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          TAG="$INPUT_TAG"
+          [ -z "$TAG" ] && TAG="$(git rev-parse --short HEAD)"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Deploying tag: $TAG"
+
+      # --- Build & push both images (same pattern as build-images.yml) ---
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to Azure Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.ACR_LOGIN_SERVER }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+      - name: Build & push backend
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          file: backend/Dockerfile
+          push: true
+          tags: ${{ secrets.ACR_LOGIN_SERVER }}/neuropathy-backend:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+      - name: Build & push frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          file: frontend/Dockerfile
+          push: true
+          tags: ${{ secrets.ACR_LOGIN_SERVER }}/neuropathy-frontend:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
+
+      # --- Deploy ---
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Run DB migrations (job first, per deploy-azure.md §6)
+        uses: azure/cli@v2
+        env:
+          RG: ${{ vars.AZURE_RESOURCE_GROUP }}
+          PREFIX: ${{ vars.NAME_PREFIX || 'neuropathy' }}
+          ACR: ${{ secrets.ACR_LOGIN_SERVER }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        with:
+          inlineScript: |
+            set -euo pipefail
+            az config set extension.use_dynamic_install=yes_without_prompt
+            JOB=$(az containerapp job list -g "$RG" --query "[?contains(name, 'migrat')].name | [0]" -o tsv)
+            if [ -z "$JOB" ]; then echo "No migration job found — skipping migrations."; exit 0; fi
+            echo "Migration job: $JOB"
+            az containerapp job update -n "$JOB" -g "$RG" --image "$ACR/${PREFIX}-backend:$TAG" -o none
+            EXEC=$(az containerapp job start -n "$JOB" -g "$RG" --query name -o tsv)
+            echo "Started migration execution: $EXEC"
+            for _ in $(seq 1 40); do
+              STATUS=$(az containerapp job execution show -n "$JOB" -g "$RG" \
+                --job-execution-name "$EXEC" --query "properties.status" -o tsv 2>/dev/null || echo "Unknown")
+              echo "  migration status: $STATUS"
+              case "$STATUS" in
+                Succeeded) echo "Migrations OK"; break ;;
+                Failed|Degraded) echo "::error::Migration job failed ($STATUS)"; exit 1 ;;
+              esac
+              sleep 15
+            done
+
+      - name: Roll backend, then frontend, to the new image
+        uses: azure/cli@v2
+        env:
+          RG: ${{ vars.AZURE_RESOURCE_GROUP }}
+          PREFIX: ${{ vars.NAME_PREFIX || 'neuropathy' }}
+          ACR: ${{ secrets.ACR_LOGIN_SERVER }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        with:
+          inlineScript: |
+            set -euo pipefail
+            az config set extension.use_dynamic_install=yes_without_prompt
+            az containerapp update -n "${PREFIX}-backend"  -g "$RG" --image "$ACR/${PREFIX}-backend:$TAG"  -o none
+            az containerapp update -n "${PREFIX}-frontend" -g "$RG" --image "$ACR/${PREFIX}-frontend:$TAG" -o none
+            echo "Rolled ${PREFIX}-backend and ${PREFIX}-frontend to $TAG"
+
+      - name: Verify frontend health
+        if: ${{ vars.FRONTEND_FQDN != '' }}
+        env:
+          FRONTEND_FQDN: ${{ vars.FRONTEND_FQDN }}
+        run: |
+          set -e
+          for _ in 1 2 3 4 5 6; do
+            code=$(curl -fsS -o /dev/null -w '%{http_code}' "https://${FRONTEND_FQDN}/healthz" || true)
+            echo "healthz: $code"
+            [ "$code" = "200" ] && { echo "Live."; exit 0; }
+            sleep 10
+          done
+          echo "::error::Health check never returned 200"; exit 1
+
+      - name: Summary
+        env:
+          RG: ${{ vars.AZURE_RESOURCE_GROUP }}
+          PREFIX: ${{ vars.NAME_PREFIX || 'neuropathy' }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          {
+            echo "### Deployed to Azure Container Apps"
+            echo ""
+            echo "- Tag: \`${TAG}\`"
+            echo "- Resource group: \`${RG}\`"
+            echo "- Rolled: \`${PREFIX}-backend\`, \`${PREFIX}-frontend\` (migrations ran first)"
+          } >> "$GITHUB_STEP_SUMMARY"
