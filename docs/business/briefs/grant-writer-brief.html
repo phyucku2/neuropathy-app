@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Neuropathy Platform — Grant Writer Brief</title>
+    <style>
+      :root {
+        --ink: #12232e; --muted: #4a5b66; --faint: #7a8a94;
+        --teal: #0e7c86; --teal-dark: #0a5c64; --teal-wash: #e7f3f4;
+        --amber-wash: #fdf4e3; --amber-line: #d9a441;
+        --line: #d7e0e3; --green: #1f8a52;
+      }
+      * { box-sizing: border-box; }
+      html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        color: var(--ink); font-size: 9.6pt; line-height: 1.46; }
+      @page { size: Letter; margin: 15mm 14mm; }
+      h1,h2,h3 { line-height: 1.2; margin: 0; }
+      p { margin: 0 0 7px; }
+      .cover { border-top: 6px solid var(--teal); padding-top: 16px; margin-bottom: 12px; }
+      .eyebrow { text-transform: uppercase; letter-spacing: .14em; font-size: 7.5pt; font-weight: 700; color: var(--teal); margin-bottom: 8px; }
+      .cover h1 { font-size: 20pt; margin-bottom: 6px; }
+      .cover .sub { font-size: 10.5pt; color: var(--muted); max-width: 54em; }
+      .meta { margin-top: 9px; font-size: 8pt; color: var(--faint); display: flex; gap: 18px; flex-wrap: wrap; }
+      h2.section { font-size: 11.5pt; color: var(--teal-dark); margin: 16px 0 4px; padding-bottom: 4px; border-bottom: 2px solid var(--teal-wash); }
+      ul { margin: 0 0 8px; padding-left: 20px; }
+      li { margin-bottom: 3px; }
+      table { width: 100%; border-collapse: collapse; margin: 6px 0 10px; font-size: 8.7pt; }
+      th, td { text-align: left; padding: 4px 7px; border-bottom: 1px solid var(--line); vertical-align: top; }
+      th { color: var(--faint); font-size: 7.5pt; text-transform: uppercase; letter-spacing: .05em; }
+      .callout { border: 1px solid var(--line); border-left: 4px solid var(--teal); background: var(--teal-wash);
+        border-radius: 6px; padding: 8px 12px; margin: 8px 0; font-size: 9pt; break-inside: avoid; }
+      .callout.amber { border-left-color: var(--amber-line); background: var(--amber-wash); }
+      .avoid-break { break-inside: avoid; }
+      code { background: #f0f4f5; border-radius: 3px; padding: 0 4px; font-size: 8.5pt; }
+      .foot { margin-top: 14px; padding-top: 7px; border-top: 1px solid var(--line); font-size: 7.4pt; color: var(--faint); }
+    </style>
+  </head>
+  <body>
+    <div class="cover">
+      <div class="eyebrow">Grant Writer Brief · Internal · Confidential</div>
+      <h1>Neuropathy Care Platform — Grant Writer Brief</h1>
+      <div class="sub">
+        The raw material for a competitive SBIR/STTR application: the unmet need, the innovation, the
+        specific aims a study could pursue, the fundable gap, and the preliminary work already done.
+        Written so a grant writer can lift claims straight into a proposal — with each claim's
+        evidentiary status marked.
+      </div>
+      <div class="meta">
+        <span><b>As of:</b> July 20, 2026</span>
+        <span><b>Targets:</b> NIH SBIR/STTR — NINDS · NIDDK · NIA · NIBIB</span>
+        <span><b>Applicant IP:</b> Advanced Health &amp; Wellness Group</span>
+      </div>
+    </div>
+
+    <div class="callout amber">
+      <b>Honesty rules for the proposal.</b> Nothing here is validated yet: the product is
+      <b>not FDA-cleared, not clinically validated, and tested on synthetic data only</b>. The
+      Neuropathy Status Index is a <b>non-diagnostic deterministic v1</b>. That is not a weakness for
+      a grant — the <i>entire point</i> of the SBIR ask is to fund the validation that does not yet
+      exist. Frame the built system as strong <b>preliminary/feasibility work</b> and the study as
+      what closes the gap. Do not assert reliability, responsiveness, MCID, or predictive accuracy the
+      company has not measured; those are the <i>aims</i>, not results.
+    </div>
+
+    <h2 class="section">1 · The unmet need (significance)</h2>
+    <ul>
+      <li><b>Diabetic peripheral neuropathy (DPN)</b> affects a large share of the diabetes population,
+        drives falls, loss of function, and loss of independence, and is <b>measured episodically and
+        crudely</b> in routine care — a monofilament test and a symptom question at an occasional visit.</li>
+      <li>Existing instruments (MNSI, NTSS-6, NPSI, Norfolk QOL-DN, Total Neuropathy Score, DN4,
+        painDETECT, PROMIS) each capture <b>one slice</b> — symptoms <i>or</i> function <i>or</i>
+        signs — and are administered as snapshots, not trajectories.</li>
+      <li>The gap the project targets: <b>no validated, longitudinal, patient-owned measure fuses
+        ADA-aligned symptom capture + objective gait/balance + labs into one explainable index</b> the
+        60+ patient can maintain daily and hand to their clinician.</li>
+    </ul>
+
+    <h2 class="section">2 · The innovation</h2>
+    <div class="callout">
+      A <b>non-diagnostic composite — the Neuropathy Status Index (NSI)</b> — that fuses four streams
+      no incumbent combines: patient-reported symptoms, objective balance/gait (device tier), phone/
+      watch mobility, and EMR labs (HbA1c), producing a <b>daily trajectory</b> with named,
+      explainable signals rather than an episodic score. The scientific innovation the SBIR would fund
+      is the <b>development-and-validation pathway</b> for this composite and the AI/ML layer
+      (adaptive testing + multimodal fusion) that could improve its precision and predictive value.
+    </div>
+
+    <h2 class="section">3 · Candidate specific aims (for the writer to shape)</h2>
+    <table class="avoid-break">
+      <thead><tr><th>Aim</th><th>What it establishes</th><th>Methodology anchor</th></tr></thead>
+      <tbody>
+        <tr><td><b>Aim 1 — Content &amp; construct validity</b></td><td>The NSI's domains map to established DPN constructs and patient-important concepts</td><td>FDA PRO guidance (2009) + PFDD series; concept elicitation, item generation, cognitive interviews; COSMIN</td></tr>
+        <tr><td><b>Aim 2 — Psychometric validation</b></td><td>Reliability, construct/criterion validity, responsiveness, and MCID of the composite</td><td>Prospective cohort; IRT/Rasch or factor-analytic weighting vs a-priori; independent biostatistician</td></tr>
+        <tr><td><b>Aim 3 — Multimodal fusion &amp; prediction</b></td><td>Whether ML fusion of symptoms + sensor gait/balance + labs improves accuracy and predicts falls/progression</td><td>Digital-biomarker literature; GMLP + Predetermined Change Control Plan for any AI/ML SaMD</td></tr>
+      </tbody>
+    </table>
+    <p>
+      A phased frame reads cleanly for reviewers: <b>deterministic v1 composite → proprietary
+      multimodal data collection → ML-optimized/adaptive v2 → prospective validation → regulatory</b>.
+      Phase I proves feasibility (Aim 1 + pilot data); Phase II runs the powered validation.
+    </p>
+
+    <h2 class="section">4 · Preliminary work already in hand (the feasibility story)</h2>
+    <ul>
+      <li><b>A working, deployed system</b> — FastAPI/Postgres backend, React web app, Android build;
+        register, check-in, longitudinal record, the NSI, and an explainable trajectory all function
+        end-to-end, now <b>live on Azure staging</b> (synthetic data).</li>
+      <li><b>A research-grade data model (ALCOA+)</b> — append-only, superseding revisions, dual
+        timestamps, full provenance (self-report / device / lab / wearable), LOINC/UCUM coding — i.e.
+        the data-integrity backbone a validation study and an FDA file require, <b>built before the
+        study, not after</b>.</li>
+      <li><b>EMR interoperability</b> — patient-authorized SMART-on-FHIR import, <b>registered with
+        Epic's sandbox</b> — evidence the lab-ingestion aim is executable, not hypothetical.</li>
+      <li><b>Measurement-science groundwork</b> — an item bank, ADA construct mapping, and IRT/CAT
+        scaffolding (ADR-0043) already laid, showing the team can execute the psychometric aims.</li>
+      <li><b>Engineering rigor unusual for the stage</b> — binding CI quality gates, an adversarial
+        internal security/function audit already run and its top findings fixed — de-risking the
+        "can this team build and maintain regulated software" question reviewers ask.</li>
+    </ul>
+
+    <h2 class="section">5 · Team, environment &amp; eligibility</h2>
+    <ul>
+      <li><b>Applicant / IP:</b> Advanced Health &amp; Wellness Group owns the IP; <b>BioMech Health</b>
+        (Frank Fornari, PhD) is the licensee and gait/balance device partner — a credible source of
+        the objective sensor stream and a domain-expert collaborator.</li>
+      <li><b>Registrations to complete before submission</b> (all on the critical path, all
+        inexpensive): SAM.gov / <b>UEI</b>, SBA Company Registry, eRA Commons, Grants.gov — plus SBIR
+        small-business eligibility confirmation.</li>
+      <li><b>Consultants to name:</b> an independent biostatistician (validation), an FDA regulatory
+        consultant (device pathway), and a clinical PI (likely via a pilot site).</li>
+    </ul>
+
+    <h2 class="section">6 · What the writer should ask engineering for next</h2>
+    <ul>
+      <li>The <b>market-position and gap analysis</b> (<code>docs/product/market-position-and-gaps.md</code>)
+        for the innovation/competition sections, and the <b>funding-strategy</b> doc
+        (<code>docs/business/funding-strategy.md</code>) for the agency mapping.</li>
+      <li>The <b>AI-fusion research digest</b> and measurement-rigor ADRs for citation-grade support of
+        Aims 2–3 (with the caveat that adoption gains from CAT/fusion are cited from the literature,
+        not yet demonstrated in-product).</li>
+      <li>A one-paragraph <b>letter-of-support</b> plan (BioMech; a prospective pilot clinic) — pilot
+        LOIs materially strengthen feasibility.</li>
+    </ul>
+
+    <div class="callout amber avoid-break">
+      <b>The claim discipline in one line:</b> everything built is describable as <i>feasibility</i>;
+      everything unmeasured (reliability, MCID, predictive accuracy, reimbursement value) is an
+      <i>aim</i> or a <i>citation</i>, never a result. Reviewers reward a team that draws that line
+      itself.
+    </div>
+
+    <div class="foot">
+      Prepared by engineering as source material; not a grant application and not regulatory or
+      scientific sign-off, which rest with qualified experts. No claim of validation or FDA clearance.
+      Living records: <code>docs/business/funding-strategy.md</code>,
+      <code>docs/product/market-position-and-gaps.md</code>, <code>docs/decisions/</code> (ADRs),
+      <code>docs/roadmap-status.md</code>.
+    </div>
+  </body>
+</html>

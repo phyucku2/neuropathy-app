@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Neuropathy Platform — CFO Brief</title>
+    <style>
+      :root {
+        --ink: #12232e; --muted: #4a5b66; --faint: #7a8a94;
+        --teal: #0e7c86; --teal-dark: #0a5c64; --teal-wash: #e7f3f4;
+        --amber-wash: #fdf4e3; --amber-line: #d9a441;
+        --line: #d7e0e3; --green: #1f8a52;
+      }
+      * { box-sizing: border-box; }
+      html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        color: var(--ink); font-size: 9.6pt; line-height: 1.46; }
+      @page { size: Letter; margin: 15mm 14mm; }
+      h1,h2,h3 { line-height: 1.2; margin: 0; }
+      p { margin: 0 0 7px; }
+      .cover { border-top: 6px solid var(--teal); padding-top: 16px; margin-bottom: 12px; }
+      .eyebrow { text-transform: uppercase; letter-spacing: .14em; font-size: 7.5pt; font-weight: 700; color: var(--teal); margin-bottom: 8px; }
+      .cover h1 { font-size: 20pt; margin-bottom: 6px; }
+      .cover .sub { font-size: 10.5pt; color: var(--muted); max-width: 54em; }
+      .meta { margin-top: 9px; font-size: 8pt; color: var(--faint); display: flex; gap: 18px; flex-wrap: wrap; }
+      h2.section { font-size: 11.5pt; color: var(--teal-dark); margin: 16px 0 4px; padding-bottom: 4px; border-bottom: 2px solid var(--teal-wash); }
+      ul { margin: 0 0 8px; padding-left: 20px; }
+      li { margin-bottom: 3px; }
+      table { width: 100%; border-collapse: collapse; margin: 6px 0 10px; font-size: 8.7pt; }
+      th, td { text-align: left; padding: 4px 7px; border-bottom: 1px solid var(--line); vertical-align: top; }
+      th { color: var(--faint); font-size: 7.5pt; text-transform: uppercase; letter-spacing: .05em; }
+      .callout { border: 1px solid var(--line); border-left: 4px solid var(--teal); background: var(--teal-wash);
+        border-radius: 6px; padding: 8px 12px; margin: 8px 0; font-size: 9pt; break-inside: avoid; }
+      .callout.amber { border-left-color: var(--amber-line); background: var(--amber-wash); }
+      .avoid-break { break-inside: avoid; }
+      code { background: #f0f4f5; border-radius: 3px; padding: 0 4px; font-size: 8.5pt; }
+      .foot { margin-top: 14px; padding-top: 7px; border-top: 1px solid var(--line); font-size: 7.4pt; color: var(--faint); }
+    </style>
+  </head>
+  <body>
+    <div class="cover">
+      <div class="eyebrow">CFO Brief · Internal · Confidential</div>
+      <h1>Neuropathy Care Platform — CFO Brief</h1>
+      <div class="sub">
+        The money view: what has been spent, what it costs to run, where revenue could come from
+        and what gates it, the funding path, and the numbers a finance owner should not take at face
+        value yet. Written for whoever owns the model, the runway, and the burn.
+      </div>
+      <div class="meta">
+        <span><b>As of:</b> July 20, 2026</span>
+        <span><b>Stage:</b> pre-seed / pre-revenue · synthetic data only</span>
+        <span><b>Cash cost to date:</b> effectively cloud + tooling only (see §1)</span>
+      </div>
+    </div>
+
+    <div class="callout amber">
+      <b>Read this first — no revenue exists, and every dollar figure here is an estimate, not a
+      booking.</b> The product is pre-revenue, not FDA-cleared, not clinically validated, and runs
+      on synthetic data only. The reimbursement numbers are <b>vendor-published estimates for a
+      qualified coder and counsel to validate</b>, not payable rates, and they are <b>double-gated</b>
+      (an FDA device determination <i>and</i> a certified-coder sign-off) before a single claim is
+      possible. Do not put any revenue line in a board model without those sign-offs. What is real
+      today is the cost side and the funding path.
+    </div>
+
+    <h2 class="section">1 · What has been spent (and what it will cost to run)</h2>
+    <p>
+      The build to date is overwhelmingly <b>engineering time, not cash outlay</b>. There is no
+      deployed production, no paid clinical study, no FDA submission, and no revenue infrastructure —
+      each of those is a future, gated spend, not a sunk one. Direct cash costs so far are limited to
+      cloud, tooling, and store/registration fees.
+    </p>
+    <table class="avoid-break">
+      <thead><tr><th>Line</th><th>Status</th><th>Rough monthly / one-time</th></tr></thead>
+      <tbody>
+        <tr><td>Azure staging (Container Apps ×2 + Postgres Flexible Server + migration job)</td><td>Live now, synthetic data</td><td>~$60–130/mo at pilot scale <i>(cloud list-price estimate)</i></td></tr>
+        <tr><td>Google Play developer account</td><td>Required for Android release</td><td>$25 one-time</td></tr>
+        <tr><td>Apple developer account (iOS, deferred)</td><td>Not yet — gated on owner Apple ID</td><td>~$99/yr when started</td></tr>
+        <tr><td>EMR sandbox registrations (Epic done; Oracle/Cerner later)</td><td>Sandbox tiers are free</td><td>$0 sandbox; production programs vary</td></tr>
+        <tr><td>Domain / TLS / secret storage</td><td>Standard</td><td>Nominal</td></tr>
+        <tr><td>Microsoft BAA/DPA</td><td>Self-serve, unsigned</td><td>$0 to execute; prerequisite for real PHI</td></tr>
+      </tbody>
+    </table>
+    <div class="callout">
+      <b>The point for a CFO:</b> the cost base is deliberately tiny and variable. Nothing about the
+      architecture forces a large fixed-infrastructure commitment before there is a pilot to justify
+      it — the deployment is managed, pay-as-you-go, and single-node-capable. The expensive line
+      items (a validation study, an FDA consultant, iOS) are <b>discretionary and sequenced behind
+      funding</b>, not committed.
+    </div>
+
+    <h2 class="section">2 · The revenue thesis — real shape, but gated and unbuilt</h2>
+    <p>
+      The intended revenue engine is <b>Remote Therapeutic Monitoring (RTM)</b>: the platform's
+      gait/balance stream plus patient-reported function map onto RTM device-supply and
+      treatment-management codes, and RTM is notable for permitting patient self-report. Vendor
+      estimates for comparable products run on the order of <b>$100+/patient/month</b>
+      <i>(assertion pending coder validation — not a payable rate)</i>. Three hard constraints sit in
+      front of any of that becoming money:
+    </p>
+    <ul>
+      <li><b>We are an enabler, not a biller.</b> A servicing clinic (a covered entity) bills; the
+        platform captures and exports the evidence. Modeled revenue is therefore a
+        <b>SaaS/enablement fee or per-patient-per-month arrangement with clinics</b>, not a claims
+        stream we control.</li>
+      <li><b>Double gate.</b> RTM data must come from an FDA "device" (§201(h)) <i>and</i> the coding
+        must be blessed by a certified coder + counsel. Neither is resolved.</li>
+      <li><b>The capture tooling isn't built.</b> The interactive-time ledger, adherence counter, and
+        evidence export are specced and deliberately <b>not started</b> — they are gated on the
+        compliance sign-off packet (D1/D3) and the FDA determination (D2).</li>
+    </ul>
+
+    <h2 class="section">3 · Funding path — non-dilutive first</h2>
+    <p>
+      The strategy is to fund the #1 gap (measurement validation) with <b>non-dilutive capital</b>
+      before taking priced equity:
+    </p>
+    <table class="avoid-break">
+      <thead><tr><th>Source</th><th>Amount (typical)</th><th>What it buys / what it needs</th></tr></thead>
+      <tbody>
+        <tr><td><b>NIH SBIR/STTR Phase I</b> (NINDS/NIDDK/NIA/NIBIB)</td><td>≈ $150–300k</td><td>Feasibility + the validation study design; needs SAM.gov/UEI registration + eligibility</td></tr>
+        <tr><td><b>SBIR/STTR Phase II</b></td><td>≈ $1–2M</td><td>Full validation; follows a successful Phase I</td></tr>
+        <tr><td><b>BioMech strategic conversation</b></td><td>Partner-dependent</td><td>Natural first strategic capital / co-development; AHWG owns IP, BioMech is licensee</td></tr>
+        <tr><td><b>Angel / SAFE bridge</b></td><td>Modest</td><td>Covers cloud + entity + filing costs between grants</td></tr>
+        <tr><td><b>Seed VC</b></td><td>Later, priced</td><td>Comes <i>after</i> a deployed pilot + FDA determination + early reimbursement evidence — not before</td></tr>
+      </tbody>
+    </table>
+
+    <h2 class="section">4 · The gates that stand between cost and revenue</h2>
+    <table class="avoid-break">
+      <thead><tr><th>Gate</th><th>Cost to clear</th><th>Unlocks (financially)</th></tr></thead>
+      <tbody>
+        <tr><td>FDA device-status opinion (D2)</td><td>Regulatory consultant fee (discrete)</td><td>Reimbursement eligibility and clinical-claim marketing</td></tr>
+        <tr><td>Microsoft BAA/DPA + counsel review</td><td>~$0 + legal time</td><td>Real patient data → a pilot → the dataset that backs any valuation</td></tr>
+        <tr><td>Measurement validation study</td><td>SBIR-funded (non-dilutive)</td><td>Payer credibility; the moat's defensibility; grant/VC milestones</td></tr>
+        <tr><td>Certified coder + counsel sign-off (D1/D3)</td><td>Professional fee</td><td>Permission to build and book RTM-enabled revenue at all</td></tr>
+      </tbody>
+    </table>
+
+    <h2 class="section">5 · The financial moat</h2>
+    <div class="callout">
+      The defensible asset is a <b>proprietary longitudinal multimodal dataset</b> — the accumulating
+      per-patient record of symptoms + gait/balance + labs over time — not the scoring formula (which
+      is replicable science). That reframes the near-term financial objective: <b>the highest-return
+      use of the next dollar is getting to a consented pilot</b>, because that is what starts the one
+      asset a competitor cannot buy, and it is the milestone both grants and a future priced round
+      underwrite.
+    </div>
+
+    <h2 class="section">6 · The CFO's watch-list</h2>
+    <ul>
+      <li><b>Keep revenue out of the model until D1+D2 clear.</b> Any per-patient RTM figure is
+        currently a citation, not a forecast. Model it as an <i>option</i>, not a line.</li>
+      <li><b>Protect runway; the burn is small — keep it that way.</b> The big spends (validation,
+        FDA, iOS) should each be triggered by a funding event, not run ahead of one.</li>
+      <li><b>Back up the cloud secrets and track cloud spend.</b> Export the Azure secrets to a
+        password manager; watch staging cost so it doesn't drift before a pilot justifies it.</li>
+      <li><b>Entity + grant readiness is cheap and on the critical path.</b> SAM.gov/UEI registration
+        and study design gate the first non-dilutive dollars — start them now.</li>
+    </ul>
+
+    <div class="foot">
+      Not investment, accounting, tax, legal, or billing advice, and no claim of compliance,
+      certification, or FDA clearance. All dollar figures are estimates for professional validation.
+      Living records: <code>docs/business/funding-strategy.md</code>,
+      <code>docs/product/reimbursement-signoff-packet.md</code>,
+      <code>docs/ops/deploy-azure.md</code>, <code>docs/roadmap-status.md</code>.
+    </div>
+  </body>
+</html>

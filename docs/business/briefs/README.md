@@ -15,12 +15,25 @@ reclaimed.
 
 ## The briefs
 
+The **role briefs** are a matched set written for the executive/advisory roles, all as of
+July 20, 2026 and grounded in the same facts (Azure staging live, Epic sandbox registered,
+synthetic data only, pre-BAA, non-diagnostic v1 pending validation):
+
+| File | Audience | What it is |
+|---|---|---|
+| [`ceo-brief.html`](./ceo-brief.html) | CEO | The company in one paragraph, what's built, the moat, the three gates, revenue thesis, funding path, and the CEO's three highest-leverage decisions. |
+| [`cto-brief.html`](./cto-brief.html) | Technical / CTO diligence | System design, data model, security posture, testing/CI, live Azure state, and technical debt. |
+| [`cfo-brief.html`](./cfo-brief.html) | CFO | Cost base and run-rate, the (gated, unbuilt) revenue thesis, the non-dilutive-first funding path, and the finance watch-list. |
+| [`compliance-officer-brief.html`](./compliance-officer-brief.html) | Compliance reviewer | Orientation for the reimbursement compliance review (D1–D3, assertions A1–A8). Pairs with [`../../product/reimbursement-signoff-packet.md`](../../product/reimbursement-signoff-packet.md). |
+| [`attorney-brief.html`](./attorney-brief.html) | Legal counsel | Entity/IP structure, the deferred FDA device question, data-protection/consent architecture, contracts outstanding, and liability posture. |
+| [`grant-writer-brief.html`](./grant-writer-brief.html) | Grant writer | SBIR/STTR raw material: unmet need, innovation, candidate specific aims, preliminary/feasibility work, and eligibility steps. |
+
+Supporting briefs:
+
 | File | Audience | What it is |
 |---|---|---|
 | [`product-and-technology-brief.html`](./product-and-technology-brief.html) | Investor / general | What the platform is, the problem, the architecture at a glance, status, and the ask. |
-| [`cto-brief.html`](./cto-brief.html) | Technical / CTO diligence | System design, data model, security posture, testing/CI, and technical risks. |
 | [`build-inventory.html`](./build-inventory.html) | Internal | Everything built so far (features, endpoints, ADRs) plus the prioritized to-do list. |
-| [`compliance-officer-brief.html`](./compliance-officer-brief.html) | Compliance reviewer | Orientation for the reimbursement compliance review (D1–D3, assertions A1–A8). Pairs with [`../../product/reimbursement-signoff-packet.md`](../../product/reimbursement-signoff-packet.md). |
 
 ## Regenerating a PDF
 
