@@ -51,7 +51,7 @@
       </div>
       <div class="meta">
         <span><b>Requesting owner:</b> Advanced Health and Wellness Group (IP holder)</span>
-        <span><b>Prepared:</b> July 15, 2026</span>
+        <span><b>Prepared:</b> July 20, 2026</span>
         <span><b>Review object:</b> the sign-off packet + the reimbursed-apps comparison</span>
       </div>
     </div>
@@ -61,7 +61,7 @@
       <li>A <b>non-diagnostic</b> tracking and decision-support platform for neuropathy patients: patient-reported daily function (ADL check-ins), lab results imported from the patient's EMR with the patient's OAuth consent (SMART on FHIR), and balance/gait metrics parsed from BioMech assessment reports — fused into an explainable trend (direction, confidence, named signals).</li>
       <li><b>Posture: enabler, not biller.</b> The intended model is that a servicing clinic — a covered entity — would bill; the platform would capture and evidence. The platform holder does not submit claims.</li>
       <li><b>Recorded owner decision (2026-07-14): "BioMech is billed separately for now."</b> BioMech's own device/assessment billing is outside this initiative's scope. Consequence: the live device-status question attaches primarily to <b>this software</b> (SaMD analysis), with the BioMech hardware relevant only as a data-provenance dependency. Revisit trigger recorded if the relationship changes.</li>
-      <li>Status honestly stated: synthetic data only to date; not FDA-cleared or -listed; HIPAA-aligned architecture pending formal validation; no reimbursement-specific features have been built — <b>the build is deliberately blocked on your sign-off.</b></li>
+      <li>Status honestly stated: <b>synthetic data only to date</b>; not FDA-cleared or -listed; HIPAA-aligned architecture pending formal validation. The app is now <b>deployed to Azure staging</b> (register/login verified) and <b>registered with Epic's sandbox</b>, but <b>no BAA/DPA has been executed</b>, so no real PHI has been processed. No reimbursement-specific features have been built — <b>that build is deliberately blocked on your sign-off.</b></li>
     </ul>
 
     <h2 class="section">2 · The three decisions the packet asks of you (D1–D3)</h2>
@@ -100,7 +100,7 @@
     <ul>
       <li><b>FDA/SaMD status (D2)</b> — the gating unknown. The packet lays out the factual inputs a regulatory consultant needs; the comparison shows the market's answer-shape.</li>
       <li><b>Incident-to / general-supervision questions</b> for any clinic operating model, and the 2026 code-family selection — assertion set A1–A8 is where the CPC's red pen belongs.</li>
-      <li><b>No deployed environment / no BAAs yet</b> — the compliance pack defines the gates; nothing processes real PHI today, so your review is prospective, not remedial.</li>
+      <li><b>Staging deployed, but no BAA/DPA executed yet</b> — an Azure staging environment now exists and Epic sandbox is registered, but the Microsoft BAA/DPA is unsigned and nothing processes real PHI today, so your review remains prospective, not remedial. Executing the BAA before first real PHI is a recorded gate.</li>
       <li><b>What we do NOT ask:</b> no one is asked to bless current billing (there is none), and nothing in the product coaches a clinic to bill — the docs are explicit that enablement ≠ authorization.</li>
     </ul>
 
@@ -131,7 +131,7 @@
     </div>
 
     <div class="foot">
-      Neuropathy Care Platform · Compliance officer brief (reimbursement) · July 15, 2026 ·
+      Neuropathy Care Platform · Compliance officer brief (reimbursement) · July 20, 2026 ·
       Confidential · Prepared by engineering as orientation only — not billing, coding, or legal
       advice; all determinations rest with the credentialed reviewers.
     </div>

@@ -51,9 +51,18 @@
         (26 ADRs are the decision log; <code>docs/roadmap-status.md</code> is the status board).
       </div>
       <div class="meta">
-        <span><b>As of:</b> July 15, 2026 · 28 merged PRs</span>
-        <span><b>State:</b> code-complete for Play internal testing; pre-deployment; synthetic data only</span>
+        <span><b>As of:</b> July 20, 2026</span>
+        <span><b>State:</b> deployed to Azure staging (register/login verified live); Epic sandbox registered; synthetic data only, pre‑BAA</span>
       </div>
+    </div>
+
+    <div class="callout amber">
+      <b>Honest status.</b> Everything below is real, merged, and reproducible from the repo, but
+      the product is <b>not FDA‑cleared, not clinically validated, and runs on synthetic data only</b>.
+      The Azure staging environment is live but <b>no Business Associate Agreement / DPA has been
+      executed</b>, so no real PHI has been processed. The Neuropathy Status Index is a
+      non‑diagnostic v1 pending validation. Treat the rigor here as a diligence asset, not a claim
+      of certification.
     </div>
 
     <h2 class="section">1 · System architecture</h2>
@@ -129,7 +138,8 @@
     <table class="avoid-break">
       <thead><tr><th>Item</th><th>Impact</th><th>Mitigation / plan</th></tr></thead>
       <tbody>
-        <tr><td>No deployed environment yet</td><td>Everything runs in CI/dev; no staging/prod URL</td><td>AWS EC2+RDS selected (free self-serve BAA); deploy portion is next in backlog; compose + runbooks carry over</td></tr>
+        <tr><td>Live env is staging only, and behind the latest image</td><td>Azure staging serves register/login end‑to‑end, but a SHA‑tagged rebuild + Bicep redeploy is owed to get the newest code (Home empty‑state, Epic env vars) onto it; no prod, no BAA yet</td><td>Bicep IaC committed (<code>infra/azure/main.bicep</code>); rebuild/redeploy is a runbook step; prod stands up behind an executed BAA/DPA</td></tr>
+        <tr><td>Backend internal ingress runs <code>allowInsecure: true</code></td><td>The Container Apps backend accepts HTTP on the internal network so the same‑origin nginx proxy doesn't get a 301 loop; traffic is inside the Azure vNet, external ingress stays HTTPS‑only</td><td>Documented + fixed in Bicep (was the cause of a smoke‑test 301); front door is TLS‑only; revisit if backend is ever exposed directly</td></tr>
         <tr><td>Keyless secret-store mode is degraded</td><td>Without <code>SECRET_STORE_KEY</code>, vault is per-process memory — EMR tokens in sibling workers survive deletion until restart</td><td>Documented non-production mode (ADR-0027 + HIPAA checklist); keyed mode is fully transactional</td></tr>
         <tr><td>In-flight AI narration race</td><td>A narration scheduled pre-deletion can complete seconds after it</td><td>Cache flushed at deletion; residual documented; narrative is off-by-default + BAA-gated; revisit if narration becomes durable</td></tr>
         <tr><td>Single shared web bundle is ~590KB JS</td><td>Vite chunk-size warning; fine for pilot, not optimized</td><td>Code-splitting when performance work is scheduled; not a correctness risk</td></tr>
@@ -137,13 +147,13 @@
         <tr><td>E2E console-error allowlist is status-pinned</td><td>New designed 4xx statuses need an allowlist edit</td><td>By design — a bare regex once masked 500s; the gate self-tests</td></tr>
         <tr><td>No horizontal-scale session story needed yet</td><td>JWTs are stateless; rate limiters are audit-table-backed (multi-worker-safe); in-memory stores are dev-only</td><td>Postgres is the only stateful service; scale-out is standard</td></tr>
         <tr><td>assetlinks.json needs the release cert</td><td>Android App-Links (EMR OAuth return) can't be finalized until the upload keystore exists</td><td>Template committed; custom-scheme fallback works meanwhile</td></tr>
-        <tr><td>Epic/Oracle production enrollment untested</td><td>Sandbox-first; production programs have review lead times</td><td>Registration runbook maps both; smoke test planned when client IDs arrive</td></tr>
+        <tr><td>Epic is sandbox‑registered, not production‑enrolled</td><td>App registered on Epic's sandbox and the non‑prod client ID is wired; production enrollment (Oracle/Cerner too) has review lead times</td><td>First end‑to‑end lab pull is one Epic client‑sync cycle away; per‑vendor client IDs are env‑only, never committed; runbook maps production</td></tr>
       </tbody>
     </table>
 
     <h2 class="section">7 · Scale &amp; cost posture</h2>
     <ul>
-      <li><b>Pilot topology</b> — 1 small app node (gunicorn/UvicornWorker, Prometheus multiprocess-safe) + managed Postgres ≈ <b>$55–110/mo on AWS</b> with a $0 self-serve BAA. Nothing in the architecture assumes a single node except the documented keyless dev mode.</li>
+      <li><b>Pilot topology (now live in staging)</b> — Azure Container Apps (backend + frontend) + Postgres Flexible Server, with a Container Apps Job running Alembic migrations, all defined in Bicep. Comparable managed footprint runs on the order of <b>~$60–130/mo</b> at pilot scale. Microsoft offers a self‑serve BAA; it must be executed before real PHI. Nothing in the architecture assumes a single node except the documented keyless dev mode.</li>
       <li><b>Hot paths are boring</b> — reads are per-patient indexed queries; the trajectory engine is deterministic in-process compute; the only external I/O is EMR pulls (async) and the optional AI call (off request path). No queues/workers needed until ingestion volume demands them.</li>
       <li><b>Observability from day one</b> — PHI-free metrics with alert rules written, request-ID-correlated logs, error seam ready for a self-hosted collector.</li>
     </ul>
@@ -152,9 +162,9 @@
     <table class="avoid-break">
       <thead><tr><th>#</th><th>Work</th><th>Readiness</th></tr></thead>
       <tbody>
-        <tr><td>1</td><td><b>Wave 3 (in flight):</b> EMR connect UI, per-provider client IDs, scope trim, authenticated callback relay, App-Links native return</td><td>Implementation running; review loop next</td></tr>
-        <tr><td>2</td><td><b>AWS deploy portion:</b> infra scripts + production runbook (TLS/ACM, Secrets Manager, RDS, backups, scrape)</td><td>Spec'd by the comparison doc; buildable now</td></tr>
-        <tr><td>3</td><td><b>Sandbox smoke → production EMR enrollment</b></td><td>Needs owner's free sandbox registrations, then a deployed origin</td></tr>
+        <tr><td>1</td><td><b>Azure prod hardening:</b> SHA‑tagged image rebuild + Bicep redeploy to land newest code; fold Epic env vars into Bicep params; stand up prod behind an executed BAA/DPA</td><td>Staging live now; owner‑side redeploy + BAA are the gates</td></tr>
+        <tr><td>2</td><td><b>First live EMR lab pull</b> via the registered Epic sandbox client (patient SMART connect → Observation.read)</td><td>One Epic client‑sync cycle away; authorize URL verified correct</td></tr>
+        <tr><td>3</td><td><b>ADR‑0045 Visit‑Ready Summary</b> (windowed clinician handout: labs, meds, ADL/biomech deltas, patient notes) + ADR‑0046 patient↔clinician messaging</td><td>Specced; P1 assembly/endpoint is the next build</td></tr>
         <tr><td>4</td><td><b>Wave 4 RTM evidence features</b> (adherence counter, time ledger, episode events, billing-consent scope, evidence export)</td><td>Design-gated on the professional sign-off packet + FDA/SaMD determination — deliberately not started</td></tr>
         <tr><td>5</td><td><b>iOS platform</b> — add-platform on the existing Capacitor architecture</td><td>Blocked on owner's Apple DUNS/ID switch</td></tr>
       </tbody>
@@ -170,8 +180,9 @@
     </div>
 
     <div class="foot">
-      Neuropathy Care Platform · CTO technical brief · July 15, 2026 · Confidential ·
-      Source of truth: the repository (26 ADRs, docs/roadmap-status.md, docs/lessons.md).
+      Neuropathy Care Platform · CTO technical brief · July 20, 2026 · Confidential ·
+      Source of truth: the repository (ADRs in docs/decisions/, docs/roadmap-status.md,
+      docs/lessons.md, docs/ops/deploy-azure.md).
     </div>
   </body>
 </html>

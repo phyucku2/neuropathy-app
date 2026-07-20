@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Neuropathy Platform — Attorney Brief</title>
+    <style>
+      :root {
+        --ink: #12232e; --muted: #4a5b66; --faint: #7a8a94;
+        --teal: #0e7c86; --teal-dark: #0a5c64; --teal-wash: #e7f3f4;
+        --amber-wash: #fdf4e3; --amber-line: #d9a441;
+        --line: #d7e0e3; --green: #1f8a52;
+      }
+      * { box-sizing: border-box; }
+      html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        color: var(--ink); font-size: 9.6pt; line-height: 1.46; }
+      @page { size: Letter; margin: 15mm 14mm; }
+      h1,h2,h3 { line-height: 1.2; margin: 0; }
+      p { margin: 0 0 7px; }
+      .cover { border-top: 6px solid var(--teal); padding-top: 16px; margin-bottom: 12px; }
+      .eyebrow { text-transform: uppercase; letter-spacing: .14em; font-size: 7.5pt; font-weight: 700; color: var(--teal); margin-bottom: 8px; }
+      .cover h1 { font-size: 20pt; margin-bottom: 6px; }
+      .cover .sub { font-size: 10.5pt; color: var(--muted); max-width: 54em; }
+      .meta { margin-top: 9px; font-size: 8pt; color: var(--faint); display: flex; gap: 18px; flex-wrap: wrap; }
+      h2.section { font-size: 11.5pt; color: var(--teal-dark); margin: 16px 0 4px; padding-bottom: 4px; border-bottom: 2px solid var(--teal-wash); }
+      ul { margin: 0 0 8px; padding-left: 20px; }
+      li { margin-bottom: 3px; }
+      table { width: 100%; border-collapse: collapse; margin: 6px 0 10px; font-size: 8.7pt; }
+      th, td { text-align: left; padding: 4px 7px; border-bottom: 1px solid var(--line); vertical-align: top; }
+      th { color: var(--faint); font-size: 7.5pt; text-transform: uppercase; letter-spacing: .05em; }
+      .callout { border: 1px solid var(--line); border-left: 4px solid var(--teal); background: var(--teal-wash);
+        border-radius: 6px; padding: 8px 12px; margin: 8px 0; font-size: 9pt; break-inside: avoid; }
+      .callout.amber { border-left-color: var(--amber-line); background: var(--amber-wash); }
+      .avoid-break { break-inside: avoid; }
+      code { background: #f0f4f5; border-radius: 3px; padding: 0 4px; font-size: 8.5pt; }
+      .foot { margin-top: 14px; padding-top: 7px; border-top: 1px solid var(--line); font-size: 7.4pt; color: var(--faint); }
+    </style>
+  </head>
+  <body>
+    <div class="cover">
+      <div class="eyebrow">Attorney Brief · Internal · Confidential · Attorney–Client Privileged</div>
+      <h1>Neuropathy Care Platform — Legal Brief</h1>
+      <div class="sub">
+        The legal surface: entity/IP structure, the regulatory posture the company has deliberately
+        adopted, data-protection and consent architecture, contracts outstanding, and the open
+        questions that need counsel's judgment. Written to brief the attorney, not to substitute for
+        their advice.
+      </div>
+      <div class="meta">
+        <span><b>As of:</b> July 20, 2026</span>
+        <span><b>IP owner:</b> Advanced Health &amp; Wellness Group · <b>Licensee/device partner:</b> BioMech Health</span>
+        <span><b>Data:</b> synthetic only · no PHI processed · no BAA executed</span>
+      </div>
+    </div>
+
+    <div class="callout amber">
+      <b>Framing.</b> Engineering has run the company conservatively on purpose: <b>non-diagnostic
+      positioning, no clinical claims, synthetic data only, and no reimbursement features built</b>
+      pending professional sign-off. The product is not FDA-cleared. The questions below are flagged
+      <i>for</i> counsel precisely because the team has declined to answer them itself — most notably
+      the FDA device-status determination, which is framed and deferred by design, not assumed.
+    </div>
+
+    <h2 class="section">1 · Entity, IP, and the partner relationship</h2>
+    <ul>
+      <li><b>IP ownership:</b> Advanced Health &amp; Wellness Group (AHWG) owns all intellectual
+        property. <b>BioMech Health is a licensee</b> and the device/data partner (Frank Fornari,
+        PhD). Counsel should confirm the license terms cleanly cover the software, the composite
+        index, and any derived dataset, and that field-of-use / data-rights boundaries are explicit.</li>
+      <li><b>Recorded owner decision (2026-07-14): "BioMech is billed separately for now."</b>
+        BioMech's device/assessment billing is outside this initiative's scope; the software's
+        device-status question therefore attaches primarily to <b>this software</b>, with the
+        hardware relevant as a data-provenance dependency. A revisit trigger is recorded if the
+        relationship changes.</li>
+      <li><b>Open items for counsel:</b> confirm the operating entity and its relationship to AHWG;
+        IP assignment from all contributors; trademark posture on the product name; and whether the
+        dataset (the core moat) is owned by AHWG free of partner claims.</li>
+    </ul>
+
+    <h2 class="section">2 · Regulatory posture (the central legal question)</h2>
+    <table class="avoid-break">
+      <thead><tr><th>Question</th><th>Company's current position</th><th>What counsel must resolve</th></tr></thead>
+      <tbody>
+        <tr><td><b>FDA device status (§201(h) / SaMD)</b></td><td>Framed and <b>deferred</b> (ADR-0041); the product is marketed non-diagnostically as a wellness trend, not a diagnostic</td><td>Whether the software is a device, a non-device wellness/decision-support function, or must become a listed/cleared device — likely with an FDA regulatory consultant. Gates clinical claims and reimbursement.</td></tr>
+        <tr><td><b>Reimbursement (RTM) eligibility</b></td><td>Treated as double-gated and <b>not built</b>; enabler-not-biller model</td><td>Confirm the device predicate (CMS requires RTM data from an FDA device), the coding, and the enabler posture with a certified coder + counsel (decisions D1–D3)</td></tr>
+        <tr><td><b>Clinical claims</b></td><td>None made; "wellness trend, not a diagnosis" disclaimer co-located with every score</td><td>Confirm the marketing/labeling line that keeps the product non-device until a determination exists</td></tr>
+      </tbody>
+    </table>
+
+    <h2 class="section">3 · Data protection, privacy &amp; consent</h2>
+    <ul>
+      <li><b>No PHI has been processed.</b> All data to date is synthetic. Azure staging is live but
+        the <b>Microsoft BAA/DPA is unsigned</b> — a recorded gate before any real PHI. Counsel
+        should execute/confirm the BAA and review the DPA before a pilot.</li>
+      <li><b>HIPAA-shaped architecture, pending formal validation:</b> PHI-free audit logging on reads
+        and writes; server-enforced, revocable, per-stream patient consent; account and data deletion
+        with re-authentication; EMR OAuth tokens in an encrypted vault deleted on revoke and on
+        account deletion. A BAA inventory and HIPAA ops checklist exist as living documents.</li>
+      <li><b>Consent architecture:</b> patient-held share-with-clinic consent that clinicians cannot
+        override; a distinct, revocable <b>billing-evidence consent scope</b> is specced (separate
+        from care-sharing) but not built — its design (decision D3) awaits counsel/compliance input.</li>
+      <li><b>EMR access is patient-authorized</b> via SMART-on-FHIR OAuth (PKCE public client, no
+        secrets); the app is registered with Epic's sandbox. Counsel should note the patient — not the
+        company — authorizes each EMR pull.</li>
+      <li><b>For counsel:</b> confirm state privacy-law exposure, breach-notification obligations,
+        the privacy policy / terms of service, and whether a covered-entity vs business-associate
+        characterization is correct for each operating model.</li>
+    </ul>
+
+    <h2 class="section">4 · Contracts &amp; agreements outstanding</h2>
+    <table class="avoid-break">
+      <thead><tr><th>Agreement</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td>Microsoft BAA / DPA (Azure)</td><td>Self-serve, <b>not yet executed</b> — prerequisite for real PHI</td></tr>
+        <tr><td>BioMech license / data-rights agreement</td><td>Confirm scope covers software + dataset + field of use</td></tr>
+        <tr><td>Clinic pilot agreements (LOIs → pilot contracts)</td><td>Not yet; needed for the first consented pilot (enabler terms, liability, data ownership)</td></tr>
+        <tr><td>EMR vendor terms (Epic, later Oracle/Cerner)</td><td>Sandbox terms accepted; production programs have their own agreements</td></tr>
+        <tr><td>Contributor IP assignment; employee/contractor agreements</td><td>Confirm all IP flows to AHWG</td></tr>
+        <tr><td>Third-party licenses (software dependencies)</td><td>Permissive-only allowlist enforced in CI; no copyleft in the dependency tree</td></tr>
+      </tbody>
+    </table>
+
+    <h2 class="section">5 · Liability &amp; risk posture</h2>
+    <ul>
+      <li><b>Non-diagnostic by design</b> — the product shows a wellness trend and repeatedly disclaims
+        being a diagnosis; it does not triage emergencies. The specced patient↔clinician communication
+        (ADR-0046) carries a <b>persistent "if this is an emergency, call 911" banner</b> and makes no
+        emergency-triage promise — a deliberate liability-limiting choice counsel should review.</li>
+      <li><b>Enabler, not biller</b> — the company does not submit claims; a servicing clinic does.
+        This keeps the company out of direct False Claims Act exposure, but counsel should confirm the
+        enablement materials never cross into advising a clinic <i>how</i> to bill.</li>
+      <li><b>No clinical claims, no medical advice</b> — consistent disclaimers; counsel to confirm
+        they are sufficient and correctly placed for the marketing surfaces.</li>
+    </ul>
+
+    <h2 class="section">6 · Counsel's near-term priorities</h2>
+    <ul>
+      <li><b>Route the FDA device-status determination</b> (with a regulatory consultant) — the single
+        highest-leverage legal action; a written opinion is already drafted for that consultant.</li>
+      <li><b>Execute/confirm the Microsoft BAA and review the DPA</b> before any real PHI touches Azure.</li>
+      <li><b>Confirm IP and dataset ownership</b> are clean between AHWG and BioMech, including the
+        longitudinal dataset that is the commercial moat.</li>
+      <li><b>Review consent, privacy policy, and ToS</b> ahead of the first pilot; shape the pilot
+        agreement (liability, data ownership, enabler terms).</li>
+    </ul>
+
+    <div class="foot">
+      Prepared by engineering as orientation; not legal advice and not a substitute for counsel's
+      independent judgment. No claim of compliance, certification, or FDA clearance is made. Living
+      records: <code>docs/decisions/</code> (ADRs, incl. ADR-0041 device status),
+      <code>docs/compliance/</code> (BAA inventory, HIPAA checklist, gap register),
+      <code>docs/product/reimbursement-signoff-packet.md</code>.
+    </div>
+  </body>
+</html>

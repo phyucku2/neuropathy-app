@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Neuropathy Platform — CEO Brief</title>
+    <style>
+      :root {
+        --ink: #12232e; --muted: #4a5b66; --faint: #7a8a94;
+        --teal: #0e7c86; --teal-dark: #0a5c64; --teal-wash: #e7f3f4;
+        --amber-wash: #fdf4e3; --amber-line: #d9a441;
+        --line: #d7e0e3; --green: #1f8a52;
+      }
+      * { box-sizing: border-box; }
+      html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        color: var(--ink); font-size: 9.6pt; line-height: 1.46; }
+      @page { size: Letter; margin: 15mm 14mm; }
+      h1,h2,h3 { line-height: 1.2; margin: 0; }
+      p { margin: 0 0 7px; }
+      .cover { border-top: 6px solid var(--teal); padding-top: 16px; margin-bottom: 12px; }
+      .eyebrow { text-transform: uppercase; letter-spacing: .14em; font-size: 7.5pt; font-weight: 700; color: var(--teal); margin-bottom: 8px; }
+      .cover h1 { font-size: 20pt; margin-bottom: 6px; }
+      .cover .sub { font-size: 10.5pt; color: var(--muted); max-width: 54em; }
+      .meta { margin-top: 9px; font-size: 8pt; color: var(--faint); display: flex; gap: 18px; flex-wrap: wrap; }
+      h2.section { font-size: 11.5pt; color: var(--teal-dark); margin: 16px 0 4px; padding-bottom: 4px; border-bottom: 2px solid var(--teal-wash); }
+      ul { margin: 0 0 8px; padding-left: 20px; }
+      li { margin-bottom: 3px; }
+      table { width: 100%; border-collapse: collapse; margin: 6px 0 10px; font-size: 8.7pt; }
+      th, td { text-align: left; padding: 4px 7px; border-bottom: 1px solid var(--line); vertical-align: top; }
+      th { color: var(--faint); font-size: 7.5pt; text-transform: uppercase; letter-spacing: .05em; }
+      .callout { border: 1px solid var(--line); border-left: 4px solid var(--teal); background: var(--teal-wash);
+        border-radius: 6px; padding: 8px 12px; margin: 8px 0; font-size: 9pt; break-inside: avoid; }
+      .callout.amber { border-left-color: var(--amber-line); background: var(--amber-wash); }
+      .avoid-break { break-inside: avoid; }
+      .foot { margin-top: 14px; padding-top: 7px; border-top: 1px solid var(--line); font-size: 7.4pt; color: var(--faint); }
+    </style>
+  </head>
+  <body>
+    <div class="cover">
+      <div class="eyebrow">CEO Brief · Internal · Confidential</div>
+      <h1>Neuropathy Care Platform — CEO Brief</h1>
+      <div class="sub">
+        What the company is, what is built, where the moat is, and the three gates that
+        unlock everything downstream. Written for the chief executive setting strategy and
+        prioritizing capital and attention.
+      </div>
+      <div class="meta">
+        <span><b>As of:</b> July 20, 2026</span>
+        <span><b>Stage:</b> pre-seed / pre-pilot · synthetic data only</span>
+        <span><b>Live:</b> Azure staging (register/login verified) · Epic sandbox registered</span>
+      </div>
+    </div>
+
+    <div class="callout amber">
+      <b>Read this first.</b> The product is <b>not FDA-cleared, not clinically validated, and
+      runs on synthetic data only</b>; no real patient data has been processed and no Business
+      Associate Agreement has been executed. The Neuropathy Status Index is a <b>non-diagnostic
+      v1, pending validation</b>. Every reimbursement figure in this brief is a vendor-published
+      estimate for a qualified coder to validate, not a payable rate. These are not weaknesses to
+      hide — they are the honest starting line, and the plan below is built around closing them.
+    </div>
+
+    <h2 class="section">1 · The company in one paragraph</h2>
+    <p>
+      We are building a <b>non-diagnostic, patient-owned measurement platform for diabetic
+      peripheral neuropathy (DPN)</b> — the <b>Neuropathy Status Index (NSI)</b>, a single
+      0–100 score (higher = better) that fuses four streams no incumbent combines: patient-reported
+      <b>symptoms</b> (pain, numbness), objective <b>balance &amp; gait</b> (from BioMech's
+      device tier), real-world <b>phone/watch mobility</b>, and <b>labs</b> (HbA1c) pulled from the
+      patient's EMR. The result is a <b>daily trajectory</b> instead of the episodic snapshot every
+      competitor offers, built deliberately for the <b>60+</b> population and designed to be
+      explainable, not a black box. <b>Advanced Health &amp; Wellness Group (AHWG) owns all IP;
+      BioMech Health is a licensee</b> and the device/data partner (Frank Fornari, PhD, CEO).
+    </p>
+
+    <h2 class="section">2 · What is built (the honest status)</h2>
+    <ul>
+      <li><b>A real, running application</b> — FastAPI/Postgres backend, React web app, and an
+        Android build (Capacitor). Register, log in, daily check-in, longitudinal record, the NSI
+        and an explainable trajectory all work end-to-end.</li>
+      <li><b>Deployed to Azure staging</b> — as of this week, register/login are verified live
+        through the real cloud stack; synthetic data only, pending the Microsoft BAA/DPA.</li>
+      <li><b>EMR connectivity is live in sandbox</b> — SMART-on-FHIR patient connect is built and
+        the app is <b>registered with Epic's sandbox</b>; the first end-to-end lab pull is one
+        Epic sync away.</li>
+      <li><b>Unusual engineering rigor for the stage</b> — research-grade (ALCOA+) data model,
+        HIPAA-shaped security, an adversarial internal audit already run and its top findings
+        fixed, and a binding CI quality gate. This is a diligence asset (see the CTO brief).</li>
+      <li><b>Not yet built:</b> clinical validation of the NSI, the reimbursement/time-capture
+        layer, the outbound clinician loop, and anything that would require a device posture.</li>
+    </ul>
+
+    <h2 class="section">3 · Market position &amp; the moat</h2>
+    <p>
+      The market is fragmented into four clusters that each solve one slice — DPN point devices
+      (Podimetrics, Siren), diabetes apps, gait/balance biomarkers (Kinesis, Zibrio), and RPM/RTM
+      plumbing (Limber, OneStep, Exer). <b>No incumbent fuses ADA-aligned symptom capture +
+      multimodal gait/balance + labs into one validated longitudinal measure.</b> The nearest
+      validated analog (a single-signal smartphone tracker) tops out at moderate concordance on
+      n=17 — the ceiling a quality-first product can beat.
+    </p>
+    <div class="callout">
+      <b>The moat is a proprietary longitudinal multimodal dataset, not an AI model.</b> The
+      composite formula and any adaptive-testing engine are replicable science; the one asset a
+      competitor cannot copy, buy, or reverse-engineer is the accumulating multi-stream record
+      of real patients over time — which is why getting to a <b>consented pilot is the single
+      most valuable near-term milestone</b>. The AI multimodal-fusion advantage is a lead to
+      prove, not a proven finding.
+    </div>
+
+    <h2 class="section">4 · The three gates that unlock everything</h2>
+    <table>
+      <tr><th>Gate</th><th>Who resolves it</th><th>What it unlocks</th></tr>
+      <tr><td><b>FDA device-status (D2)</b> — is our software a §201(h) device / SaMD, or a
+        non-device wellness / decision-support function?</td><td>A qualified <b>FDA regulatory
+        consultant</b> (not us; framed and deferred in ADR-0041)</td><td>Clinical claims,
+        reimbursement eligibility, and marketing posture. The highest-leverage single action.</td></tr>
+      <tr><td><b>Microsoft BAA/DPA</b> confirmation for Azure</td><td>You + counsel</td>
+        <td>The ability to touch <b>real patient data</b> — the prerequisite for a pilot and for
+        the dataset moat.</td></tr>
+      <tr><td><b>Measurement validation</b> of the NSI (content → reliability → responsiveness → MCID)</td>
+        <td>A validation study (SBIR-funded), independent biostatistician</td><td>Any claim
+        stronger than "trend visualization," payer credibility, and the moat's defensibility.</td></tr>
+    </table>
+
+    <h2 class="section">5 · The revenue thesis (real, but gated)</h2>
+    <p>
+      The reimbursement path is <b>Remote Therapeutic Monitoring (RTM)</b> — our musculoskeletal
+      gait/balance stream plus patient-reported function fit the RTM device-supply and
+      treatment-management codes, and RTM uniquely permits patient self-report. Vendor estimates
+      for comparable products run roughly <b>$100+/patient/month</b> <i>(assertion pending coder
+      validation — not a payable rate)</i>. But this is <b>double-gated</b>: it needs the FDA
+      determination (RTM data must come from a device) <i>and</i> a certified-coder + counsel
+      sign-off, and the time-capture tooling it requires is not built. We are an
+      <b>enabler, not a biller</b>: a servicing clinic bills; we capture and export evidence.
+    </p>
+
+    <h2 class="section">6 · Funding path</h2>
+    <p>
+      The strategy is <b>non-dilutive first</b>: NIH <b>SBIR/STTR</b> mapped to NINDS/NIDDK/NIA/NIBIB
+      (Phase I ≈ $150–300k feasibility; Phase II ≈ $1–2M), to fund exactly the validation the
+      product needs. In parallel: <b>BioMech as the natural first strategic conversation</b>,
+      clinic <b>pilot Letters of Intent</b> (highest-leverage de-risking), and modest angel/SAFE
+      bridge capital. Seed VC comes <i>after</i> a deployed pilot + the FDA determination + early
+      reimbursement evidence — engineering is ahead; regulatory clarity and traction are the gaps.
+    </p>
+
+    <h2 class="section">7 · Your three highest-leverage decisions</h2>
+    <ul>
+      <li><b>Engage the FDA regulatory consultant (D2).</b> One written opinion unblocks the most
+        — the brief is already written for them (<code>fda-regulatory-consultant-brief.md</code>).</li>
+      <li><b>Confirm the Azure DPA/BAA with counsel</b> so a consented pilot can begin — the pilot
+        is what starts the dataset moat and satisfies grant/VC "real data" milestones.</li>
+      <li><b>Green-light the SBIR track</b> (DUNS/UEI + the validation study design) — it funds the
+        #1 gap (measurement rigor) without dilution.</li>
+    </ul>
+    <p>
+      Everything else (the reimbursement build, the clinician loop, iOS) is correctly sequenced
+      <i>behind</i> these three.
+    </p>
+
+    <div class="foot">
+      Not investment, legal, regulatory, or billing advice, and no claim of compliance,
+      certification, or FDA clearance. Living records: <code>docs/roadmap-status.md</code>,
+      <code>docs/decisions/</code> (ADRs), <code>docs/compliance/gap-register/</code>,
+      <code>docs/product/market-position-and-gaps.md</code>,
+      <code>docs/business/funding-strategy.md</code>.
+    </div>
+  </body>
+</html>
