@@ -27,6 +27,7 @@ import type {
   RegisterIn,
   TokenOut,
   Trajectory,
+  VisitSummary,
   WearableImportOut,
   WearableSampleIn,
 } from './types';
@@ -62,6 +63,16 @@ export async function deleteAccount(password: string): Promise<void> {
  */
 export function exportMyData(): Promise<ExportOut> {
   return request<ExportOut>('/me/export');
+}
+
+/**
+ * The patient-held Visit-Ready Summary (ADR-0045) — a windowed, curated re-presentation of
+ * the signed-in patient's own analyzable record, the SAME assembly the clinician view answers
+ * from. `window` must be one of 30/60/90/120/365 (the backend 422s anything else). Patient
+ * role only (403 otherwise); the response is PHI, served Cache-Control: no-store.
+ */
+export function getMyVisitSummary(windowDays: number): Promise<VisitSummary> {
+  return request<VisitSummary>(`/me/visit-summary?window=${String(windowDays)}`);
 }
 
 // ---- trajectory ----
@@ -192,6 +203,20 @@ function clinicPatientPath(patientId: string, suffix: string): string {
 /** DETERMINISTIC only — the backend never narrates the clinician view (ADR-0012). */
 export function getClinicPatientTrajectory(patientId: string): Promise<Trajectory> {
   return request<Trajectory>(clinicPatientPath(patientId, '/trajectory'));
+}
+
+/**
+ * The clinician-side Visit-Ready Summary (ADR-0045) — the SAME VisitSummary shape/data as the
+ * patient print, behind the consented-connection gate (non-enumerating 404, never 403). Always
+ * deterministic (no narrator). `window` must be one of 30/60/90/120/365.
+ */
+export function getClinicPatientVisitSummary(
+  patientId: string,
+  windowDays: number,
+): Promise<VisitSummary> {
+  return request<VisitSummary>(
+    clinicPatientPath(patientId, `/visit-summary?window=${String(windowDays)}`),
+  );
 }
 
 export function getClinicPatientObservations(

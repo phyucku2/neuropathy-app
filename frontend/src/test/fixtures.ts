@@ -12,10 +12,13 @@ import type {
   EmrPullOut,
   ExportObservation,
   ExportOut,
+  LeadSection,
   MeOut,
   ObservationItem,
   PanelOut,
+  PlaceholderRow,
   Trajectory,
+  VisitSummary,
 } from '../api/types';
 
 export const TEST_ACCESS_TOKEN = 'synthetic-access-token';
@@ -211,6 +214,270 @@ export const OBSERVATIONS: ObservationItem[] = [
     status: 'final',
   },
 ];
+
+// ---- Visit-Ready Summary (ADR-0045) — mirrors backend/app/schemas/visit_summary.py ----
+
+/** The backend's non-diagnostic note + sheet label, verbatim (ride in the envelope). */
+export const VISIT_SUMMARY_DISCLAIMER =
+  'This is a wellness summary of your own recorded data, not a diagnosis. Each item shows its ' +
+  'source and date. Share it with your care team to discuss what it means.';
+export const VISIT_SUMMARY_SHEET_LABEL = 'current record, not a complete medical record';
+
+/** The four render-only placeholder rows (Phase 2/3 capture, ADR-0045). */
+export const VISIT_SUMMARY_PLACEHOLDERS: PlaceholderRow[] = [
+  {
+    key: 'medications',
+    label: 'Medications & supplements',
+    status: 'not_yet_tracked',
+    phase: 'Phase 2',
+  },
+  { key: 'emr_notes', label: 'EMR clinician notes', status: 'not_yet_tracked', phase: 'Phase 2' },
+  {
+    key: 'patient_notes',
+    label: 'Patient notes & events',
+    status: 'not_yet_tracked',
+    phase: 'Phase 2',
+  },
+  { key: 'nutrition', label: 'Nutrition', status: 'not_yet_tracked', phase: 'Phase 3' },
+];
+
+/** A rich default summary (window 60 → lead_section 'what_changed'). Self-consistent synthetic
+ *  data; the status reuses TRAJECTORY_IMPROVING so the hero renders the full NSI card. */
+export const VISIT_SUMMARY: VisitSummary = {
+  generated_at: '2026-07-15T10:00:00Z',
+  schema_version: '1.0',
+  subject_id: '22222222-2222-4222-8222-222222222222',
+  window_days: 60,
+  window_end: '2026-07-15T10:00:00Z',
+  current_window_start: '2026-05-16T10:00:00Z',
+  prior_window_start: '2026-03-17T10:00:00Z',
+  lead_section: 'what_changed',
+  status: TRAJECTORY_IMPROVING,
+  what_changed: {
+    new_labs: [
+      {
+        code: '4548-4',
+        label: 'Long-term blood sugar',
+        source: 'lab',
+        origin: 'ehr_imported',
+        unit: '%',
+        latest_value: 7.2,
+        latest_at: '2026-06-20T09:00:00Z',
+        prior_value: 6.9,
+        prior_at: '2026-03-30T09:00:00Z',
+        prior_unit: '%',
+        delta: 0.3,
+        unit_changed: false,
+      },
+    ],
+    symptom_trend: [
+      {
+        code: 'symptom_pain',
+        label: 'nerve pain',
+        source: 'adl',
+        origin: 'patient_reported',
+        current_direction: 'improving',
+        prior_direction: 'stable',
+        changed: true,
+      },
+      {
+        code: 'symptom_numbness',
+        label: 'numbness or tingling',
+        source: 'adl',
+        origin: 'patient_reported',
+        current_direction: 'stable',
+        prior_direction: 'stable',
+        changed: false,
+      },
+    ],
+    adherence: {
+      last_checkin_at: '2026-07-12T08:00:00Z',
+      days_since_last_checkin: 3,
+      checkins_in_window: 20,
+      checkins_in_prior_window: 18,
+    },
+    latest_biomech: [
+      {
+        code: 'biomech_balance_score',
+        label: 'Balance score',
+        source: 'biomech',
+        origin: 'document_imported',
+        latest_value: 65,
+        latest_at: '2026-07-02T10:00:00Z',
+        prior_value: 57,
+        prior_at: '2026-05-06T10:00:00Z',
+        direction: 'improving',
+      },
+    ],
+  },
+  symptoms: [
+    {
+      code: 'symptom_pain',
+      label: 'nerve pain',
+      source: 'adl',
+      origin: 'patient_reported',
+      points: [
+        { at: '2026-05-20T08:00:00Z', value: 6 },
+        { at: '2026-06-10T08:00:00Z', value: 5 },
+        { at: '2026-07-12T08:00:00Z', value: 4 },
+      ],
+      start_value: 6,
+      start_at: '2026-05-20T08:00:00Z',
+      latest_value: 4,
+      latest_at: '2026-07-12T08:00:00Z',
+      direction: 'improving',
+    },
+    {
+      code: 'symptom_numbness',
+      label: 'numbness or tingling',
+      source: 'adl',
+      origin: 'patient_reported',
+      points: [
+        { at: '2026-05-20T08:00:00Z', value: 5 },
+        { at: '2026-07-12T08:00:00Z', value: 5 },
+      ],
+      start_value: 5,
+      start_at: '2026-05-20T08:00:00Z',
+      latest_value: 5,
+      latest_at: '2026-07-12T08:00:00Z',
+      direction: 'stable',
+    },
+  ],
+  function: [
+    {
+      code: 'adl_walking',
+      label: 'Walking',
+      source: 'adl',
+      origin: 'patient_reported',
+      points: [
+        { at: '2026-05-20T08:00:00Z', value: 6 },
+        { at: '2026-07-12T08:00:00Z', value: 8 },
+      ],
+      start_value: 6,
+      start_at: '2026-05-20T08:00:00Z',
+      latest_value: 8,
+      latest_at: '2026-07-12T08:00:00Z',
+      direction: 'improving',
+    },
+    {
+      // A single-reading series so the "not enough readings to draw a line" branch renders.
+      code: 'adl_balance_confidence',
+      label: 'Balance confidence',
+      source: 'adl',
+      origin: 'patient_reported',
+      points: [{ at: '2026-05-20T08:00:00Z', value: 7 }],
+      start_value: null,
+      start_at: null,
+      latest_value: 7,
+      latest_at: '2026-05-20T08:00:00Z',
+      direction: 'insufficient_data',
+    },
+  ],
+  balance_gait: [
+    {
+      code: 'biomech_balance_score',
+      label: 'Balance score',
+      source: 'biomech',
+      origin: 'document_imported',
+      latest_value: 65,
+      latest_at: '2026-07-02T10:00:00Z',
+      prior_value: 57,
+      prior_at: '2026-05-06T10:00:00Z',
+      direction: 'improving',
+    },
+    {
+      // No prior value → the "no prior value in the record" branch + insufficient_data direction.
+      code: 'biomech_gait_score',
+      label: 'Gait score',
+      source: 'biomech',
+      origin: 'document_imported',
+      latest_value: 72,
+      latest_at: '2026-07-02T10:00:00Z',
+      prior_value: null,
+      prior_at: null,
+      direction: 'insufficient_data',
+    },
+  ],
+  labs: [
+    {
+      code: '4548-4',
+      label: 'Long-term blood sugar',
+      source: 'lab',
+      origin: 'ehr_imported',
+      unit: '%',
+      latest_value: 7.2,
+      latest_at: '2026-06-20T09:00:00Z',
+      prior_value: 6.9,
+      prior_at: '2026-03-30T09:00:00Z',
+      prior_unit: '%',
+      delta: 0.3,
+      unit_changed: false,
+    },
+  ],
+  activity: [
+    {
+      code: 'wearable_walking_asymmetry',
+      label: 'Walking asymmetry',
+      source: 'wearable',
+      origin: 'device_stream',
+      count: 24,
+      mean: 6.8,
+      min: 6.1,
+      max: 7.6,
+      latest_at: '2026-07-02T10:00:00Z',
+    },
+  ],
+  placeholders: VISIT_SUMMARY_PLACEHOLDERS,
+  questions: {
+    data_completeness: [
+      'A new long-term blood sugar result was recorded in this window since the last value — review in context.',
+    ],
+    change_pointed: [],
+  },
+  disclaimer: VISIT_SUMMARY_DISCLAIMER,
+  sheet_label: VISIT_SUMMARY_SHEET_LABEL,
+};
+
+/** The empty-account honesty state: NSI null, every section empty, minimal questions. */
+export const VISIT_SUMMARY_INSUFFICIENT: VisitSummary = {
+  ...VISIT_SUMMARY,
+  status: TRAJECTORY_INSUFFICIENT,
+  what_changed: {
+    new_labs: [],
+    symptom_trend: [],
+    adherence: {
+      last_checkin_at: null,
+      days_since_last_checkin: null,
+      checkins_in_window: 0,
+      checkins_in_prior_window: 0,
+    },
+    latest_biomech: [],
+  },
+  symptoms: [],
+  function: [],
+  balance_gait: [],
+  labs: [],
+  activity: [],
+  questions: { data_completeness: [], change_pointed: [] },
+};
+
+/** With the D2 feature flag ON: the interpretive change-pointed prompts are populated. */
+export const VISIT_SUMMARY_WITH_CHANGE_QUESTIONS: VisitSummary = {
+  ...VISIT_SUMMARY,
+  questions: {
+    data_completeness: VISIT_SUMMARY.questions.data_completeness,
+    change_pointed: [
+      'The nerve pain trend direction changed over the last 60 days — ask the patient about it.',
+    ],
+  },
+};
+
+/** The backend computes lead_section from the window (short → what_changed, 120/365 →
+ *  trajectory) and echoes window_days; the mock mirrors that so the picker changes the payload. */
+export function visitSummaryForWindow(windowDays: number): VisitSummary {
+  const lead: LeadSection = windowDays <= 90 ? 'what_changed' : 'trajectory';
+  return { ...VISIT_SUMMARY, window_days: windowDays, lead_section: lead };
+}
 
 export const CAPABILITIES: CapabilityStateOut[] = [
   {

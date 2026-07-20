@@ -53,6 +53,9 @@ const SettingsPage = lazy(() =>
 const RecordsPage = lazy(() =>
   import('./features/records/RecordsPage').then((m) => ({ default: m.RecordsPage })),
 );
+const HandoutPage = lazy(() =>
+  import('./features/handout/HandoutPage').then((m) => ({ default: m.HandoutPage })),
+);
 const EmrCallbackPage = lazy(() =>
   import('./features/emr/EmrCallbackPage').then((m) => ({ default: m.EmrCallbackPage })),
 );
@@ -146,6 +149,9 @@ export function App() {
                 {/* Your Records (read-only, display-only) — reached from a card on the
                     Sources surface, NOT a bottom-nav tab (ADR-0039: five is the max). */}
                 <Route path="records" element={<RecordsPage />} />
+                {/* Visit-Ready Summary (ADR-0045): the patient-held print/PDF handout, reached
+                    from a Sources card (not a sixth nav tab — five is the accessible max). */}
+                <Route path="handout" element={<HandoutPage />} />
                 {/* The SMART redirect relay (ADR-0028): the EMR sends the patient's browser
                 to /emr/callback?code=..&state=..; this authenticated route forwards
                 them to the bearer-only backend callback. On native, the App-Links /

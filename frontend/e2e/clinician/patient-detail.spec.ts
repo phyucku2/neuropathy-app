@@ -20,6 +20,29 @@ test.describe('Clinician Patient detail', () => {
     ).toBeVisible();
   });
 
+  test('Summary tab renders the shared Visit-Ready Summary with a print/export affordance', async ({
+    page,
+  }) => {
+    // Stub print so the export affordance never opens a real dialog.
+    await page.addInitScript(() => {
+      window.print = () => {};
+    });
+    await signedInApp(page, { me: CLINICIAN_ME });
+    await page.goto(DETAIL_URL);
+
+    await page.getByRole('button', { name: 'Summary' }).click();
+    await expect(
+      page.getByRole('region', { name: /60 days summary for Pat Example/ }),
+    ).toBeVisible();
+    // SAME sourced sections + the co-located non-diagnostic note.
+    await expect(page.getByRole('heading', { name: 'What changed' })).toBeVisible();
+    await expect(page.getByRole('note')).toContainText('not a diagnosis');
+
+    // Print/export must not throw or open a dialog.
+    await page.getByRole('button', { name: 'Print or export' }).click();
+    await expect(page.getByRole('heading', { name: 'What changed' })).toBeVisible();
+  });
+
   test('Trend table shows cross-source rows including "not judged"', async ({ page }) => {
     await signedInApp(page, { me: CLINICIAN_ME, clinicObservations: CLINIC_OBSERVATIONS });
     await page.goto(DETAIL_URL);

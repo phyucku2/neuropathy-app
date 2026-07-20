@@ -1080,3 +1080,148 @@ h2 {
   min-height: 40px;
   padding: 8px 12px;
 }
+
+/* ---------- Visit-Ready Summary handout (ADR-0045) ---------- */
+
+/* Screen controls (window picker + print) sit in a row; hidden entirely in print. */
+.handout-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.handout-disclose {
+  margin: 0 0 14px;
+}
+
+.handout-section {
+  margin-bottom: 14px;
+}
+
+/* A metric row inside a section: the metric name, its source chip, and its direction word. */
+.handout-row {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.handout-row:last-child {
+  border-bottom: 0;
+}
+
+.handout-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.handout-metric {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.handout-span {
+  margin: 4px 0 0;
+  font-size: var(--text-small);
+}
+
+.handout-change {
+  margin-top: 10px;
+}
+
+.handout-change h3 {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-brand-navy);
+  margin: 0 0 4px;
+}
+
+.handout-questions {
+  margin: 6px 0 0;
+  padding-left: 20px;
+}
+
+.handout-questions li {
+  margin-bottom: 6px;
+}
+
+/* Direction word + glyph — the colour is a reinforcement; the WORD carries the meaning
+ * (WCAG 1.4.1). All three pass AA on white and stay legible when printed in greyscale. */
+.hd-dir {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.hd-dir.up {
+  color: #1f6f44;
+}
+
+.hd-dir.down {
+  color: #a23f2c;
+}
+
+.hd-dir.flat,
+.hd-dir.unjudged {
+  color: var(--color-text-secondary);
+}
+
+/* Dependency-free sparkline (inline SVG, monochrome, prints cleanly in black-and-white). */
+.sparkline {
+  display: block;
+  color: var(--color-brand-blue);
+  margin: 6px 0;
+  max-width: 100%;
+}
+
+.sheet-label {
+  margin-top: 16px;
+  font-style: italic;
+}
+
+/*
+ * Print stylesheet (ADR-0045): the browser's own dialog turns the handout into paper or a PDF —
+ * no PDF dependency in the bundle. Strip the app chrome and anything screen-only (`.no-print`),
+ * flatten the phone frame to the full page, and keep the status-hero gradient + white text
+ * legible with print-color-adjust. The co-located disclaimer and the sheet label stay visible.
+ */
+@media print {
+  .status-bar,
+  .tabbar,
+  .no-print {
+    display: none !important;
+  }
+
+  .app-frame,
+  .app-frame.clinician {
+    max-width: none;
+    height: auto;
+    background: #fff;
+  }
+
+  .app-body {
+    overflow: visible;
+    padding: 0;
+  }
+
+  body {
+    background: #fff;
+  }
+
+  /* Keep the hero's gradient background + white text on paper (otherwise white-on-white). */
+  .traj {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Avoid splitting a section card across a page break where the printer allows control. */
+  .handout-section,
+  .traj {
+    break-inside: avoid;
+  }
+}

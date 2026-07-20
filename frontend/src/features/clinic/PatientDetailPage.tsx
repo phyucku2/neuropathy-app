@@ -26,12 +26,14 @@ import { CapabilityOrders } from './CapabilityOrders';
 import { NonDiagnosticNote } from './NonDiagnosticNote';
 import { ObservationsTable } from './ObservationsTable';
 import { PatientNotFound } from './PatientNotFound';
+import { PatientVisitSummary } from './PatientVisitSummary';
 import { TrendTable } from './TrendTable';
 
-type TabKey = 'trajectory' | 'trend-table' | 'observations' | 'features';
+type TabKey = 'trajectory' | 'summary' | 'trend-table' | 'observations' | 'features';
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'trajectory', label: 'Trajectory' },
+  { key: 'summary', label: 'Summary' },
   { key: 'trend-table', label: 'Trend table' },
   { key: 'observations', label: 'Observations' },
   { key: 'features', label: 'Features' },
@@ -150,6 +152,13 @@ export function PatientDetailPage() {
       </div>
       {tab === 'trajectory' && (
         <TrajectoryTab
+          patientId={patientId}
+          displayName={entry.display_name}
+          onNotFound={handleNotFound}
+        />
+      )}
+      {tab === 'summary' && (
+        <PatientVisitSummary
           patientId={patientId}
           displayName={entry.display_name}
           onNotFound={handleNotFound}

@@ -79,6 +79,46 @@ describe('PatientDetailPage — trajectory tab', () => {
   });
 });
 
+describe('PatientDetailPage — visit summary tab', () => {
+  it('renders the SAME deterministic Visit-Ready Summary the patient prints', async () => {
+    actAsClinician();
+    await openTab('Summary');
+    // The shared status hero, named for the patient, plus the co-located disclaimer.
+    expect(
+      await screen.findByRole('region', { name: /60 days summary for Pat Example/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('note')).toHaveTextContent(/not a diagnosis/);
+    // Sourced sections + the print/export affordance.
+    expect(screen.getByRole('heading', { name: 'What changed' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Print or export' })).toBeEnabled();
+    // Deterministic only — the change-pointed (D2-gated) prompts are absent by default.
+    expect(screen.queryByText(/ask the patient about it/)).not.toBeInTheDocument();
+  });
+
+  it('changes the window and refetches', async () => {
+    actAsClinician();
+    const user = await openTab('Summary');
+    await screen.findByRole('region', { name: /60 days summary for Pat Example/ });
+    await user.click(screen.getByRole('button', { name: '1 year' }));
+    expect(
+      await screen.findByRole('region', { name: /1 year summary for Pat Example/ }),
+    ).toBeInTheDocument();
+  });
+
+  it('collapses the whole view to the neutral not-found screen on a 404', async () => {
+    actAsClinician();
+    server.use(
+      http.get('/clinic/patients/:patientId/visit-summary', () =>
+        HttpResponse.json({ detail: 'Patient not found' }, { status: 404 }),
+      ),
+    );
+    await openTab('Summary');
+    expect(await screen.findByRole('heading', { name: 'Patient not found' })).toBeInTheDocument();
+    // No PHI header left above a not-found body.
+    expect(screen.queryByText('Pat Example')).not.toBeInTheDocument();
+  });
+});
+
 describe('PatientDetailPage — cross-source trend table', () => {
   it('shows one judged row per metric and never says "stable"', async () => {
     actAsClinician();

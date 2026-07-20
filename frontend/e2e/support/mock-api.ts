@@ -24,10 +24,13 @@ import type {
   EmrPullOut,
   ExportObservation,
   ExportOut,
+  LeadSection,
   MeOut,
   ObservationItem,
   PanelOut,
+  PlaceholderRow,
   Trajectory,
+  VisitSummary,
 } from '../../src/api/types';
 
 // ---- synthetic credentials + tokens (mirror src/test/fixtures.ts) ----
@@ -310,6 +313,179 @@ export const EMR_PULL: EmrPullOut = {
   ],
 };
 
+// ---- Visit-Ready Summary (ADR-0045) — mirrors src/test/fixtures.ts + backend schema ----
+
+const VISIT_SUMMARY_PLACEHOLDERS: PlaceholderRow[] = [
+  {
+    key: 'medications',
+    label: 'Medications & supplements',
+    status: 'not_yet_tracked',
+    phase: 'Phase 2',
+  },
+  { key: 'emr_notes', label: 'EMR clinician notes', status: 'not_yet_tracked', phase: 'Phase 2' },
+  {
+    key: 'patient_notes',
+    label: 'Patient notes & events',
+    status: 'not_yet_tracked',
+    phase: 'Phase 2',
+  },
+  { key: 'nutrition', label: 'Nutrition', status: 'not_yet_tracked', phase: 'Phase 3' },
+];
+
+export const VISIT_SUMMARY: VisitSummary = {
+  generated_at: '2026-07-15T10:00:00Z',
+  schema_version: '1.0',
+  subject_id: '22222222-2222-4222-8222-222222222222',
+  window_days: 60,
+  window_end: '2026-07-15T10:00:00Z',
+  current_window_start: '2026-05-16T10:00:00Z',
+  prior_window_start: '2026-03-17T10:00:00Z',
+  lead_section: 'what_changed',
+  status: TRAJECTORY_IMPROVING,
+  what_changed: {
+    new_labs: [
+      {
+        code: '4548-4',
+        label: 'Long-term blood sugar',
+        source: 'lab',
+        origin: 'ehr_imported',
+        unit: '%',
+        latest_value: 7.2,
+        latest_at: '2026-06-20T09:00:00Z',
+        prior_value: 6.9,
+        prior_at: '2026-03-30T09:00:00Z',
+        prior_unit: '%',
+        delta: 0.3,
+        unit_changed: false,
+      },
+    ],
+    symptom_trend: [
+      {
+        code: 'symptom_pain',
+        label: 'nerve pain',
+        source: 'adl',
+        origin: 'patient_reported',
+        current_direction: 'improving',
+        prior_direction: 'stable',
+        changed: true,
+      },
+    ],
+    adherence: {
+      last_checkin_at: '2026-07-12T08:00:00Z',
+      days_since_last_checkin: 3,
+      checkins_in_window: 20,
+      checkins_in_prior_window: 18,
+    },
+    latest_biomech: [
+      {
+        code: 'biomech_balance_score',
+        label: 'Balance score',
+        source: 'biomech',
+        origin: 'document_imported',
+        latest_value: 65,
+        latest_at: '2026-07-02T10:00:00Z',
+        prior_value: 57,
+        prior_at: '2026-05-06T10:00:00Z',
+        direction: 'improving',
+      },
+    ],
+  },
+  symptoms: [
+    {
+      code: 'symptom_pain',
+      label: 'nerve pain',
+      source: 'adl',
+      origin: 'patient_reported',
+      points: [
+        { at: '2026-05-20T08:00:00Z', value: 6 },
+        { at: '2026-06-10T08:00:00Z', value: 5 },
+        { at: '2026-07-12T08:00:00Z', value: 4 },
+      ],
+      start_value: 6,
+      start_at: '2026-05-20T08:00:00Z',
+      latest_value: 4,
+      latest_at: '2026-07-12T08:00:00Z',
+      direction: 'improving',
+    },
+  ],
+  function: [
+    {
+      code: 'adl_walking',
+      label: 'Walking',
+      source: 'adl',
+      origin: 'patient_reported',
+      points: [
+        { at: '2026-05-20T08:00:00Z', value: 6 },
+        { at: '2026-07-12T08:00:00Z', value: 8 },
+      ],
+      start_value: 6,
+      start_at: '2026-05-20T08:00:00Z',
+      latest_value: 8,
+      latest_at: '2026-07-12T08:00:00Z',
+      direction: 'improving',
+    },
+  ],
+  balance_gait: [
+    {
+      code: 'biomech_balance_score',
+      label: 'Balance score',
+      source: 'biomech',
+      origin: 'document_imported',
+      latest_value: 65,
+      latest_at: '2026-07-02T10:00:00Z',
+      prior_value: 57,
+      prior_at: '2026-05-06T10:00:00Z',
+      direction: 'improving',
+    },
+  ],
+  labs: [
+    {
+      code: '4548-4',
+      label: 'Long-term blood sugar',
+      source: 'lab',
+      origin: 'ehr_imported',
+      unit: '%',
+      latest_value: 7.2,
+      latest_at: '2026-06-20T09:00:00Z',
+      prior_value: 6.9,
+      prior_at: '2026-03-30T09:00:00Z',
+      prior_unit: '%',
+      delta: 0.3,
+      unit_changed: false,
+    },
+  ],
+  activity: [
+    {
+      code: 'wearable_walking_asymmetry',
+      label: 'Walking asymmetry',
+      source: 'wearable',
+      origin: 'device_stream',
+      count: 24,
+      mean: 6.8,
+      min: 6.1,
+      max: 7.6,
+      latest_at: '2026-07-02T10:00:00Z',
+    },
+  ],
+  placeholders: VISIT_SUMMARY_PLACEHOLDERS,
+  questions: {
+    data_completeness: [
+      'A new long-term blood sugar result was recorded in this window since the last value — review in context.',
+    ],
+    change_pointed: [],
+  },
+  disclaimer:
+    'This is a wellness summary of your own recorded data, not a diagnosis. Each item shows its ' +
+    'source and date. Share it with your care team to discuss what it means.',
+  sheet_label: 'current record, not a complete medical record',
+};
+
+/** Echo window_days + compute lead_section exactly like the backend (short → what_changed). */
+function visitSummaryForWindow(windowDays: number): VisitSummary {
+  const lead: LeadSection = windowDays <= 90 ? 'what_changed' : 'trajectory';
+  return { ...VISIT_SUMMARY, window_days: windowDays, lead_section: lead };
+}
+
 // ---- clinician fixtures ----
 
 export const PANEL_PATIENT_ID = '22222222-2222-4222-8222-222222222222';
@@ -545,6 +721,11 @@ export async function installApiMocks(page: Page, scenario: Scenario = {}): Prom
         state.dataExports += 1;
         return fulfillJson(route, 200, EXPORT_OUT);
       }
+      // Visit-Ready Summary (ADR-0045): windowed handout, echoes window_days + lead_section.
+      if (method === 'GET' && path === '/me/visit-summary') {
+        const window = Number(new URL(req.url()).searchParams.get('window') ?? '60');
+        return fulfillJson(route, 200, visitSummaryForWindow(window));
+      }
       if (method === 'GET' && path === '/trajectory') {
         return fulfillJson(route, 200, trajectory);
       }
@@ -675,6 +856,15 @@ export async function installApiMocks(page: Page, scenario: Scenario = {}): Prom
       }
       if (method === 'GET' && path === '/clinic/patients') {
         return fulfillJson(route, 200, panel);
+      }
+      const summaryMatch = /^\/clinic\/patients\/([^/]+)\/visit-summary$/.exec(path);
+      if (method === 'GET' && summaryMatch) {
+        const id = decodeURIComponent(summaryMatch[1] ?? '');
+        if (id !== PANEL_PATIENT_ID) {
+          return patientNotFound(route);
+        }
+        const window = Number(new URL(req.url()).searchParams.get('window') ?? '60');
+        return fulfillJson(route, 200, visitSummaryForWindow(window));
       }
       const patientMatch =
         /^\/clinic\/patients\/([^/]+)\/(trajectory|observations|capabilities)$/.exec(path);
