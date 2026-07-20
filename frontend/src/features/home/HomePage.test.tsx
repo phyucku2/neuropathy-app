@@ -49,6 +49,10 @@ describe('HomePage', () => {
     const note = screen.getByRole('note');
     expect(note).toHaveTextContent(/not a diagnosis/i);
     expect(hero.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // With data, the primary CTAs show and the empty-state Get-started card does not.
+    expect(screen.getByRole('link', { name: 'See your trends' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Get started' })).not.toBeInTheDocument();
   });
 
   it('renders the insufficient-data variant without a signals card', async () => {
@@ -60,6 +64,24 @@ describe('HomePage', () => {
     );
     expect(screen.queryByText("What's driving it")).not.toBeInTheDocument();
     expect(screen.getByText('No BioMech reports yet')).toBeInTheDocument();
+
+    // Empty state fills the space with onboarding (Get-started card), not a blank screen.
+    const getStarted = screen.getByRole('region', { name: 'Get started' });
+    expect(getStarted).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Do today.s check-in/ })).toHaveAttribute(
+      'href',
+      '/check-in',
+    );
+    expect(screen.getByRole('link', { name: /Connect your health record/ })).toHaveAttribute(
+      'href',
+      '/settings',
+    );
+    expect(screen.getByRole('link', { name: /Add a lab or report/ })).toHaveAttribute(
+      'href',
+      '/add',
+    );
+    // The bottom "See your trends" CTA is hidden when there is no trend to see.
+    expect(screen.queryByRole('link', { name: 'See your trends' })).not.toBeInTheDocument();
   });
 
   it('renders an unjudged signal as "not enough data", never as "stable"', async () => {
