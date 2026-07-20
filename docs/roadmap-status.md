@@ -65,7 +65,7 @@ Portion 3.
 | # | Portion | Built | Tested | Merged | Notes |
 |---|---|---|---|---|---|
 | 1 | Patient EMR-connect UI + per-provider client ids + native OAuth return path (ADR-0028) — Sources "Health record connections" card (picker/search/connect), authenticated `/emr/callback` SPA relay (backend auth unchanged), system-browser OAuth on native (`@capacitor/browser`, never the WebView), `appUrlOpen` App-Links/custom-scheme routing + manifest scheme filter (assetlinks template in `docs/mobile/emr-app-links.md`), `SMART_CLIENT_ID_<VENDOR>` per registry entry, scope trim to `launch/patient patient/Observation.read offline_access` — closes runbook code rows 7/8/9/10 | ✅ | ✅ | ⏳ | Backend 100% cov (live-Postgres green); frontend unit ≥90% all four; 31 Playwright specs incl. the full connect→callback→pull→revoke round trip in the built bundle, zero console errors; `cap sync` warning-free; prod audit + license + secret scans clean. Known gap (recorded in ADR-0028): no EMR-connections LIST endpoint yet — post-connect confirmation carries pull/revoke; list endpoint + card list is a follow-up portion. |
-| 2 | Vendor registrations + sandbox smoke (runbook §§1–5: Epic + Oracle accounts, app registrations, client ids into env, §5 smoke both vendors — record `granted_scope` + the Epic refresh-token outcome) | — | — | — | **USER-side** (owner credentials; see runbook checklist rows 1–6, 11–12). The app side is ready: the smoke test can now run through the UI end-to-end. |
+| 2 | Vendor registrations + sandbox smoke (runbook §§1–5: Epic + Oracle accounts, app registrations, client ids into env, §5 smoke both vendors — record `granted_scope` + the Epic refresh-token outcome) | ◑ Epic | — | — | **Epic sandbox: REGISTERED (2026-07-19)** — app "Advanced Health and Wellness Group" (Draft = correct for non-prod), Non-Production Client ID issued + wired into the live backend (`SMART_CLIENT_ID_EPIC`, env-only). The authorize redirect works (correct endpoint/client/`aud`/PKCE); the end-to-end pull awaits Epic's ~1h client-sync (see runbook §1 status). Oracle: still USER-side. |
 | 3 | Production enrollment (per-org FHIR bases, Epic mark-live/distribution, Oracle per-tenant provisioning, deployed HTTPS origin + `assetlinks.json`) | — | — | — | USER + ops; after #2. Refresh-token rotation job (runbook row 13) is informed by #2's outcomes. |
 
 **Patient experience** — quality-of-life portions on the shipped patient app
@@ -130,9 +130,29 @@ data-gap signal + PRO-to-EHR write-back) is **specced** — a phased, gated desi
 "alerts" and write-back are deferred behind the FDA framework (ADR-0041) and per-vendor write
 support, not built blind.
 
-**In progress / next:** NSI Function two-tier (fold fidelity-weighted wearable data into the
-score); BioMech eyes-open−closed gap; Android Health Connect connector; iOS + HealthKit
-(pending Mac + Apple account). Backlog detail in
+## Compliance, clinician-side specs & live bring-up (2026-07-18 → 07-19)
+
+| Item | Decision / doc | State | Notes |
+|---|---|---|---|
+| **HIPAA/SOC2/function pre-audit** (AI-run, adversarially verified) | `docs/compliance/sweep-2026-07-18.md` | ✅ Merged (#65) | 22 confirmed findings (1 HIGH / 4 MEDIUM / 17 LOW) + remediation plan |
+| **Sweep MEDIUM remediation** — DB-level import idempotency (partial UNIQUE + `add_if_absent`, migration 0008), bounded EMR paging, JWT fail-closed on the serving path, nginx PHI-log comment | (sweep follow-up) | ✅ Merged (#66) | HIGH + 3 LOW landed in #65; the 4 MEDIUMs in #66 |
+| **Visit-Ready Summary** (clinician handout) + between-visit capture: windowed summary, meds/supplements (patient + FHIR + camera-with-confirm), patient notes/events, EMR clinician-notes pull, "what changed" + questions | ADR-0045 | 🧭 Spec (PR #67) | Reuses the ADR-0031 export assembly; non-diagnostic; P2/P3 gated. Build tasks queued |
+| **Patient↔clinician communication + interactive-time ledger** | ADR-0046 | 🧭 Spec (PR #67) | Care feature + the (named-but-unbuilt) RTM interactive-time evidence; billing use gated on D1+D2 |
+| **Clinical-review packet** (Dr. Fornari — scientific soundness + content validity) | `docs/product/clinical-review-packet.md` | ✅ Merged (#66) | Explicitly NOT an FDA or validation call |
+| **FDA regulatory-consultant brief** (decision D2 — §201(h)/SaMD, CDS carve-out, general-wellness, accessory) | `docs/product/fda-regulatory-consultant-brief.md` | ✅ Merged (#66) | Standalone, sendable version of ADR-0041 §D2 |
+| **Azure live staging deployment** | `docs/ops/deploy-azure.md` | ✅ Live (synthetic) | `neuropathy-rg2` (eastus2): backend + frontend + Postgres + migration job; **register 201 / login 200 verified end-to-end**. Fixed the backend-ingress `allowInsecure` 301 (live + Bicep) |
+| **Epic sandbox registration** | `docs/emr/sandbox-registration-runbook.md §1` | ◑ Registered | Non-Production Client ID wired; end-to-end pull awaits Epic's ~1h sync |
+
+**Next operational steps (owner + ops):** confirm the Azure DPA/BAA (§0) before real PHI;
+retry the Epic connect after the ~1h sync; rebuild the images **SHA-tagged from `main`** and
+redeploy via the Bicep (passing `smartClientIdEpic`/`smartRedirectUri`) so the live app is
+current + reproducible (the running `:v1` image predates this session's merges); then stand up a
+separate production environment post-BAA.
+
+**In progress / next:** Home empty-state "Get started" block (fills the dead space, aids 60+
+activation); NSI Function two-tier (fold fidelity-weighted wearable data into the score);
+BioMech eyes-open−closed gap; Android Health Connect connector; iOS + HealthKit (pending Mac +
+Apple account). ADR-0045 build tasks (P1 ×3, P2 ×3, P3 ×1). Backlog detail in
 [`docs/product/roadmap-buildout-specs.md`](product/roadmap-buildout-specs.md).
 **V2:** AI photo food logging (honest ranged-estimate) — architecture decided (**ADR-0042**):
 **GPT-4o-vision (Azure, under Microsoft's BAA) + free nutrition DBs** (Open Food Facts barcode /

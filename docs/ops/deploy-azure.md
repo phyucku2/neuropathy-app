@@ -325,6 +325,22 @@ on first deploy** (§9): confirm an API path (e.g. `POST /auth/login`) succeeds 
 frontend origin*, not just against the backend directly — internal-ingress DNS/port specifics
 vary, and `NGINX_RESOLVER` / `BACKEND_ORIGIN` are the two knobs if a path 502s.
 
+### 7.2 The backend internal ingress MUST allow plain HTTP (`allowInsecure: true`) — fixed 2026-07-19
+
+nginx reverse-proxies to the backend over **HTTP** (`proxy_pass http://$backend_origin`). A
+Container Apps ingress with `allowInsecure: false` (the platform default) **301-redirects
+HTTP→HTTPS** — and nginx passes that redirect straight back to the browser, so *every* proxied
+API call fails with a `301` whose `Location` points at `https://<backend-internal-fqdn>/…`.
+Symptom on the eastus2 bring-up: `GET /healthz` (answered locally by nginx) was `200`, but
+`POST /auth/register` and `/auth/login` were `301`. The Bicep now sets `allowInsecure: true` on
+the **backend (internal)** ingress only — internal-only traffic within the environment network,
+the documented same-origin-proxy pattern; the **external frontend** ingress stays
+`allowInsecure: false` (public HTTP→HTTPS redirect is correct there). A live hotfix on an
+already-deployed stack is:
+```bash
+az containerapp ingress update -n <namePrefix>-backend -g "$RG" --allow-insecure true
+```
+
 If you would rather not use the reverse-proxy at all, the alternative is cross-origin
 (`API_BASE_URL` = the backend's public URL + an **external** backend ingress) — but the backend
 ships **no CORS layer**, so browser calls are blocked until CORS is added. Prefer the
@@ -416,9 +432,11 @@ same environment) — proves the API + DB independent of the frontend proxy cave
 curl -fsS http://<backendInternalFqdn>/healthz   # {"status":"ok"}
 curl -fsS http://<backendInternalFqdn>/readyz    # {"status":"ready","mode":"database"} (200; 503 if DB down)
 
-# Register + login (durable auth end-to-end):
+# Register + login (durable auth end-to-end). NOTE: /auth/register requires
+# display_name (schemas/auth.py RegisterIn: email, password ≥8, display_name) — omitting
+# it 422s. Verified live 2026-07-19: register -> 201, login -> 200.
 curl -fsS -X POST http://<backendInternalFqdn>/auth/register -H 'content-type: application/json' \
-  -d '{"email":"you@example.com","password":"a-strong-passphrase"}'
+  -d '{"email":"you@example.com","password":"a-strong-passphrase","display_name":"You"}'
 curl -fsS -X POST http://<backendInternalFqdn>/auth/login -H 'content-type: application/json' \
   -d '{"email":"you@example.com","password":"a-strong-passphrase"}'   # -> access token
 
@@ -442,8 +460,24 @@ resolve §7.1.
   The `.env.example` files hold placeholders only.
 - **Async DB driver + SSL** — the one "manual" wire, automated by the template (§5.1):
   `postgresql+asyncpg://…?ssl=require` (asyncpg's `ssl`, not libpq's `sslmode`).
-- **Frontend reverse-proxy on Container Apps** — the nginx Docker-resolver caveat (§7.1) is
-  the top open item; decide before production.
+- **Frontend reverse-proxy on Container Apps** — **validated live 2026-07-19**: register/login
+  succeed end-to-end *through the frontend origin* on the eastus2 staging stack. The resolver
+  auto-detect (§7.1) worked as designed; the one real fix was the backend ingress
+  `allowInsecure` (§7.2). No longer an open item.
+- **Live staging deployment (2026-07-19)** — synthetic-data-only staging is up in
+  `neuropathy-rg2` (eastus2): backend + frontend Container Apps, Postgres Flexible Server,
+  migration job (schema at head), Log Analytics. Core app verified (register 201 / login 200).
+  Epic sandbox is registered and wired (`SMART_CLIENT_ID_EPIC` + `SMART_REDIRECT_URI` set on the
+  backend). **Note:** those two SMART values were set live via `az containerapp update
+  --set-env-vars`; fold them into the Bicep params (`smartClientIdEpic`, `smartRedirectUri`) on
+  the next `az deployment group create` so a redeploy does not drop them. The running image is a
+  point-in-time build (tag `:v1`) — the professional path is to rebuild SHA-tagged from `main`
+  and redeploy via the Bicep.
+- **Deployment discipline (professional path)** — repo is the single source of truth; images are
+  SHA-tagged (build-images.yml); config/secrets live in the Bicep params, never hand-set as the
+  durable mechanism (live `az` edits are firefighting, then back-ported — as `allowInsecure`
+  was); staging (synthetic) stays separate from a production environment stood up only after the
+  Azure BAA/DPA is confirmed (§0). Migrations run (job) before the new backend revision rolls.
 - **Database networking** — the template uses **public access + an "allow Azure services"
   firewall rule** for simplicity. For a hardened PHI posture, switch Flexible Server to
   **private access** (VNet integration + Private DNS) and place the Container Apps environment
