@@ -52,5 +52,14 @@ test.describe('Patient Home', () => {
     await expect(hero.getByText('Not enough data yet', { exact: true })).toBeVisible();
     // No signals card when there are no signals.
     await expect(page.getByText("What's driving it")).toHaveCount(0);
+
+    // The empty space is filled with the Get-started onboarding card (three first steps),
+    // not left blank; the bottom "See your trends" CTA is hidden with no trend to see.
+    const getStarted = page.getByRole('region', { name: 'Get started' });
+    await expect(getStarted).toBeVisible();
+    await expect(
+      getStarted.getByRole('link', { name: /Connect your health record/ }),
+    ).toBeVisible();
+    await expect(page.getByRole('link', { name: 'See your trends' })).toHaveCount(0);
   });
 });
