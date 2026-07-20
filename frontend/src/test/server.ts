@@ -16,6 +16,7 @@ import {
   EMR_CONNECTION_REVOKED,
   EMR_PROVIDERS,
   EMR_PULL,
+  EMR_PULL_NOTES,
   EMR_STATE,
   EVENTS,
   EXPORT,
@@ -334,6 +335,10 @@ export const handlers = [
 
   http.post('/emr/connections/:id/pull', ({ request }) =>
     isAuthorized(request) ? HttpResponse.json(EMR_PULL) : unauthorized(),
+  ),
+
+  http.post('/emr/connections/:id/pull-notes', ({ request }) =>
+    isAuthorized(request) ? HttpResponse.json(EMR_PULL_NOTES) : unauthorized(),
   ),
 
   http.delete('/emr/connections/:id', ({ request }) =>

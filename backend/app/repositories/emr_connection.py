@@ -29,6 +29,8 @@ class ConnectionRecord:
     token_ref: str | None = None
     token_expires_at: datetime | None = None
     revoked_at: datetime | None = None
+    # Watermark for the incremental clinical-note pull (ADR-0045 P2 #27).
+    last_notes_pulled_at: datetime | None = None
 
 
 class EmrConnectionRepository(Protocol):

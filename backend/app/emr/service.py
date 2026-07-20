@@ -21,8 +21,15 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 from app.emr.client import EmrClient
+from app.emr.notes_client import EmrClinicalNoteClient
 from app.emr.providers import client_id_env_for
+from app.emr.signals import (
+    InMemoryNewChartNoteSink,
+    NewChartNoteSignal,
+    NewChartNoteSink,
+)
 from app.emr.smart import (
+    NOTE_READ_SCOPE,
     build_authorize_url,
     build_token_request,
     code_challenge_for,
@@ -31,9 +38,14 @@ from app.emr.smart import (
 from app.emr.transport import HttpTransport
 from app.ingestion.labs import lab_import_key, lab_result_to_observation
 from app.models.audit import AuditEvent
+from app.models.emr_clinical_note import EmrClinicalNote
 from app.models.emr_connection import EmrConnectionStatus
 from app.models.observation import DataOrigin
 from app.repositories.audit import AuditEventRepository, InMemoryAuditEventRepository
+from app.repositories.emr_clinical_note import (
+    EmrClinicalNoteRepository,
+    InMemoryEmrClinicalNoteRepository,
+)
 from app.repositories.emr_connection import (
     ConnectionRecord,
     EmrConnectionRepository,
@@ -46,7 +58,12 @@ from app.repositories.pending_auth import (
     PendingAuthStore,
     pending_auth_ttl,
 )
+from app.schemas.emr import ClinicalNoteIn
 from app.schemas.lab import LabResultIn
+
+# The clinical-note read scopes that authorize a DocumentReference pull (ADR-0045 P2 #27):
+# the opt-in `.rs` scope this build requests, plus the plain `.read` some EHRs grant.
+_NOTE_READ_SCOPES = frozenset({NOTE_READ_SCOPE, "patient/DocumentReference.read"})
 
 __all__ = [
     "UNCONFIGURED_CLIENT_ID",
@@ -134,7 +151,15 @@ class EmrService:
     secret_store: SecretStore = field(default_factory=InMemorySecretStore)
     connections: EmrConnectionRepository = field(default_factory=InMemoryEmrConnectionRepository)
     observations: ObservationRepository = field(default_factory=InMemoryObservationRepository)
+    # Clinical notes are a SEPARATE append-only store (NOT observations) — pulled via
+    # DocumentReference, metadata only (ADR-0045 P2 #27).
+    clinical_notes: EmrClinicalNoteRepository = field(
+        default_factory=InMemoryEmrClinicalNoteRepository
+    )
     audit: AuditEventRepository = field(default_factory=InMemoryAuditEventRepository)
+    # New-chart-note signal fan-out (existence only) — the caregiver consumer is out of
+    # scope (ADR-0047); the default in-memory sink just records emitted signals.
+    note_signals: NewChartNoteSink = field(default_factory=InMemoryNewChartNoteSink)
     _pending: PendingAuthStore = field(default_factory=InMemoryPendingAuthStore)
 
     def _client_id_for(self, provider_name: str | None) -> str:
@@ -170,9 +195,17 @@ class EmrService:
         raise EmrError(detail, status_code=422)
 
     async def start_connect(
-        self, *, patient_id: uuid.UUID, fhir_base: str, provider_name: str | None
+        self,
+        *,
+        patient_id: uuid.UUID,
+        fhir_base: str,
+        provider_name: str | None,
+        include_notes: bool = False,
     ) -> tuple[ConnectionRecord, str, str]:
-        """SMART discovery -> PKCE -> authorize URL. Returns (connection, url, state)."""
+        """SMART discovery -> PKCE -> authorize URL. Returns (connection, url, state).
+
+        `include_notes` (ADR-0045 P2 #27) opts this connection into requesting the
+        clinical-note (DocumentReference) read scope on the EHR consent screen."""
         # Fail BEFORE discovery and before persisting anything: an unconfigured client
         # id can never complete a handshake, so no record or pending state may be born.
         client_id = self._require_configured_client_id(provider_name)
@@ -204,6 +237,7 @@ class EmrService:
             fhir_base=base,
             state=state,
             code_challenge=code_challenge_for(verifier),
+            include_note_scope=include_notes,
         )
         return record, url, state
 
@@ -339,6 +373,106 @@ class EmrService:
         )
         return imported
 
+    async def pull_clinical_notes(self, connection_id: uuid.UUID) -> tuple[int, int, int]:
+        """Fetch clinical-note metadata from the EMR and persist the notes not already
+        imported (ADR-0045 P2 #27).
+
+        Returns ``(fetched, newly persisted, skipped)``. Metadata-eager, body-lazy: only
+        the note's existence + metadata is written; the body is never fetched here. Import
+        is idempotent per source note, so a re-pull persists 0 and re-alerts nothing. The
+        watermark (``last_notes_pulled_at``) advances only after a successful persist.
+        """
+        record = await self.get_connection(connection_id)
+        if record.status is not EmrConnectionStatus.active:
+            raise EmrError("Connection is not active", status_code=409)
+        if record.token_ref is None or record.patient_fhir_id is None:
+            raise EmrError("Connection is missing tokens or patient id", status_code=409)
+        # Scope guard BEFORE any EHR call: a connection that never opted into note read must
+        # not have a DocumentReference request sent on its behalf — the patient must
+        # reconnect and allow notes (mirrors the dangling-ref reconnect posture).
+        if not (_granted_scopes(record.granted_scope) & _NOTE_READ_SCOPES):
+            raise EmrError(
+                "This connection isn't authorized to read clinical notes; "
+                "please reconnect your EMR and allow clinical notes",
+                status_code=409,
+            )
+        tokens = await self.secret_store.get(record.token_ref)
+        if tokens is None:
+            # A dangling reference (tokens vaulted in a process-local store before a restart,
+            # or ciphertext a rotated/unconfigured key can no longer open). Ask to re-link.
+            raise EmrError(
+                "EMR tokens are no longer available on this server; please reconnect your EMR",
+                status_code=409,
+            )
+        client = EmrClinicalNoteClient(record.fhir_base, self.transport)
+        notes, skipped = await client.fetch_clinical_notes(
+            patient_fhir_id=record.patient_fhir_id,
+            access_token=tokens["access_token"],
+            watermark=record.last_notes_pulled_at,
+        )
+        imported = await self._persist_pulled_notes(record, notes)
+        # Advance the watermark only AFTER a successful persist, so a mid-pull failure
+        # re-fetches the same window next time rather than silently dropping notes.
+        record.last_notes_pulled_at = datetime.now(UTC)
+        await self.connections.update(record)
+        return len(notes), imported, skipped
+
+    async def _persist_pulled_notes(
+        self, record: ConnectionRecord, notes: list[ClinicalNoteIn]
+    ) -> int:
+        """Persist pulled note METADATA as append-only rows + one audit event + one signal
+        per newly-persisted note (existence only).
+
+        Idempotent: each note carries an import key (its source DocumentReference id when
+        provided, else type+time+author); already-imported notes are skipped so repeated
+        pulls never duplicate the store OR re-alert. The audit detail and the signal carry
+        counts/references only — NEVER note text (CLAUDE.md).
+        """
+        keys = [_note_import_key(note) for note in notes]
+        on_file = await self.clinical_notes.existing_import_keys(record.patient_id, keys)
+        imported = 0
+        seen: set[str] = set()
+        for note, import_key in zip(notes, keys, strict=True):
+            if import_key in on_file or import_key in seen:
+                continue
+            seen.add(import_key)
+            row = _clinical_note_to_model(note, record=record, import_key=import_key)
+            # add_if_absent, not add: the on_file probe narrows the common case, but a
+            # concurrent pull can commit between it and this write — the DB partial-unique
+            # index makes the duplicate impossible and this returns False rather than raising.
+            inserted = await self.clinical_notes.add_if_absent(row)
+            if not inserted:
+                continue
+            imported += 1
+            # Signal ONLY on the True branch (idempotent, no re-alert). Existence + metadata
+            # only — no body, no interpretation (ADR-0047 caregiver alert's data source).
+            await self.note_signals.emit(
+                NewChartNoteSignal(
+                    patient_id=record.patient_id,
+                    connection_id=record.id,
+                    note_id=row.id,
+                    type_display=note.type_display,
+                    author_display=note.author_display,
+                    authored_at=note.authored_at,
+                    encounter_fhir_id=note.encounter_fhir_id,
+                )
+            )
+        await self.audit.add(
+            AuditEvent(
+                actor_id=None,
+                actor_role="system",
+                action="import_clinical_notes",
+                patient_id=record.patient_id,
+                # References/counts only, never note text (audit model contract).
+                detail={
+                    "connection_id": str(record.id),
+                    "fetched": len(notes),
+                    "imported": imported,
+                },
+            )
+        )
+        return imported
+
     async def revoke(self, connection_id: uuid.UUID) -> ConnectionRecord:
         """Revoke the connection AND delete its vaulted tokens (ADR-0017).
 
@@ -360,3 +494,41 @@ class EmrService:
         if record is None:
             raise EmrError("Connection not found", status_code=404)
         return record
+
+
+def _granted_scopes(scope: str | None) -> set[str]:
+    """The space-separated granted scopes as a set (empty when None)."""
+    return set(scope.split()) if scope else set()
+
+
+def _note_import_key(note: ClinicalNoteIn) -> str:
+    """Stable idempotency key for one clinical note: its content identity. The source's
+    own DocumentReference id when the EMR provides one, else type+time+author — so the
+    same note arriving twice is never double-stored (mirrors lab_import_key)."""
+    if note.document_fhir_id:
+        return f"docref:{note.document_fhir_id}"
+    return f"note:{note.type_code}:{note.authored_at.isoformat()}:{note.author_display}"
+
+
+def _clinical_note_to_model(
+    note: ClinicalNoteIn, *, record: ConnectionRecord, import_key: str
+) -> EmrClinicalNote:
+    """Map parsed note metadata to its append-only row. Metadata + references only; the
+    body is never a field here (fetched lazily on demand)."""
+    return EmrClinicalNote(
+        patient_id=record.patient_id,
+        connection_id=record.id,
+        origin=DataOrigin.ehr_imported,
+        source_system=record.provider_name or record.fhir_base,
+        document_fhir_id=note.document_fhir_id,
+        type_code=note.type_code,
+        type_display=note.type_display,
+        category="clinical-note",
+        authored_at=note.authored_at,
+        author_display=note.author_display,
+        encounter_fhir_id=note.encounter_fhir_id,
+        content_type=note.content_type,
+        attachment_url=note.attachment_url,
+        has_inline_data=note.has_inline_data,
+        import_key=import_key,
+    )

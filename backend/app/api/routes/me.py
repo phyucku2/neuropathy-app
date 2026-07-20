@@ -84,6 +84,7 @@ async def my_visit_summary(
         window=window,
         now=now,
         include_change_questions=settings.include_change_questions,
+        clinical_notes=service.clinical_notes,
     )
     # PHI read — audit-logged like every health-data access (CLAUDE.md §5), counts only.
     await service.audit.add(

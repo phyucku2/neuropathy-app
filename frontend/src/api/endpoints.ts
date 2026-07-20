@@ -17,6 +17,7 @@ import type {
   EmrConnectStartIn,
   EmrConnectStartOut,
   EmrProviderOut,
+  EmrPullNotesOut,
   EmrPullOut,
   EventIn,
   EventList,
@@ -235,6 +236,16 @@ export function pullEmrLabs(connectionId: string): Promise<EmrPullOut> {
   return request<EmrPullOut>(`/emr/connections/${encodeURIComponent(connectionId)}/pull`, {
     method: 'POST',
   });
+}
+
+/** Pull clinical-note METADATA from the EMR (ADR-0045 P2 #27). Gated by the opt-in
+ * `ingest_notes` capability; the response is counts only (no note text ever leaves the
+ * backend). The note body is opened on demand, never during this poll. */
+export function pullEmrClinicalNotes(connectionId: string): Promise<EmrPullNotesOut> {
+  return request<EmrPullNotesOut>(
+    `/emr/connections/${encodeURIComponent(connectionId)}/pull-notes`,
+    { method: 'POST' },
+  );
 }
 
 /** Revoke: the backend flips the status AND deletes the vaulted tokens (ADR-0017). */

@@ -8,6 +8,7 @@ docs/engineering/fhir-mapping.md.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import ValidationError
@@ -25,6 +26,7 @@ from app.fhir.resources import (
     Quantity,
     Reference,
 )
+from app.schemas.emr import ClinicalNoteIn
 from app.schemas.lab import Interpretation, LabResultIn, LabStatus, ReferenceRange
 
 _LABORATORY_CATEGORY = CodeableConcept(
@@ -184,3 +186,105 @@ def lab_results_from_bundle_payload(payload: Mapping[str, Any]) -> tuple[list[La
         except (ValueError, ValidationError):
             skipped += 1  # unmappable Observation (bad status / no value / non-LOINC / no time)
     return results, skipped
+
+
+def _parse_fhir_instant(value: Any) -> datetime:
+    """Parse a FHIR dateTime/instant string to a tz-aware UTC datetime (naive -> UTC).
+
+    Raises ValueError on a missing/empty/malformed value so the lenient note parser skips
+    the entry rather than aborting the batch."""
+    if not isinstance(value, str) or not value:
+        raise ValueError("DocumentReference has no usable date")
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
+def _document_reference_to_note(resource: Mapping[str, Any]) -> ClinicalNoteIn:
+    """Map ONE FHIR DocumentReference to a metadata-only note; raise ValueError when a
+    required element (type, date, or a content attachment) is absent. NEVER touches body
+    text — only references and metadata."""
+    authored_at = _parse_fhir_instant(resource.get("date"))
+
+    type_code: str | None = None
+    type_display: str | None = None
+    type_concept = resource.get("type")
+    if isinstance(type_concept, Mapping):
+        codings = type_concept.get("coding")
+        if isinstance(codings, list) and codings and isinstance(codings[0], Mapping):
+            first = codings[0]
+            type_code = first.get("code") if isinstance(first.get("code"), str) else None
+            type_display = first.get("display") if isinstance(first.get("display"), str) else None
+        text_val = type_concept.get("text")
+        type_display = type_display or (text_val if isinstance(text_val, str) else None)
+    if not type_code and not type_display:
+        raise ValueError("DocumentReference has no type")
+
+    content = resource.get("content")
+    if not isinstance(content, list) or not content or not isinstance(content[0], Mapping):
+        raise ValueError("DocumentReference has no content")
+    attachment = content[0].get("attachment")
+    if not isinstance(attachment, Mapping):
+        raise ValueError("DocumentReference content has no attachment")
+    url = attachment.get("url")
+    data = attachment.get("data")
+    if not (isinstance(url, str) and url) and not data:
+        raise ValueError("DocumentReference attachment has neither url nor inline data")
+
+    author_display: str | None = None
+    authors = resource.get("author")
+    if isinstance(authors, list) and authors and isinstance(authors[0], Mapping):
+        candidate = authors[0].get("display")
+        author_display = candidate if isinstance(candidate, str) else None
+
+    encounter_fhir_id: str | None = None
+    context = resource.get("context")
+    if isinstance(context, Mapping):
+        encounters = context.get("encounter")
+        if isinstance(encounters, list) and encounters and isinstance(encounters[0], Mapping):
+            reference = encounters[0].get("reference")
+            if isinstance(reference, str) and reference:
+                encounter_fhir_id = reference.split("/")[-1]
+
+    content_type = attachment.get("contentType")
+    document_id = resource.get("id")
+    return ClinicalNoteIn(
+        document_fhir_id=document_id if isinstance(document_id, str) else None,
+        type_code=type_code,
+        type_display=type_display,
+        authored_at=authored_at,
+        author_display=author_display,
+        encounter_fhir_id=encounter_fhir_id,
+        content_type=content_type if isinstance(content_type, str) else None,
+        attachment_url=url if isinstance(url, str) and url else None,
+        has_inline_data=bool(data),
+    )
+
+
+def clinical_notes_from_bundle_payload(
+    payload: Mapping[str, Any],
+) -> tuple[list[ClinicalNoteIn], int]:
+    """Resiliently map an EHR search-set Bundle of DocumentReferences to note metadata
+    (ADR-0045 P2 #27).
+
+    A real ``DocumentReference?category=clinical-note`` search-set mixes importable notes
+    with entries we cannot or should not map: a non-DocumentReference entry (e.g. an
+    ``OperationOutcome``), or a DocumentReference missing its type, date, or a content
+    attachment. Each such entry is **skipped**, never aborting the batch — the same
+    reject-not-crash posture as the lab parser. No body text is ever read.
+
+    Returns ``(notes, skipped_count)``. Bundle paging is handled by the caller via the raw
+    payload's ``link`` (this function never touches the network).
+    """
+    notes: list[ClinicalNoteIn] = []
+    skipped = 0
+    entries = payload.get("entry")
+    for entry in entries if isinstance(entries, list) else []:
+        resource = entry.get("resource") if isinstance(entry, Mapping) else None
+        if not isinstance(resource, Mapping) or resource.get("resourceType") != "DocumentReference":
+            skipped += 1  # OperationOutcome or any non-DocumentReference search-set entry
+            continue
+        try:
+            notes.append(_document_reference_to_note(resource))
+        except (ValueError, ValidationError, KeyError, TypeError):
+            skipped += 1  # unmappable DocumentReference (no type / date / attachment)
+    return notes, skipped

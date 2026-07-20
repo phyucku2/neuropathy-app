@@ -127,6 +127,10 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
     CapabilitySpec(
         key="emr_connect", name="Medical record connection", default=True, enforced=True
     ),
+    # EMR clinical-note pull (ADR-0045 P2 #27). OPT-IN (default off, like ingest_wearable):
+    # notes are large sensitive free-text, so nothing is pulled until the patient turns it
+    # on. enforced=True — POST /emr/connections/{id}/pull-notes refuses with 409 when off.
+    CapabilitySpec(key="ingest_notes", name="EMR clinician notes", default=False, enforced=True),
     CapabilitySpec(key="ai_narrative", name="AI trajectory narration", default=True, enforced=True),
     CapabilitySpec(
         key=SHARE_WITH_CLINIC_KEY, name="Share data with my clinic", default=True, enforced=True

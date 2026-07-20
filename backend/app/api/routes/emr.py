@@ -22,7 +22,14 @@ from app.api.deps import (
 )
 from app.emr.providers import get_provider, search_providers
 from app.emr.service import ConnectionRecord, EmrError, EmrService
-from app.schemas.emr import ConnectionOut, ConnectStartIn, ConnectStartOut, ProviderOut, PullOut
+from app.schemas.emr import (
+    ConnectionOut,
+    ConnectStartIn,
+    ConnectStartOut,
+    ProviderOut,
+    PullNotesOut,
+    PullOut,
+)
 
 __all__ = ["get_emr_service", "router"]
 
@@ -103,7 +110,10 @@ async def start_connect(
     assert current.patient_id is not None  # guaranteed by require_patient
     try:
         record, url, state = await service.start_connect(
-            patient_id=current.patient_id, fhir_base=fhir_base, provider_name=provider_name
+            patient_id=current.patient_id,
+            fhir_base=fhir_base,
+            provider_name=provider_name,
+            include_notes=body.connect_notes,
         )
     except EmrError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.reason) from exc
@@ -150,6 +160,28 @@ async def pull_labs(
     # second sync of the same records reports imported=0 while still returning them.
     # `skipped` counts un-mappable EHR entries that were passed over (never fatal).
     return PullOut(imported=imported, skipped=skipped, results=results)
+
+
+# The clinical-note pull writes to the SEPARATE append-only note store (metadata only) —
+# gated by its OWN opt-in toggle (ingest_notes), distinct from ingest_labs, so a patient
+# can import labs without notes (or vice versa). Behind _owned_connection like the lab
+# pull (cross-user -> 403). Connect/callback/revoke stay ungated as before.
+@router.post(
+    "/connections/{connection_id}/pull-notes",
+    response_model=PullNotesOut,
+    dependencies=[Depends(require_capability("ingest_notes"))],
+)
+async def pull_clinical_notes(
+    connection_id: uuid.UUID, service: ServiceDep, current: PatientUserDep
+) -> PullNotesOut:
+    await _owned_connection(service, connection_id, current)
+    try:
+        fetched, imported, skipped = await service.pull_clinical_notes(connection_id)
+    except EmrError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.reason) from exc
+    # Counts only — no note text ever leaves the endpoint (NON-DIAGNOSTIC house rule).
+    # `imported` counts newly persisted notes; re-pulls are idempotent (imported=0).
+    return PullNotesOut(imported=imported, skipped=skipped, fetched=fetched)
 
 
 @router.delete("/connections/{connection_id}", response_model=ConnectionOut)

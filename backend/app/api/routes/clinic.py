@@ -231,6 +231,7 @@ async def patient_visit_summary(
         window=window,
         now=now,
         include_change_questions=settings.include_change_questions,
+        clinical_notes=service.clinical_notes,
     )
     # PHI read — clinician as actor, patient as subject, counts only + the connection ref.
     await service.audit.add(

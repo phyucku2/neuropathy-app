@@ -30,11 +30,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.core.config import settings
 from app.main import create_app
+from app.models.emr_clinical_note import EmrClinicalNote
 from app.models.emr_connection import EmrConnectionStatus
 from app.models.observation import DataOrigin, Observation, ObservationStatus, SourceType
 from app.repositories.emr_connection import ConnectionRecord
 from app.repositories.pending_auth import PendingAuth
 from app.repositories.postgres import (
+    PostgresEmrClinicalNoteRepository,
     PostgresEmrConnectionRepository,
     PostgresPendingAuthStore,
     PostgresSecretStore,
@@ -67,6 +69,7 @@ _PATIENT_SCOPED_COUNTS = {
         "SELECT count(*) FROM patient_capability WHERE patient_id = :patient_id"
     ),
     "observation": "SELECT count(*) FROM observation WHERE patient_id = :patient_id",
+    "emr_clinical_note": ("SELECT count(*) FROM emr_clinical_note WHERE patient_id = :patient_id"),
 }
 
 
@@ -142,6 +145,25 @@ async def _seed_all_tables(url: str, patient_id: uuid.UUID) -> tuple[uuid.UUID, 
                     token_endpoint="https://ehr.example/oauth/token",
                 ),
                 now=now,
+            )
+
+            # A pulled EMR clinical note (FKs the active connection) — must die BEFORE the
+            # connection in the deletion's FK-safe order (ADR-0045 P2 #27).
+            await PostgresEmrClinicalNoteRepository(session).add_if_absent(
+                EmrClinicalNote(
+                    patient_id=patient_id,
+                    connection_id=active_id,
+                    origin=DataOrigin.ehr_imported,
+                    source_system="Synthetic Health",
+                    document_fhir_id="DocRef/synthetic-1",
+                    type_code="11506-3",
+                    type_display="Progress note",
+                    category="clinical-note",
+                    authored_at=now,
+                    author_display="Dr Synthetic",
+                    has_inline_data=False,
+                    import_key="docref:DocRef/synthetic-1",
+                )
             )
 
             clinic_id = uuid.uuid4()

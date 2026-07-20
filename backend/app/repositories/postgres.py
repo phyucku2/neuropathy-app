@@ -25,6 +25,7 @@ from app.models.audit import AuditEvent
 from app.models.capability import Actor, Capability, PatientCapability
 from app.models.clinic import Clinic
 from app.models.connection import ClinicConnection, ConnectionStatus
+from app.models.emr_clinical_note import EmrClinicalNote
 from app.models.emr_connection import EmrConnection
 from app.models.observation import Observation, ObservationStatus, SourceType
 from app.models.patient import Patient
@@ -287,6 +288,7 @@ class PostgresEmrConnectionRepository:
                 token_ref=connection.token_ref,
                 token_expires_at=connection.token_expires_at,
                 revoked_at=connection.revoked_at,
+                last_notes_pulled_at=connection.last_notes_pulled_at,
             )
         )
         await self._session.flush()
@@ -305,6 +307,7 @@ class PostgresEmrConnectionRepository:
         row.token_ref = connection.token_ref
         row.token_expires_at = connection.token_expires_at
         row.revoked_at = connection.revoked_at
+        row.last_notes_pulled_at = connection.last_notes_pulled_at
         await self._session.flush()
 
     async def list_for_patient(self, patient_id: uuid.UUID) -> list[ConnectionRecord]:
@@ -320,6 +323,58 @@ class PostgresEmrConnectionRepository:
         # these connections and purged their vaulted secrets via SecretStore.delete.
         await self._session.execute(
             delete(EmrConnection).where(EmrConnection.patient_id == patient_id)
+        )
+        await self._session.flush()
+
+
+class PostgresEmrClinicalNoteRepository:
+    """EmrClinicalNoteRepository over the emr_clinical_note table (append-only)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add_if_absent(self, note: EmrClinicalNote) -> bool:
+        # A savepoint scopes the flush: when uq_emr_note_patient_import_key fires (a
+        # concurrent pull already imported this DocumentReference), only THIS insert rolls
+        # back and the caller's transaction stays usable — the pull still writes its audit
+        # event and returns a clean skip instead of a 500. Any other IntegrityError re-raises.
+        try:
+            async with self._session.begin_nested():
+                self._session.add(note)
+                await self._session.flush()
+        except IntegrityError as exc:
+            if "uq_emr_note_patient_import_key" in str(exc.orig):
+                return False
+            raise
+        return True
+
+    async def existing_import_keys(self, patient_id: uuid.UUID, import_keys: list[str]) -> set[str]:
+        if not import_keys:
+            return set()
+        stmt = select(EmrClinicalNote.import_key).where(
+            EmrClinicalNote.patient_id == patient_id,
+            EmrClinicalNote.import_key.in_(import_keys),
+        )
+        return {key for key in (await self._session.scalars(stmt)).all() if key is not None}
+
+    async def list_for_patient(
+        self,
+        patient_id: uuid.UUID,
+        *,
+        since: datetime | None = None,
+        newest_first: bool = False,
+    ) -> list[EmrClinicalNote]:
+        order = EmrClinicalNote.authored_at.desc() if newest_first else EmrClinicalNote.authored_at
+        stmt = (
+            select(EmrClinicalNote).where(EmrClinicalNote.patient_id == patient_id).order_by(order)
+        )
+        if since is not None:
+            stmt = stmt.where(EmrClinicalNote.authored_at >= since)
+        return list((await self._session.scalars(stmt)).all())
+
+    async def delete_for_patient(self, patient_id: uuid.UUID) -> None:
+        await self._session.execute(
+            delete(EmrClinicalNote).where(EmrClinicalNote.patient_id == patient_id)
         )
         await self._session.flush()
 
@@ -702,4 +757,5 @@ def _connection_to_record(row: EmrConnection) -> ConnectionRecord:
         token_ref=row.token_ref,
         token_expires_at=row.token_expires_at,
         revoked_at=row.revoked_at,
+        last_notes_pulled_at=row.last_notes_pulled_at,
     )

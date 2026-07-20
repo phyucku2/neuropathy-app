@@ -15,6 +15,7 @@ import type { ReactNode } from 'react';
 import type {
   ActivityStat,
   Direction,
+  EmrNoteItem,
   LabDelta,
   MedicationChangeDelta,
   MedicationItem,
@@ -217,6 +218,33 @@ function PatientEventRow({ item }: { item: PatientEventItem }) {
   );
 }
 
+function EmrNoteRow({ item }: { item: EmrNoteItem }) {
+  // NON-DIAGNOSTIC: the summary carries METADATA ONLY (type/author/date). We surface the
+  // note's EXISTENCE with an "open" affordance to the verbatim text — never a summary,
+  // finding, or red-flag scan of the note body (CLAUDE.md house rules).
+  return (
+    <div className="handout-row">
+      <div className="handout-row-head">
+        <span className="handout-metric">{item.type_display ?? 'Clinician note'}</span>
+        <span className="chip">{formatDayYear(Date.parse(item.authored_at))}</span>
+        <span className="chip">EMR</span>
+      </div>
+      <p className="handout-span">
+        {item.author_display !== null && item.author_display.trim() !== '' && (
+          <>
+            <span className="muted">Author: </span>
+            {item.author_display}
+            {'. '}
+          </>
+        )}
+        <span className="muted">
+          The full note is in your medical record — open it there to read it.
+        </span>
+      </p>
+    </div>
+  );
+}
+
 function MedicationChangeDeltaRow({ change }: { change: MedicationChangeDelta }) {
   const dose = medDose(change.dose_amount, change.dose_unit, change.dose_text);
   return (
@@ -373,6 +401,13 @@ function TrendSections({ summary }: { summary: VisitSummary }) {
               key={`${item.type}:${item.effective_at}:${String(index)}`}
               item={item}
             />
+          ))}
+        </SeriesCard>
+      )}
+      {summary.emr_notes.length > 0 && (
+        <SeriesCard title="EMR clinician notes">
+          {summary.emr_notes.map((item, index) => (
+            <EmrNoteRow key={`${item.authored_at}:${String(index)}`} item={item} />
           ))}
         </SeriesCard>
       )}

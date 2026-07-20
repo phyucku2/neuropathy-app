@@ -45,6 +45,34 @@ describe('EmrCallbackPage — the SMART redirect relay', () => {
     ).toBeInTheDocument();
   });
 
+  it('pulls clinician notes on demand and reports the imported count (metadata only)', async () => {
+    const user = userEvent.setup();
+    seedPending();
+    renderApp(callbackPath);
+    await user.click(await screen.findByRole('button', { name: 'Pull clinician notes' }));
+    // COUNTS ONLY (ADR-0045 P2 #27): the success copy names how many notes were added and
+    // points at the medical record to read each — it NEVER surfaces any note body.
+    expect(
+      await screen.findByText(
+        'Added 1 clinician note to your visit summary — open each in your medical record to read it.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('surfaces the notes-pull 409 verbatim when the feature is off (never a note body)', async () => {
+    server.use(
+      http.post('/emr/connections/:id/pull-notes', () =>
+        HttpResponse.json({ detail: 'Importing clinician notes is turned off' }, { status: 409 }),
+      ),
+    );
+    const user = userEvent.setup();
+    seedPending();
+    renderApp(callbackPath);
+    await user.click(await screen.findByRole('button', { name: 'Pull clinician notes' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Importing clinician notes is turned off');
+  });
+
   it('disconnects with a two-tap confirm and shows the revoked state', async () => {
     const user = userEvent.setup();
     seedPending();

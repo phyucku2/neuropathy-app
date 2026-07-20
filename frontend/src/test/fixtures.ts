@@ -9,6 +9,7 @@ import type {
   EmrConnectionOut,
   EmrConnectStartOut,
   EmrProviderOut,
+  EmrPullNotesOut,
   EmrPullOut,
   EventList,
   ExportObservation,
@@ -228,7 +229,7 @@ export const VISIT_SUMMARY_SHEET_LABEL = 'current record, not a complete medical
 /** The render-only placeholder rows (ADR-0045). Medications & patient notes are CAPTURED as of
  *  P2 and dropped from here; emr_notes (Phase 2b) and nutrition (Phase 3) stay render-only. */
 export const VISIT_SUMMARY_PLACEHOLDERS: PlaceholderRow[] = [
-  { key: 'emr_notes', label: 'EMR clinician notes', status: 'not_yet_tracked', phase: 'Phase 2b' },
+  // emr_notes is CAPTURED now (ADR-0045 P2 #27) — a real data section, GONE from placeholders.
   { key: 'nutrition', label: 'Nutrition', status: 'not_yet_tracked', phase: 'Phase 3' },
 ];
 
@@ -326,7 +327,7 @@ export const EVENTS: EventList = {
  *  data; the status reuses TRAJECTORY_IMPROVING so the hero renders the full NSI card. */
 export const VISIT_SUMMARY: VisitSummary = {
   generated_at: '2026-07-15T10:00:00Z',
-  schema_version: '1.1',
+  schema_version: '1.2',
   subject_id: '22222222-2222-4222-8222-222222222222',
   window_days: 60,
   window_end: '2026-07-15T10:00:00Z',
@@ -563,12 +564,23 @@ export const VISIT_SUMMARY: VisitSummary = {
       provenance: 'patient-entered',
     },
   ],
+  // EMR clinician notes pulled in the window — METADATA ONLY (ADR-0045 P2 #27), newest-first.
+  emr_notes: [
+    {
+      type_display: 'Progress note',
+      author_display: 'Dr. Rivera',
+      authored_at: '2026-07-08T00:00:00Z',
+      encounter_fhir_id: 'enc-8891',
+      provenance: 'emr',
+    },
+  ],
   placeholders: VISIT_SUMMARY_PLACEHOLDERS,
   questions: {
     data_completeness: [
       'A new long-term blood sugar result was recorded in this window since the last value — review in context.',
       "A medication or supplement change was recorded in this window — confirm it's reflected in the chart.",
       'Between-visit events or notes were recorded in this window — review them with the patient.',
+      'A new clinician note was pulled from the EMR in this window — open it to review.',
     ],
     change_pointed: [],
   },
@@ -599,6 +611,7 @@ export const VISIT_SUMMARY_INSUFFICIENT: VisitSummary = {
   activity: [],
   medications: [],
   patient_notes: [],
+  emr_notes: [],
   questions: { data_completeness: [], change_pointed: [] },
 };
 
@@ -826,6 +839,13 @@ export const EMR_PULL: EmrPullOut = {
       unit_system: 'UCUM',
     },
   ],
+};
+
+/** The clinical-note pull result — COUNTS ONLY (ADR-0045 P2 #27), no note text. */
+export const EMR_PULL_NOTES: EmrPullNotesOut = {
+  imported: 1,
+  skipped: 0,
+  fetched: 1,
 };
 
 export const CONNECTION_PENDING: ConnectionOut = {

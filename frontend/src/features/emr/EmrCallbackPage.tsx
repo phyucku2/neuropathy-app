@@ -20,8 +20,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { messageFor } from '../../api/client';
-import { completeEmrCallback, pullEmrLabs, revokeEmrConnection } from '../../api/endpoints';
-import type { EmrConnectionOut, EmrPullOut } from '../../api/types';
+import {
+  completeEmrCallback,
+  pullEmrClinicalNotes,
+  pullEmrLabs,
+  revokeEmrConnection,
+} from '../../api/endpoints';
+import type { EmrConnectionOut, EmrPullNotesOut, EmrPullOut } from '../../api/types';
 import { ErrorNotice, Loading, SuccessNotice } from '../../components/StatusMessages';
 import { clearPendingConnect, loadPendingConnect } from './pendingConnect';
 
@@ -38,6 +43,7 @@ function ConnectionActions({
   const [busy, setBusy] = useState(false);
   const [confirmingRevoke, setConfirmingRevoke] = useState(false);
   const [pull, setPull] = useState<EmrPullOut | null>(null);
+  const [notesPull, setNotesPull] = useState<EmrPullNotesOut | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const pullNow = async () => {
@@ -45,6 +51,21 @@ function ConnectionActions({
     setActionError(null);
     try {
       setPull(await pullEmrLabs(connection.id));
+    } catch (cause) {
+      setActionError(messageFor(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Clinical-note pull (ADR-0045 P2 #27): imports note METADATA only. Gated by the opt-in
+  // ingest_notes capability + the connection's granted DocumentReference scope, so it may
+  // answer 409 (feature off / reconnect needed) — surfaced as an ordinary action error.
+  const pullNotesNow = async () => {
+    setBusy(true);
+    setActionError(null);
+    try {
+      setNotesPull(await pullEmrClinicalNotes(connection.id));
     } catch (cause) {
       setActionError(messageFor(cause));
     } finally {
@@ -63,6 +84,7 @@ function ConnectionActions({
     try {
       onChanged(await revokeEmrConnection(connection.id));
       setPull(null);
+      setNotesPull(null);
     } catch (cause) {
       setActionError(messageFor(cause));
     } finally {
@@ -81,6 +103,13 @@ function ConnectionActions({
             : `Nothing new to import — all ${String(pull.results.length)} lab results are already in your record.`}
         </SuccessNotice>
       )}
+      {notesPull !== null && (
+        <SuccessNotice>
+          {notesPull.imported > 0
+            ? `Added ${String(notesPull.imported)} clinician note${notesPull.imported === 1 ? '' : 's'} to your visit summary — open each in your medical record to read it.`
+            : 'No new clinician notes to add — your visit summary is up to date.'}
+        </SuccessNotice>
+      )}
       {connection.status === 'active' && (
         <>
           <button
@@ -92,6 +121,16 @@ function ConnectionActions({
             }}
           >
             {busy ? 'Working…' : 'Pull labs now'}
+          </button>
+          <button
+            type="button"
+            className="btn-inline"
+            disabled={busy}
+            onClick={() => {
+              void pullNotesNow();
+            }}
+          >
+            {busy ? 'Working…' : 'Pull clinician notes'}
           </button>
           <button
             type="button"

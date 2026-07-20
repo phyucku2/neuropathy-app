@@ -47,7 +47,7 @@ describe('SettingsPage — danger zone (delete account)', () => {
     await user.type(screen.getByLabelText('Confirm your password'), TEST_PASSWORD);
     expect(confirm).toBeDisabled();
     // ...the checkbox alone is not enough either.
-    const acknowledge = screen.getByRole('checkbox');
+    const acknowledge = screen.getByRole('checkbox', { name: /I understand/ });
     await user.click(acknowledge);
     expect(confirm).toBeEnabled();
     await user.clear(screen.getByLabelText('Confirm your password'));
@@ -57,7 +57,7 @@ describe('SettingsPage — danger zone (delete account)', () => {
   it('requires a second tap to confirm, then deletes and lands on login with the notice', async () => {
     const user = await openDangerZone();
     await user.type(screen.getByLabelText('Confirm your password'), TEST_PASSWORD);
-    await user.click(screen.getByRole('checkbox'));
+    await user.click(screen.getByRole('checkbox', { name: /I understand/ }));
 
     // First tap arms the confirm — nothing is deleted yet.
     await user.click(screen.getByRole('button', { name: 'Delete my account and data' }));
@@ -78,7 +78,7 @@ describe('SettingsPage — danger zone (delete account)', () => {
   it('wrong password does NOT silence the reminder — nothing was deleted', async () => {
     const user = await openDangerZone();
     await user.type(screen.getByLabelText('Confirm your password'), 'not-the-password');
-    await user.click(screen.getByRole('checkbox'));
+    await user.click(screen.getByRole('checkbox', { name: /I understand/ }));
     await user.click(screen.getByRole('button', { name: 'Delete my account and data' }));
     await user.click(screen.getByRole('button', { name: 'Tap again to permanently delete' }));
     await screen.findByRole('alert');
@@ -101,7 +101,7 @@ describe('SettingsPage — danger zone (delete account)', () => {
   it('shows the wrong-password detail verbatim in an alert and stays on settings', async () => {
     const user = await openDangerZone();
     await user.type(screen.getByLabelText('Confirm your password'), 'not-the-password');
-    await user.click(screen.getByRole('checkbox'));
+    await user.click(screen.getByRole('checkbox', { name: /I understand/ }));
     await user.click(screen.getByRole('button', { name: 'Delete my account and data' }));
     await user.click(screen.getByRole('button', { name: 'Tap again to permanently delete' }));
 
@@ -123,7 +123,7 @@ describe('SettingsPage — danger zone (delete account)', () => {
     const user = await openDangerZone();
     const passwordInput = screen.getByLabelText('Confirm your password');
     await user.type(passwordInput, TEST_PASSWORD);
-    const acknowledge = screen.getByRole('checkbox');
+    const acknowledge = screen.getByRole('checkbox', { name: /I understand/ });
     await user.click(acknowledge);
     await user.click(screen.getByRole('button', { name: 'Delete my account and data' }));
     await user.click(screen.getByRole('button', { name: 'Tap again to permanently delete' }));

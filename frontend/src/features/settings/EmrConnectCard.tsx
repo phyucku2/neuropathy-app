@@ -71,6 +71,9 @@ export function EmrConnectCard() {
   const { data: providers, error, loading } = useApi(providersFetcher);
   const [startError, setStartError] = useState<string | null>(null);
   const [connectingKey, setConnectingKey] = useState<string | null>(null);
+  // Per-connection opt-in to also request clinical-note read (ADR-0045 P2 #27). Off by
+  // default so a labs-only connection never asks for note access on the EHR consent screen.
+  const [connectNotes, setConnectNotes] = useState(false);
 
   const emrConnect = capabilityData?.capabilities.find((row) => row.key === 'emr_connect');
   // UI hint only — the server enforces the toggle on connect AND callback (ADR-0020).
@@ -80,7 +83,10 @@ export function EmrConnectCard() {
     setStartError(null);
     setConnectingKey(provider.key);
     try {
-      const started = await startEmrConnect({ provider_key: provider.key });
+      const started = await startEmrConnect({
+        provider_key: provider.key,
+        connect_notes: connectNotes,
+      });
       // Persist BEFORE leaving the page: the callback route verifies the EMR's echoed
       // state against this value and refuses anything it did not start.
       savePendingConnect({
@@ -123,6 +129,19 @@ export function EmrConnectCard() {
                   setQuery(event.target.value);
                 }}
               />
+            </div>
+            <div className="field">
+              <label htmlFor="emr-connect-notes" style={{ display: 'flex', gap: '0.5rem' }}>
+                <input
+                  id="emr-connect-notes"
+                  type="checkbox"
+                  checked={connectNotes}
+                  onChange={(event) => {
+                    setConnectNotes(event.target.checked);
+                  }}
+                />
+                <span>Also import my clinician notes (their existence and dates)</span>
+              </label>
             </div>
             {loading && providers === null && <Loading label="Loading providers…" />}
             {error !== null && <ErrorNotice>{error}</ErrorNotice>}

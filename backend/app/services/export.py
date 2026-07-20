@@ -29,9 +29,14 @@ from datetime import UTC, datetime, timedelta
 
 from app.core.config import settings
 from app.models.audit import AuditEvent
+from app.models.emr_clinical_note import EmrClinicalNote
 from app.models.observation import Observation
 from app.models.user import UserRole
 from app.repositories.audit import AuditEventRepository, InMemoryAuditEventRepository
+from app.repositories.emr_clinical_note import (
+    EmrClinicalNoteRepository,
+    InMemoryEmrClinicalNoteRepository,
+)
 from app.repositories.emr_connection import (
     ConnectionRecord,
     EmrConnectionRepository,
@@ -45,6 +50,7 @@ from app.schemas.emr import ConnectionOut as EmrConnectionOut
 from app.schemas.export import (
     EXPORT_SCHEMA_VERSION,
     ExportAccountProfile,
+    ExportEmrClinicalNote,
     ExportObservation,
     ExportOut,
     ExportPatient,
@@ -116,6 +122,27 @@ def _observation_out(observation: Observation) -> ExportObservation:
     )
 
 
+def _clinical_note_out(note: EmrClinicalNote) -> ExportEmrClinicalNote:
+    # Metadata only — there is NO body field, so the note text is structurally absent.
+    return ExportEmrClinicalNote(
+        id=note.id,
+        connection_id=note.connection_id,
+        source_system=note.source_system,
+        document_fhir_id=note.document_fhir_id,
+        type_code=note.type_code,
+        type_display=note.type_display,
+        # category/has_inline_data carry model-level defaults that only fire on a DB flush;
+        # coerce here so an in-memory row (no flush) projects the same shape as a DB row.
+        category=note.category or "clinical-note",
+        authored_at=note.authored_at,
+        author_display=note.author_display,
+        encounter_fhir_id=note.encounter_fhir_id,
+        content_type=note.content_type,
+        attachment_url=note.attachment_url,
+        has_inline_data=bool(note.has_inline_data),
+    )
+
+
 def _emr_connection_out(connection: ConnectionRecord) -> EmrConnectionOut:
     # Token-free by construction: ConnectionOut has no token_ref field, so the vault
     # reference on the record is simply never carried into the export.
@@ -146,6 +173,9 @@ class PatientDataExportService:
     observations: ObservationRepository = field(default_factory=InMemoryObservationRepository)
     emr_connections: EmrConnectionRepository = field(
         default_factory=InMemoryEmrConnectionRepository
+    )
+    clinical_notes: EmrClinicalNoteRepository = field(
+        default_factory=InMemoryEmrClinicalNoteRepository
     )
     clinic: ClinicService = field(default_factory=ClinicService)
     capabilities: CapabilityService = field(default_factory=CapabilityService)
@@ -184,6 +214,7 @@ class PatientDataExportService:
         capabilities = await self.capabilities.effective_states(patient_id, now=now)
         clinic_connections = await self.clinic.list_connections(patient_id)
         emr_connections = await self.emr_connections.list_for_patient(patient_id)
+        clinical_notes = await self.clinical_notes.list_for_patient(patient_id)
 
         # ONE PHI-free audit event: this is a disclosure of the whole record, so it is
         # logged like every other PHI read (CLAUDE.md §5) — counts only, never values.
@@ -196,6 +227,7 @@ class PatientDataExportService:
                 detail={
                     "observations": len(observations),
                     "emr_connections": len(emr_connections),
+                    "emr_clinical_notes": len(clinical_notes),
                     "clinic_connections": len(clinic_connections),
                     "capabilities": len(capabilities),
                 },
@@ -248,4 +280,5 @@ class PatientDataExportService:
                 for connection, clinic in clinic_connections
             ],
             emr_connections=[_emr_connection_out(row) for row in emr_connections],
+            emr_clinical_notes=[_clinical_note_out(row) for row in clinical_notes],
         )

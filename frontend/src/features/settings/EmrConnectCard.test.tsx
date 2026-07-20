@@ -68,6 +68,32 @@ describe('SettingsPage — health record connections (EMR connect)', () => {
     });
   });
 
+  it('connect: requests clinician-note read only when the opt-in checkbox is ticked (ADR-0045 P2 #27)', async () => {
+    const bodies: { connect_notes?: boolean }[] = [];
+    server.use(
+      http.post('/emr/connect', async ({ request }) => {
+        bodies.push((await request.json()) as { connect_notes?: boolean });
+        return HttpResponse.json(EMR_CONNECT_START);
+      }),
+    );
+    const user = userEvent.setup();
+    renderApp('/settings');
+
+    // Off by default — a labs-only connect never asks the EHR for note access.
+    const checkbox = await screen.findByRole('checkbox', {
+      name: 'Also import my clinician notes (their existence and dates)',
+    });
+    expect(checkbox).not.toBeChecked();
+    await user.click(checkbox);
+    expect(checkbox).toBeChecked();
+
+    await user.click(screen.getByRole('button', { name: 'Connect Epic (MyChart)' }));
+    await waitFor(() => {
+      expect(bodies).toHaveLength(1);
+    });
+    expect(bodies[0]?.connect_notes).toBe(true);
+  });
+
   it('surfaces a connect failure detail verbatim (e.g. the emr_connect-off 409) and persists nothing', async () => {
     server.use(
       http.post('/emr/connect', () =>

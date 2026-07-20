@@ -27,6 +27,13 @@ DEFAULT_SCOPES = (
     "offline_access",
 )
 
+# The clinical-note (DocumentReference) read scope — its consumer lands here (ADR-0045 P2
+# #27), so this is "the PR that adds its consumer" the line-23 note defers to. It is added
+# to the authorize URL ONLY when a connection opts in (`include_note_scope`), so a
+# labs-only connection is never forced to request note read on the EHR consent screen;
+# the pull enforces its presence in the granted scope at pull time.
+NOTE_READ_SCOPE = "patient/DocumentReference.rs"
+
 
 def generate_code_verifier(n_bytes: int = 64) -> str:
     """A high-entropy PKCE code_verifier (RFC 7636), URL-safe, unpadded."""
@@ -49,13 +56,17 @@ def build_authorize_url(
     code_challenge: str,
     scopes: tuple[str, ...] = DEFAULT_SCOPES,
     launch: str | None = None,
+    include_note_scope: bool = False,
 ) -> str:
     """Construct the SMART authorization-code (PKCE) URL.
 
     Standalone patient launch by default; pass `launch` (the EHR-provided context token)
     for a SMART EHR launch from within a clinician's EHR session — the `launch` scope is
-    added automatically (ADR-0009).
+    added automatically (ADR-0009). `include_note_scope` (ADR-0045 P2 #27) adds the
+    per-connection clinical-note read scope so a labs-only connection never requests it.
     """
+    if include_note_scope and NOTE_READ_SCOPE not in scopes:
+        scopes = (*scopes, NOTE_READ_SCOPE)
     if launch is not None and "launch" not in scopes:
         scopes = ("launch", *scopes)
     params = {

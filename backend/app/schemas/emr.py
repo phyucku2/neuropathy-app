@@ -26,6 +26,12 @@ class ConnectStartIn(BaseModel):
 
     provider_key: str | None = Field(default=None, description="Key from GET /emr/providers")
     fhir_base: str | None = Field(default=None, description="Custom SMART FHIR base URL")
+    # Per-connection opt-in to also request clinical-note read on the EHR consent screen
+    # (ADR-0045 P2 #27). Default off so a labs-only connection is not forced to ask for
+    # patient/DocumentReference.rs — the pull enforces the granted scope at pull time.
+    connect_notes: bool = Field(
+        default=False, description="Also request clinical-note (DocumentReference) read access"
+    )
 
     @model_validator(mode="after")
     def _require_a_target(self) -> ConnectStartIn:
@@ -58,3 +64,32 @@ class PullOut(BaseModel):
     # value, non-LOINC code, missing unit/time, non-Observation) — reported, never fatal.
     skipped: int = 0
     results: list[LabResultIn]
+
+
+class ClinicalNoteIn(BaseModel):
+    """One clinical note parsed from a FHIR DocumentReference — METADATA ONLY (ADR-0045 P2).
+
+    NEVER carries the note body: the text is fetched lazily from the Binary on demand and
+    never summarized, scanned, or fed to the AI narrator. `attachment_url` is the opaque
+    Binary reference for that lazy fetch, not content.
+    """
+
+    document_fhir_id: str | None = None
+    type_code: str | None = None
+    type_display: str | None = None
+    authored_at: datetime
+    author_display: str | None = None
+    encounter_fhir_id: str | None = None
+    content_type: str | None = None
+    attachment_url: str | None = None
+    has_inline_data: bool = False
+
+
+class PullNotesOut(BaseModel):
+    """Result of a clinical-note pull — COUNTS ONLY (no note text ever leaves here)."""
+
+    imported: int
+    # DocumentReference entries skipped as un-mappable (non-DocumentReference, missing
+    # type/date/attachment, OperationOutcome) — reported, never fatal.
+    skipped: int = 0
+    fetched: int = 0

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 from urllib.parse import parse_qs, urlparse
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -86,6 +86,92 @@ class FakeEmr:
             "scope": "patient/Observation.read",
             "expires_in": 3600,
         }
+
+
+class NotesEmr(FakeEmr):
+    """A FakeEmr that ALSO grants the clinical-note scope and answers DocumentReference +
+    Binary (ADR-0045 P2 #27). Records the DocumentReference search URLs so the watermark
+    (date=ge on the 2nd pull) can be asserted."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.note_search_urls: list[str] = []
+        self.binary_calls: list[str] = []
+
+    async def get_json(self, url: str, *, access_token: str | None = None) -> dict[str, Any]:
+        if url.endswith("/.well-known/smart-configuration"):
+            return await super().get_json(url, access_token=access_token)
+        if url.startswith(f"{FHIR_BASE}/DocumentReference"):
+            assert access_token == "the-access-token"
+            self.note_search_urls.append(url)
+            return {
+                "resourceType": "Bundle",
+                "type": "searchset",
+                "entry": [
+                    {
+                        "resource": {
+                            "resourceType": "DocumentReference",
+                            "id": "docref-1",
+                            "type": {
+                                "coding": [
+                                    {
+                                        "system": "http://loinc.org",
+                                        "code": "11506-3",
+                                        "display": "Progress note",
+                                    }
+                                ]
+                            },
+                            "date": "2026-06-15T08:30:00+00:00",
+                            "author": [{"display": "Dr Synthetic"}],
+                            "context": {"encounter": [{"reference": "Encounter/enc-1"}]},
+                            "content": [
+                                {
+                                    "attachment": {
+                                        "contentType": "text/plain",
+                                        # A body URL AND inline data with SECRET note text
+                                        # that must NEVER surface in the summary/audit/signal.
+                                        "url": f"{FHIR_BASE}/Binary/bin-1",
+                                        "data": "U0VDUkVULU5PVEUtQk9EWQ==",  # "SECRET-NOTE-BODY"
+                                    }
+                                }
+                            ],
+                        }
+                    }
+                ],
+            }
+        if url.startswith(f"{FHIR_BASE}/Binary"):
+            assert access_token == "the-access-token"
+            self.binary_calls.append(url)
+            return {"resourceType": "Binary", "contentType": "text/plain", "data": "U0VDUkVU"}
+        return await super().get_json(url, access_token=access_token)
+
+    async def post_form(self, url: str, data: dict[str, str]) -> dict[str, Any]:
+        response = await super().post_form(url, data)
+        # Grant BOTH labs and clinical-note read for a notes-capable connection.
+        response["scope"] = "patient/Observation.read patient/DocumentReference.rs"
+        return response
+
+
+async def _enable_ingest_notes() -> None:
+    """Turn ingest_notes ON for BOTH test patients (it is opt-in/off by default) and
+    override the capability service so the pull-notes gate passes — enabling USER_B too so
+    the cross-user test reaches the ownership 403 rather than the toggle 409."""
+    from datetime import UTC, datetime
+
+    from app.api.deps import get_capability_service
+    from app.services.capability import CapabilityService
+
+    capability_service = CapabilityService()
+    for user in (USER_A, USER_B):
+        assert user.patient_id is not None
+        await capability_service.set_for_patient(
+            patient_id=user.patient_id,
+            actor_id=user.user_id,
+            key="ingest_notes",
+            active=True,
+            now=datetime.now(UTC),
+        )
+    app.dependency_overrides[get_capability_service] = lambda: capability_service
 
 
 @pytest.fixture()
@@ -602,3 +688,157 @@ def test_deps_build_the_provider_client_id_map_from_settings(
     assert ids["Epic (MyChart)"] == "synthetic-epic-client-id"
     assert ids["Oracle Health (Cerner)"] == "synthetic-oracle-client-id"
     assert "athenahealth" not in ids and "MEDITECH" not in ids  # unconfigured -> absent
+
+
+# --- Clinical-note pull (ADR-0045 P2 #27) ---------------------------------------------
+
+
+async def _connect_notes_and_activate(service: EmrService) -> UUID:
+    """A full connect->callback on a notes-capable EMR; returns the active connection id.
+
+    Uses the service API directly (the callback grants the DocumentReference scope) so the
+    connection is ready for a note pull. USER_A owns it (matching the signed-in override)."""
+    assert USER_A.patient_id is not None
+    record, _, state = await service.start_connect(
+        patient_id=USER_A.patient_id, fhir_base=FHIR_BASE, provider_name=None, include_notes=True
+    )
+    await service.complete_callback(state=state, code="auth-code")
+    return record.id
+
+
+async def test_pull_notes_full_flow_imports_and_is_idempotent_with_one_signal() -> None:
+    """Two pulls of the same note import 1 then 0 (idempotent), and exactly ONE
+    new-chart-note signal is emitted (only on the first, real insert — no re-alert)."""
+    service = EmrService(transport=NotesEmr(), client_id="c", redirect_uri="https://a/cb")
+    try:
+        c = _client_with(service)
+        await _enable_ingest_notes()
+        connection_id = await _connect_notes_and_activate(service)
+
+        first = c.post(f"/emr/connections/{connection_id}/pull-notes")
+        assert first.status_code == 200
+        assert first.json() == {"imported": 1, "skipped": 0, "fetched": 1}
+
+        second = c.post(f"/emr/connections/{connection_id}/pull-notes")
+        assert second.status_code == 200
+        assert second.json()["imported"] == 0  # already on file — re-pull persists nothing
+
+        # Exactly ONE signal across the two pulls, carrying metadata only (no body).
+        signals = service.note_signals.signals  # type: ignore[attr-defined]
+        assert len(signals) == 1
+        signal = signals[0]
+        assert signal.type_display == "Progress note"
+        assert signal.author_display == "Dr Synthetic"
+        assert signal.encounter_fhir_id == "enc-1"
+        assert "SECRET" not in repr(signal)  # existence + metadata only, never the body
+    finally:
+        app.dependency_overrides.clear()
+
+
+async def test_pull_notes_watermark_bounds_the_second_search() -> None:
+    """The first pull searches unbounded; the second carries date=ge(last_notes_pulled_at)
+    so it only asks for notes authored since the last sync."""
+    emr = NotesEmr()
+    service = EmrService(transport=emr, client_id="c", redirect_uri="https://a/cb")
+    try:
+        c = _client_with(service)
+        await _enable_ingest_notes()
+        connection_id = await _connect_notes_and_activate(service)
+
+        c.post(f"/emr/connections/{connection_id}/pull-notes")
+        c.post(f"/emr/connections/{connection_id}/pull-notes")
+
+        assert len(emr.note_search_urls) == 2
+        assert "date=ge" not in emr.note_search_urls[0]  # first pull unbounded
+        assert "date=ge" in emr.note_search_urls[1]  # second pull carries the watermark
+    finally:
+        app.dependency_overrides.clear()
+
+
+async def test_pull_notes_no_body_in_summary_or_audit() -> None:
+    """The pull writes note METADATA only: the note body (inline data / Binary) never
+    appears in the endpoint response OR in the import_clinical_notes audit event."""
+    service = EmrService(transport=NotesEmr(), client_id="c", redirect_uri="https://a/cb")
+    try:
+        c = _client_with(service)
+        await _enable_ingest_notes()
+        connection_id = await _connect_notes_and_activate(service)
+
+        resp = c.post(f"/emr/connections/{connection_id}/pull-notes")
+        assert "SECRET" not in resp.text  # no body in the response payload
+
+        events = service.audit._events  # type: ignore[attr-defined]
+        note_events = [e for e in events if e.action == "import_clinical_notes"]
+        assert len(note_events) == 1
+        assert note_events[0].detail == {
+            "connection_id": str(connection_id),
+            "fetched": 1,
+            "imported": 1,
+        }
+        # No note text anywhere in the audit detail (counts/refs only).
+        import json as _json
+
+        assert "SECRET" not in _json.dumps(note_events[0].detail)
+    finally:
+        app.dependency_overrides.clear()
+
+
+async def test_pull_notes_scope_guard_refuses_without_the_note_scope() -> None:
+    """A connection whose granted scope lacks DocumentReference read must NOT have a
+    DocumentReference request sent on its behalf — the pull answers 409 (reconnect) and
+    makes no EHR search call (the base FakeEmr grants only Observation.read)."""
+    service = EmrService(transport=FakeEmr(), client_id="c", redirect_uri="https://a/cb")
+    try:
+        c = _client_with(service)
+        await _enable_ingest_notes()
+        assert USER_A.patient_id is not None
+        record, _, state = await service.start_connect(
+            patient_id=USER_A.patient_id, fhir_base=FHIR_BASE, provider_name=None
+        )
+        await service.complete_callback(state=state, code="auth-code")
+
+        resp = c.post(f"/emr/connections/{record.id}/pull-notes")
+        assert resp.status_code == 409
+        assert "clinical notes" in resp.json()["detail"]
+        # No note was persisted and no signal emitted (no EHR call was made).
+        assert service.note_signals.signals == []  # type: ignore[attr-defined]
+    finally:
+        app.dependency_overrides.clear()
+
+
+async def test_pull_notes_is_gated_by_the_ingest_notes_toggle(client: TestClient) -> None:
+    """ingest_notes is OPT-IN (default off): the pull-notes gate answers 409 before the
+    handler even for an unknown connection id, until the patient turns it on."""
+    refused = client.post(f"/emr/connections/{uuid4()}/pull-notes")
+    assert refused.status_code == 409
+    assert "turned off" in refused.json()["detail"]
+
+
+async def test_pull_notes_cross_user_is_403() -> None:
+    """A note pull on someone else's connection is 403 (ownership), like the lab pull."""
+    service = EmrService(transport=NotesEmr(), client_id="c", redirect_uri="https://a/cb")
+    try:
+        c = _client_with(service)
+        await _enable_ingest_notes()
+        connection_id = await _connect_notes_and_activate(service)
+        _sign_in_as(USER_B)
+        assert c.post(f"/emr/connections/{connection_id}/pull-notes").status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_pull_notes_requires_auth() -> None:
+    with TestClient(app) as anon:
+        assert anon.post(f"/emr/connections/{uuid4()}/pull-notes").status_code == 401
+
+
+def test_connect_notes_opt_in_requests_the_document_reference_scope(client: TestClient) -> None:
+    """connect_notes=True adds patient/DocumentReference.rs to the authorize URL scopes;
+    a labs-only connect (default) never requests it."""
+    with_notes = client.post("/emr/connect", json={"fhir_base": FHIR_BASE, "connect_notes": True})
+    scope = parse_qs(urlparse(with_notes.json()["authorize_url"]).query)["scope"][0]
+    assert "patient/DocumentReference.rs" in scope
+
+    labs_only = client.post("/emr/connect", json={"fhir_base": FHIR_BASE})
+    scope_labs = parse_qs(urlparse(labs_only.json()["authorize_url"]).query)["scope"][0]
+    assert "patient/DocumentReference.rs" not in scope_labs
