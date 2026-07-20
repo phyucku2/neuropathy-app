@@ -16,6 +16,8 @@ from app.models.observation import DataOrigin, Observation, ObservationStatus, S
 from app.schemas.trajectory import Direction
 from app.schemas.visit_summary import (
     BIOMECH_DIFFERS_QUESTION,
+    EVENT_RECORDED_QUESTION,
+    MED_CHANGE_QUESTION,
     NON_DIAGNOSTIC_NOTE,
     SHEET_LABEL,
     SYMPTOM_DIRECTION_CHANGE_QUESTION,
@@ -373,5 +375,127 @@ def test_change_questions_skip_unchanged_symptoms() -> None:
 def test_placeholder_rows_present_and_not_yet_tracked() -> None:
     summary = _assemble([], window=60)
     keys = {row.key for row in summary.placeholders}
-    assert keys == {"medications", "emr_notes", "patient_notes", "nutrition"}
+    # Medications & patient_notes are CAPTURED now (ADR-0045 P2) — only emr_notes (Phase 2b
+    # FHIR DocumentReference) and nutrition (Phase 3) remain render-only placeholders.
+    assert keys == {"emr_notes", "nutrition"}
     assert all(row.status == "not_yet_tracked" for row in summary.placeholders)
+
+
+# --- ADR-0045 P2: medications, patient notes/events, and the what-changed delta --------
+
+
+def _med_row(
+    med_id: str,
+    *,
+    change_type: str,
+    name: str = "Gabapentin",
+    kind: str = "prescription",
+    dose: float | None = 300.0,
+    days_ago: float = 10,
+) -> Observation:
+    at = NOW - timedelta(days=days_ago)
+    return Observation(
+        id=uuid4(),
+        patient_id=SUBJECT,
+        source=SourceType.medication,
+        origin=DataOrigin.patient_reported,
+        code=med_id,
+        code_system="neuropathy-app/medication",
+        value_num=dose,
+        value_text=name,
+        unit="mg",
+        effective_at=at,
+        recorded_at=at,
+        status=ObservationStatus.final,
+        quality={"human_confirmed": True, "source_mode": "manual"},
+        payload={"change_type": change_type, "kind": kind, "prescriber": "Dr X", "dose_text": None},
+    )
+
+
+def _event_row(
+    code: str, *, event_type: str, note: str | None, days_ago: float = 10
+) -> Observation:
+    at = NOW - timedelta(days=days_ago)
+    return Observation(
+        id=uuid4(),
+        patient_id=SUBJECT,
+        source=SourceType.event,
+        origin=DataOrigin.patient_reported,
+        code=code,
+        value_text=note,
+        effective_at=at,
+        recorded_at=at,
+        status=ObservationStatus.final,
+        quality={"human_confirmed": True},
+        payload={"type": event_type, "display": "Fall", "reviewed": False},
+    )
+
+
+def _assemble_meds(  # type: ignore[no-untyped-def]
+    rows: list[Observation], medication_rows: list[Observation], *, window: int = 60
+):
+    return assemble_visit_summary(
+        rows,
+        subject_id=SUBJECT,
+        window=window,
+        now=NOW,
+        include_change_questions=False,
+        medication_rows=medication_rows,
+    )
+
+
+def test_medication_and_event_rows_excluded_from_trajectory_signals() -> None:
+    """Medication/event rows carry a numeric dose + unknown code; they must NOT mint a
+    spurious signal under 'What's driving it', while the meds/notes sections still fill."""
+    meds = [_med_row("med:aaa", change_type="added", dose=300.0, days_ago=10)]
+    events = [_event_row("event_fall", event_type="fall", note="fell", days_ago=10)]
+    # The windowed `rows` include the med + event rows (build_visit_summary's 2×window read
+    # is not source-filtered), plus a real ADL series.
+    rows = [_obs("adl_walking", 3.0, 20), _obs("adl_walking", 4.0, 5), *meds, *events]
+    summary = _assemble_meds(rows, medication_rows=meds)
+    signal_codes = {s.code for s in summary.status.signals}
+    assert "med:aaa" not in signal_codes
+    assert "event_fall" not in signal_codes
+    # The sections still populate.
+    assert [m.medication_id for m in summary.medications] == ["med:aaa"]
+    assert [n.type for n in summary.patient_notes] == ["fall"]
+
+
+def test_med_added_in_window_appears_in_delta_and_triggers_question() -> None:
+    meds = [_med_row("med:aaa", change_type="added", dose=300.0, days_ago=10)]
+    summary = _assemble_meds([*meds], medication_rows=meds)
+    deltas = summary.what_changed.medication_changes
+    assert [d.medication_id for d in deltas] == ["med:aaa"]
+    assert deltas[0].change_type == "added"
+    assert deltas[0].provenance == "patient-entered"
+    assert MED_CHANGE_QUESTION in summary.questions.data_completeness
+
+
+def test_med_added_before_window_folds_but_is_not_in_delta() -> None:
+    """The full-history read means a med started before the window still folds into the
+    current medications section, but its (out-of-window) added row is NOT a delta."""
+    meds = [_med_row("med:aaa", change_type="added", dose=300.0, days_ago=200)]
+    summary = _assemble_meds([], medication_rows=meds, window=60)
+    assert [m.medication_id for m in summary.medications] == ["med:aaa"]  # folded current state
+    assert summary.what_changed.medication_changes == []  # nothing changed IN the window
+    assert MED_CHANGE_QUESTION not in summary.questions.data_completeness
+
+
+def test_events_in_window_trigger_event_question_and_notes_newest_first() -> None:
+    events = [
+        _event_row("event_fall", event_type="fall", note="older", days_ago=30),
+        _event_row("event_fall", event_type="fall", note="newer", days_ago=5),
+    ]
+    summary = _assemble_meds([*events], medication_rows=[])
+    assert [n.note for n in summary.patient_notes] == ["newer", "older"]  # newest first
+    assert EVENT_RECORDED_QUESTION in summary.questions.data_completeness
+
+
+def test_stopped_med_still_appears_in_medications_section() -> None:
+    meds = [
+        _med_row("med:aaa", change_type="added", dose=300.0, days_ago=40),
+        _med_row("med:aaa", change_type="stopped", dose=None, days_ago=10),
+    ]
+    summary = _assemble_meds([*meds], medication_rows=meds)
+    assert len(summary.medications) == 1
+    assert summary.medications[0].status == "stopped"

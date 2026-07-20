@@ -113,7 +113,7 @@ async def test_patient_visit_summary_defaults_to_window_60(
     assert resp.status_code == 200
     body = resp.json()
     assert body["window_days"] == 60
-    assert body["schema_version"] == "1.0"
+    assert body["schema_version"] == "1.1"
     assert body["subject_id"] == str(PATIENT.patient_id)
     assert body["lead_section"] == "what_changed"  # 60 is a short window
     assert body["disclaimer"]  # non-diagnostic note co-located
@@ -346,6 +346,54 @@ async def test_clinician_visit_summary_matches_patient_shape(
     assert clin_body["status"]["direction"] == pat_body["status"]["direction"]
     assert [s["code"] for s in clin_body["symptoms"]] == [s["code"] for s in pat_body["symptoms"]]
     assert clin_body["window_days"] == pat_body["window_days"] == 60
+
+
+async def test_clinician_visit_summary_shows_meds_and_events(
+    clinic_client: TestClient, clinic_service: ClinicService
+) -> None:
+    """The consented clinician sees the patient's captured medications & events through the
+    SAME assembly (one source of truth) — meds fold, events surface, and a med change in the
+    window appears in the what-changed delta (ADR-0045 P2)."""
+    clinician = _create_clinician(clinic_client)
+    _, patient_id = _connect_consented(clinic_client, clinician)
+    med = Observation(
+        patient_id=patient_id,
+        source=SourceType.medication,
+        origin=DataOrigin.patient_reported,
+        code="med:aaa",
+        code_system="neuropathy-app/medication",
+        value_num=300.0,
+        value_text="Gabapentin",
+        unit="mg",
+        effective_at=NOW - timedelta(days=10),
+        recorded_at=NOW - timedelta(days=10),
+        status=ObservationStatus.final,
+        quality={"human_confirmed": True, "source_mode": "manual"},
+        payload={"change_type": "added", "kind": "prescription", "prescriber": "Dr X"},
+    )
+    fall = Observation(
+        patient_id=patient_id,
+        source=SourceType.event,
+        origin=DataOrigin.patient_reported,
+        code="event_fall",
+        value_text="fell in the hall",
+        effective_at=NOW - timedelta(days=8),
+        recorded_at=NOW - timedelta(days=8),
+        status=ObservationStatus.final,
+        quality={"human_confirmed": True},
+        payload={"type": "fall", "display": "Fall", "reviewed": False},
+    )
+    await clinic_service.observations.add(med)
+    await clinic_service.observations.add(fall)
+
+    body = clinic_client.get(
+        f"/clinic/patients/{patient_id}/visit-summary", headers=clinician
+    ).json()
+    assert [m["medication_id"] for m in body["medications"]] == ["med:aaa"]
+    assert body["medications"][0]["provenance"] == "patient-entered"
+    assert [n["type"] for n in body["patient_notes"]] == ["fall"]
+    assert body["patient_notes"][0]["note"] == "fell in the hall"  # patient's own words
+    assert [d["medication_id"] for d in body["what_changed"]["medication_changes"]] == ["med:aaa"]
 
 
 def test_clinician_non_consented_is_404_not_403(

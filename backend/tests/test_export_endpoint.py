@@ -342,7 +342,7 @@ def test_export_writes_one_phi_free_audit_event(world: World, client: TestClient
         "observations": 3,
         "emr_connections": 1,
         "clinic_connections": 1,
-        "capabilities": 8,  # ADR-0034 ingest_symptoms + ADR-0035 ingest_wearable
+        "capabilities": 10,  # + ADR-0045 P2 ingest_medications & ingest_events
     }
     assert "Synthetic" not in json.dumps(event.detail)
 

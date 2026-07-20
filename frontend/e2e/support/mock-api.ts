@@ -22,9 +22,13 @@ import type {
   EmrConnectionOut,
   EmrProviderOut,
   EmrPullOut,
+  EventList,
+  EventOut,
   ExportObservation,
   ExportOut,
   LeadSection,
+  MedicationLog,
+  MedicationOut,
   MeOut,
   ObservationItem,
   PanelOut,
@@ -316,25 +320,101 @@ export const EMR_PULL: EmrPullOut = {
 // ---- Visit-Ready Summary (ADR-0045) — mirrors src/test/fixtures.ts + backend schema ----
 
 const VISIT_SUMMARY_PLACEHOLDERS: PlaceholderRow[] = [
-  {
-    key: 'medications',
-    label: 'Medications & supplements',
-    status: 'not_yet_tracked',
-    phase: 'Phase 2',
-  },
-  { key: 'emr_notes', label: 'EMR clinician notes', status: 'not_yet_tracked', phase: 'Phase 2' },
-  {
-    key: 'patient_notes',
-    label: 'Patient notes & events',
-    status: 'not_yet_tracked',
-    phase: 'Phase 2',
-  },
+  { key: 'emr_notes', label: 'EMR clinician notes', status: 'not_yet_tracked', phase: 'Phase 2b' },
   { key: 'nutrition', label: 'Nutrition', status: 'not_yet_tracked', phase: 'Phase 3' },
 ];
 
+/** Patient-entered medication log (ADR-0045 P2) — active supplement + stopped prescription. */
+export const MEDICATIONS: MedicationLog = {
+  items: [
+    {
+      medication_id: 'med:11111111-1111-4111-8111-aaaaaaaaaaaa',
+      name: 'Alpha-lipoic acid',
+      kind: 'supplement',
+      status: 'active',
+      current_dose_amount: 600,
+      current_dose_unit: 'mg',
+      current_dose_text: null,
+      prescriber: 'Dr. Rivera',
+      started_on: '2026-03-01',
+      last_change_at: '2026-06-10T00:00:00Z',
+      changes: [
+        {
+          change_type: 'added',
+          effective_at: '2026-03-01T00:00:00Z',
+          dose_amount: 300,
+          dose_unit: 'mg',
+          dose_text: null,
+          reason: null,
+        },
+        {
+          change_type: 'dose_changed',
+          effective_at: '2026-06-10T00:00:00Z',
+          dose_amount: 600,
+          dose_unit: 'mg',
+          dose_text: null,
+          reason: 'Tolerating it well',
+        },
+      ],
+    },
+    {
+      medication_id: 'med:22222222-2222-4222-8222-bbbbbbbbbbbb',
+      name: 'Gabapentin',
+      kind: 'prescription',
+      status: 'stopped',
+      current_dose_amount: 300,
+      current_dose_unit: 'mg',
+      current_dose_text: null,
+      prescriber: 'Dr. Rivera',
+      started_on: '2026-02-01',
+      last_change_at: '2026-05-20T00:00:00Z',
+      changes: [
+        {
+          change_type: 'added',
+          effective_at: '2026-02-01T00:00:00Z',
+          dose_amount: 300,
+          dose_unit: 'mg',
+          dose_text: null,
+          reason: null,
+        },
+        {
+          change_type: 'stopped',
+          effective_at: '2026-05-20T00:00:00Z',
+          dose_amount: null,
+          dose_unit: null,
+          dose_text: null,
+          reason: 'Side effects',
+        },
+      ],
+    },
+  ],
+};
+
+/** Patient-entered between-visit events (ADR-0045 P2), newest-first. */
+export const EVENTS: EventList = {
+  items: [
+    {
+      event_id: 'aaaaaaaa-0000-4000-8000-000000000001',
+      type: 'fall',
+      effective_at: '2026-07-05T00:00:00Z',
+      note: 'Lost my balance stepping off the curb, no injury.',
+      reviewed: false,
+      skipped: false,
+    },
+    {
+      event_id: 'aaaaaaaa-0000-4000-8000-000000000002',
+      type: 'note',
+      effective_at: '2026-06-28T00:00:00Z',
+      note: 'Feet feel colder in the mornings this week.',
+      reviewed: false,
+      skipped: false,
+    },
+  ],
+};
+
 export const VISIT_SUMMARY: VisitSummary = {
   generated_at: '2026-07-15T10:00:00Z',
-  schema_version: '1.0',
+  schema_version: '1.1',
   subject_id: '22222222-2222-4222-8222-222222222222',
   window_days: 60,
   window_end: '2026-07-15T10:00:00Z',
@@ -387,6 +467,19 @@ export const VISIT_SUMMARY: VisitSummary = {
         prior_value: 57,
         prior_at: '2026-05-06T10:00:00Z',
         direction: 'improving',
+      },
+    ],
+    medication_changes: [
+      {
+        medication_id: 'med:11111111-1111-4111-8111-aaaaaaaaaaaa',
+        name: 'Alpha-lipoic acid',
+        kind: 'supplement',
+        change_type: 'dose_changed',
+        dose_amount: 600,
+        dose_unit: 'mg',
+        dose_text: null,
+        effective_at: '2026-06-10T00:00:00Z',
+        provenance: 'patient-entered',
       },
     ],
   },
@@ -467,10 +560,50 @@ export const VISIT_SUMMARY: VisitSummary = {
       latest_at: '2026-07-02T10:00:00Z',
     },
   ],
+  medications: [
+    {
+      medication_id: 'med:11111111-1111-4111-8111-aaaaaaaaaaaa',
+      name: 'Alpha-lipoic acid',
+      kind: 'supplement',
+      status: 'active',
+      current_dose_amount: 600,
+      current_dose_unit: 'mg',
+      current_dose_text: null,
+      prescriber: 'Dr. Rivera',
+      started_on: '2026-03-01',
+      last_change_at: '2026-06-10T00:00:00Z',
+      provenance: 'patient-entered',
+    },
+    {
+      medication_id: 'med:22222222-2222-4222-8222-bbbbbbbbbbbb',
+      name: 'Gabapentin',
+      kind: 'prescription',
+      status: 'stopped',
+      current_dose_amount: 300,
+      current_dose_unit: 'mg',
+      current_dose_text: null,
+      prescriber: 'Dr. Rivera',
+      started_on: '2026-02-01',
+      last_change_at: '2026-05-20T00:00:00Z',
+      provenance: 'patient-entered',
+    },
+  ],
+  patient_notes: [
+    {
+      type: 'fall',
+      display: 'Fall',
+      effective_at: '2026-07-05T00:00:00Z',
+      note: 'Lost my balance stepping off the curb, no injury.',
+      reviewed: false,
+      provenance: 'patient-entered',
+    },
+  ],
   placeholders: VISIT_SUMMARY_PLACEHOLDERS,
   questions: {
     data_completeness: [
       'A new long-term blood sugar result was recorded in this window since the last value — review in context.',
+      "A medication or supplement change was recorded in this window — confirm it's reflected in the chart.",
+      'Between-visit events or notes were recorded in this window — review them with the patient.',
     ],
     change_pointed: [],
   },
@@ -599,6 +732,10 @@ export interface Scenario {
   biomech?: { status?: number; body?: unknown };
   /** Override the PUT /capabilities/:key outcome (e.g. a 409 clinically-managed). */
   putCapability?: { status: number; body: unknown };
+  /** Seed the medication log (ADR-0045 P2); POSTs append to it statefully. Defaults empty. */
+  medications?: MedicationOut[];
+  /** Seed the between-visit event list (ADR-0045 P2); POSTs prepend to it. Defaults empty. */
+  events?: EventOut[];
   // clinician surface
   panel?: PanelOut;
   clinicTrajectory?: Trajectory;
@@ -646,13 +783,17 @@ export async function installApiMocks(page: Page, scenario: Scenario = {}): Prom
   const clinicTrajectory = scenario.clinicTrajectory ?? TRAJECTORY_IMPROVING;
   const clinicObservations = scenario.clinicObservations ?? OBSERVATIONS;
   const clinicCapabilities = scenario.clinicCapabilities ?? CLINIC_CAPABILITIES;
+  // Stateful patient-entered capture (ADR-0045 P2): seeded from the scenario (default empty),
+  // POSTs mutate these so an added med / recorded event shows up on the next GET.
+  const medications: MedicationOut[] = scenario.medications ? [...scenario.medications] : [];
+  const events: EventOut[] = scenario.events ? [...scenario.events] : [];
 
   await page.route('**/favicon.ico', (route) => route.fulfill({ status: 204, body: '' }));
 
   await page.route(
     // /emr shares its prefix between API paths and the SPA's /emr/callback relay
     // route, exactly like /clinic (see the document-navigation note below).
-    /\/(auth|me|observations|adl|biomech|trajectory|capabilities|connections|clinic|emr)(\/|$|\?)/,
+    /\/(auth|me|observations|adl|biomech|trajectory|capabilities|connections|clinic|emr|medications|events)(\/|$|\?)/,
     async (route) => {
       const req = route.request();
       // Only intercept the app's fetch/XHR API calls. The client routes /clinic and
@@ -769,6 +910,114 @@ export async function installApiMocks(page: Page, scenario: Scenario = {}): Prom
           ...(typeof scenario.biomech?.body === 'object' ? scenario.biomech.body : {}),
         });
       }
+      // ---- medications & supplements (ADR-0045 P2) ----
+      if (method === 'GET' && path === '/medications') {
+        return fulfillJson(route, 200, { items: medications });
+      }
+      if (method === 'POST' && path === '/medications') {
+        const body = req.postDataJSON() as {
+          name: string;
+          kind: MedicationOut['kind'];
+          dose_amount: number | null;
+          dose_unit: string | null;
+          dose_text: string | null;
+          prescriber: string | null;
+          started_on: string;
+        };
+        const medicationId = `med:${crypto.randomUUID()}`;
+        const effectiveAt = `${body.started_on}T00:00:00Z`;
+        medications.push({
+          medication_id: medicationId,
+          name: body.name,
+          kind: body.kind,
+          status: 'active',
+          current_dose_amount: body.dose_amount,
+          current_dose_unit: body.dose_unit,
+          current_dose_text: body.dose_text,
+          prescriber: body.prescriber,
+          started_on: body.started_on,
+          last_change_at: effectiveAt,
+          changes: [
+            {
+              change_type: 'added',
+              effective_at: effectiveAt,
+              dose_amount: body.dose_amount,
+              dose_unit: body.dose_unit,
+              dose_text: body.dose_text,
+              reason: null,
+            },
+          ],
+        });
+        return fulfillJson(route, 201, {
+          medication_id: medicationId,
+          change_type: 'added',
+          effective_at: effectiveAt,
+          skipped: false,
+        });
+      }
+      const medChangeMatch = /^\/medications\/([^/]+)\/changes$/.exec(path);
+      if (method === 'POST' && medChangeMatch) {
+        const medicationId = decodeURIComponent(medChangeMatch[1] ?? '');
+        const med = medications.find((m) => m.medication_id === medicationId);
+        if (med === undefined) {
+          return fulfillJson(route, 404, { detail: 'No such medication' });
+        }
+        const body = req.postDataJSON() as {
+          change_type: 'dose_changed' | 'stopped';
+          dose_amount: number | null;
+          dose_unit: string | null;
+          dose_text: string | null;
+          reason: string | null;
+          effective_date: string;
+        };
+        const effectiveAt = `${body.effective_date}T00:00:00Z`;
+        med.changes.push({
+          change_type: body.change_type,
+          effective_at: effectiveAt,
+          dose_amount: body.dose_amount,
+          dose_unit: body.dose_unit,
+          dose_text: body.dose_text,
+          reason: body.reason,
+        });
+        med.last_change_at = effectiveAt;
+        if (body.change_type === 'stopped') {
+          med.status = 'stopped';
+        } else {
+          med.current_dose_amount = body.dose_amount;
+          med.current_dose_unit = body.dose_unit;
+          med.current_dose_text = body.dose_text;
+        }
+        return fulfillJson(route, 201, {
+          medication_id: medicationId,
+          change_type: body.change_type,
+          effective_at: effectiveAt,
+          skipped: false,
+        });
+      }
+
+      // ---- between-visit events & notes (ADR-0045 P2) ----
+      if (method === 'GET' && path === '/events') {
+        return fulfillJson(route, 200, { items: events });
+      }
+      if (method === 'POST' && path === '/events') {
+        const body = req.postDataJSON() as {
+          type: EventOut['type'];
+          effective_date: string;
+          note: string | null;
+        };
+        const recorded: EventOut = {
+          event_id: crypto.randomUUID(),
+          type: body.type,
+          effective_at: `${body.effective_date}T00:00:00Z`,
+          note: body.note,
+          reviewed: false,
+          skipped: false,
+        };
+        // Newest-first, mirroring the real list ordering.
+        events.unshift(recorded);
+        return fulfillJson(route, 201, recorded);
+      }
+
       if (method === 'GET' && path === '/capabilities') {
         return fulfillJson(route, 200, { capabilities });
       }

@@ -124,6 +124,8 @@ async def test_registry_covers_every_shipped_feature() -> None:
         "ingest_biomech",
         "ingest_symptoms",
         "ingest_wearable",
+        "ingest_medications",
+        "ingest_events",
         "emr_connect",
         "ai_narrative",
         "share_with_clinic",

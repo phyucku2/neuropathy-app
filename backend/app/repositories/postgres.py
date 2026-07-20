@@ -26,7 +26,7 @@ from app.models.capability import Actor, Capability, PatientCapability
 from app.models.clinic import Clinic
 from app.models.connection import ClinicConnection, ConnectionStatus
 from app.models.emr_connection import EmrConnection
-from app.models.observation import Observation, ObservationStatus
+from app.models.observation import Observation, ObservationStatus, SourceType
 from app.models.patient import Patient
 from app.models.pending_auth import PendingAuthState
 from app.models.secret import StoredSecret
@@ -359,6 +359,7 @@ class PostgresObservationRepository:
         limit: int | None = None,
         offset: int = 0,
         newest_first: bool = False,
+        source: SourceType | None = None,
     ) -> list[Observation]:
         # "Current" records only: exclude rows superseded by a newer row's revises_id
         # (corrections replace their target in the analyzable dataset).
@@ -379,6 +380,10 @@ class PostgresObservationRepository:
         )
         if code is not None:
             stmt = stmt.where(Observation.code == code)
+        if source is not None:
+            # Backed by ix_observation_patient_source_time — the medication full-history
+            # fold's source-scoped read (ADR-0045 P2).
+            stmt = stmt.where(Observation.source == source)
         if since is not None:
             stmt = stmt.where(Observation.effective_at >= since)
         if offset:

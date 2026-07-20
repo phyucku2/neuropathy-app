@@ -10,9 +10,11 @@ import type {
   EmrConnectStartOut,
   EmrProviderOut,
   EmrPullOut,
+  EventList,
   ExportObservation,
   ExportOut,
   LeadSection,
+  MedicationLog,
   MeOut,
   ObservationItem,
   PanelOut,
@@ -223,29 +225,108 @@ export const VISIT_SUMMARY_DISCLAIMER =
   'source and date. Share it with your care team to discuss what it means.';
 export const VISIT_SUMMARY_SHEET_LABEL = 'current record, not a complete medical record';
 
-/** The four render-only placeholder rows (Phase 2/3 capture, ADR-0045). */
+/** The render-only placeholder rows (ADR-0045). Medications & patient notes are CAPTURED as of
+ *  P2 and dropped from here; emr_notes (Phase 2b) and nutrition (Phase 3) stay render-only. */
 export const VISIT_SUMMARY_PLACEHOLDERS: PlaceholderRow[] = [
-  {
-    key: 'medications',
-    label: 'Medications & supplements',
-    status: 'not_yet_tracked',
-    phase: 'Phase 2',
-  },
-  { key: 'emr_notes', label: 'EMR clinician notes', status: 'not_yet_tracked', phase: 'Phase 2' },
-  {
-    key: 'patient_notes',
-    label: 'Patient notes & events',
-    status: 'not_yet_tracked',
-    phase: 'Phase 2',
-  },
+  { key: 'emr_notes', label: 'EMR clinician notes', status: 'not_yet_tracked', phase: 'Phase 2b' },
   { key: 'nutrition', label: 'Nutrition', status: 'not_yet_tracked', phase: 'Phase 3' },
 ];
+
+/** Patient-entered medication log (ADR-0045 P2) — an active supplement with a dose-change plus a
+ *  stopped prescription, so the folded current state + append-only history both render. */
+export const MEDICATIONS: MedicationLog = {
+  items: [
+    {
+      medication_id: 'med:11111111-1111-4111-8111-aaaaaaaaaaaa',
+      name: 'Alpha-lipoic acid',
+      kind: 'supplement',
+      status: 'active',
+      current_dose_amount: 600,
+      current_dose_unit: 'mg',
+      current_dose_text: null,
+      prescriber: 'Dr. Rivera',
+      started_on: '2026-03-01',
+      last_change_at: '2026-06-10T00:00:00Z',
+      changes: [
+        {
+          change_type: 'added',
+          effective_at: '2026-03-01T00:00:00Z',
+          dose_amount: 300,
+          dose_unit: 'mg',
+          dose_text: null,
+          reason: null,
+        },
+        {
+          change_type: 'dose_changed',
+          effective_at: '2026-06-10T00:00:00Z',
+          dose_amount: 600,
+          dose_unit: 'mg',
+          dose_text: null,
+          reason: 'Tolerating it well',
+        },
+      ],
+    },
+    {
+      medication_id: 'med:22222222-2222-4222-8222-bbbbbbbbbbbb',
+      name: 'Gabapentin',
+      kind: 'prescription',
+      status: 'stopped',
+      current_dose_amount: 300,
+      current_dose_unit: 'mg',
+      current_dose_text: null,
+      prescriber: 'Dr. Rivera',
+      started_on: '2026-02-01',
+      last_change_at: '2026-05-20T00:00:00Z',
+      changes: [
+        {
+          change_type: 'added',
+          effective_at: '2026-02-01T00:00:00Z',
+          dose_amount: 300,
+          dose_unit: 'mg',
+          dose_text: null,
+          reason: null,
+        },
+        {
+          change_type: 'stopped',
+          effective_at: '2026-05-20T00:00:00Z',
+          dose_amount: null,
+          dose_unit: null,
+          dose_text: null,
+          reason: 'Side effects',
+        },
+      ],
+    },
+  ],
+};
+
+/** Patient-entered between-visit events (ADR-0045 P2), newest-first: a fall with a note and a
+ *  plain typed note. The note text is the patient's own words (synthetic). */
+export const EVENTS: EventList = {
+  items: [
+    {
+      event_id: 'aaaaaaaa-0000-4000-8000-000000000001',
+      type: 'fall',
+      effective_at: '2026-07-05T00:00:00Z',
+      note: 'Lost my balance stepping off the curb, no injury.',
+      reviewed: false,
+      skipped: false,
+    },
+    {
+      event_id: 'aaaaaaaa-0000-4000-8000-000000000002',
+      type: 'note',
+      effective_at: '2026-06-28T00:00:00Z',
+      note: 'Feet feel colder in the mornings this week.',
+      reviewed: false,
+      skipped: false,
+    },
+  ],
+};
 
 /** A rich default summary (window 60 → lead_section 'what_changed'). Self-consistent synthetic
  *  data; the status reuses TRAJECTORY_IMPROVING so the hero renders the full NSI card. */
 export const VISIT_SUMMARY: VisitSummary = {
   generated_at: '2026-07-15T10:00:00Z',
-  schema_version: '1.0',
+  schema_version: '1.1',
   subject_id: '22222222-2222-4222-8222-222222222222',
   window_days: 60,
   window_end: '2026-07-15T10:00:00Z',
@@ -307,6 +388,21 @@ export const VISIT_SUMMARY: VisitSummary = {
         prior_value: 57,
         prior_at: '2026-05-06T10:00:00Z',
         direction: 'improving',
+      },
+    ],
+    // A dose change recorded inside the current window (ADR-0045 P2) — surfaces under
+    // "What changed" and triggers MED_CHANGE_QUESTION on the backend.
+    medication_changes: [
+      {
+        medication_id: 'med:11111111-1111-4111-8111-aaaaaaaaaaaa',
+        name: 'Alpha-lipoic acid',
+        kind: 'supplement',
+        change_type: 'dose_changed',
+        dose_amount: 600,
+        dose_unit: 'mg',
+        dose_text: null,
+        effective_at: '2026-06-10T00:00:00Z',
+        provenance: 'patient-entered',
       },
     ],
   },
@@ -427,10 +523,52 @@ export const VISIT_SUMMARY: VisitSummary = {
       latest_at: '2026-07-02T10:00:00Z',
     },
   ],
+  // Folded current medications (ADR-0045 P2): an active supplement + a stopped prescription.
+  medications: [
+    {
+      medication_id: 'med:11111111-1111-4111-8111-aaaaaaaaaaaa',
+      name: 'Alpha-lipoic acid',
+      kind: 'supplement',
+      status: 'active',
+      current_dose_amount: 600,
+      current_dose_unit: 'mg',
+      current_dose_text: null,
+      prescriber: 'Dr. Rivera',
+      started_on: '2026-03-01',
+      last_change_at: '2026-06-10T00:00:00Z',
+      provenance: 'patient-entered',
+    },
+    {
+      medication_id: 'med:22222222-2222-4222-8222-bbbbbbbbbbbb',
+      name: 'Gabapentin',
+      kind: 'prescription',
+      status: 'stopped',
+      current_dose_amount: 300,
+      current_dose_unit: 'mg',
+      current_dose_text: null,
+      prescriber: 'Dr. Rivera',
+      started_on: '2026-02-01',
+      last_change_at: '2026-05-20T00:00:00Z',
+      provenance: 'patient-entered',
+    },
+  ],
+  // Between-visit events/notes in the window (ADR-0045 P2), newest-first.
+  patient_notes: [
+    {
+      type: 'fall',
+      display: 'Fall',
+      effective_at: '2026-07-05T00:00:00Z',
+      note: 'Lost my balance stepping off the curb, no injury.',
+      reviewed: false,
+      provenance: 'patient-entered',
+    },
+  ],
   placeholders: VISIT_SUMMARY_PLACEHOLDERS,
   questions: {
     data_completeness: [
       'A new long-term blood sugar result was recorded in this window since the last value — review in context.',
+      "A medication or supplement change was recorded in this window — confirm it's reflected in the chart.",
+      'Between-visit events or notes were recorded in this window — review them with the patient.',
     ],
     change_pointed: [],
   },
@@ -452,12 +590,15 @@ export const VISIT_SUMMARY_INSUFFICIENT: VisitSummary = {
       checkins_in_prior_window: 0,
     },
     latest_biomech: [],
+    medication_changes: [],
   },
   symptoms: [],
   function: [],
   balance_gait: [],
   labs: [],
   activity: [],
+  medications: [],
+  patient_notes: [],
   questions: { data_completeness: [], change_pointed: [] },
 };
 

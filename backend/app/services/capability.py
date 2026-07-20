@@ -115,6 +115,15 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         default=False,
         enforced=True,
     ),
+    # Patient-entered medication/supplement change log and between-visit events/notes
+    # (ADR-0045 P2). Default ON (back-compat posture of the other capture keys); enforced —
+    # the medications/events routes refuse the write with 409 when the toggle is off.
+    CapabilitySpec(
+        key="ingest_medications", name="Medications & supplements", default=True, enforced=True
+    ),
+    CapabilitySpec(
+        key="ingest_events", name="Between-visit notes & events", default=True, enforced=True
+    ),
     CapabilitySpec(
         key="emr_connect", name="Medical record connection", default=True, enforced=True
     ),

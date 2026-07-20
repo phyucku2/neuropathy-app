@@ -55,6 +55,9 @@ describe('signalMeta', () => {
     expect(sourceLabel('lab')).toBe('Lab');
     expect(sourceLabel('adl')).toBe('Check-in');
     expect(sourceLabel('emr')).toBe('Your records');
+    // Patient-entered capture (ADR-0045 P2) — never a device/lab claim.
+    expect(sourceLabel('medication')).toBe('You entered');
+    expect(sourceLabel('event')).toBe('You entered');
     expect(sourceLabel('device')).toBe('Device');
     expect(displayUnit('{score}')).toBe('score');
     expect(displayUnit('mm/s')).toBe('mm/s');

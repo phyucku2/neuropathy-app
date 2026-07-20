@@ -23,6 +23,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 
+from app.ingestion.medications import FoldedMedication, fold_medications
 from app.models.observation import Observation, SourceType
 from app.repositories.observation import ObservationRepository
 from app.schemas.trajectory import Direction, Trajectory
@@ -31,6 +32,8 @@ from app.schemas.visit_summary import (
     ADHERENCE_GAP_QUESTION,
     BIOMECH_DIFFERS_QUESTION,
     COVERAGE_GAP_QUESTION,
+    EVENT_RECORDED_QUESTION,
+    MED_CHANGE_QUESTION,
     NEW_LAB_QUESTION,
     PLACEHOLDER_ROWS,
     SHORT_WINDOWS,
@@ -39,6 +42,9 @@ from app.schemas.visit_summary import (
     AdherenceGap,
     LabDelta,
     LeadSection,
+    MedicationChangeDelta,
+    MedicationItem,
+    PatientEventItem,
     PriorDelta,
     QuestionsToAsk,
     SparkPoint,
@@ -55,6 +61,13 @@ from app.trajectory.points import points_from_observations
 # The self-reported symptom + function series the handout sparklines (ADR-0034/0045).
 _SYMPTOM_CODES = ("symptom_pain", "symptom_numbness")
 _FUNCTION_CODES = ("adl_walking", "adl_stairs", "adl_balance_confidence")
+
+# The sources the trajectory engine judges. Medication/event rows carry a numeric dose and
+# unknown codes, so feeding them to compute_trajectory would mint a spurious
+# "unknown-polarity" signal under "What's driving it" — they are excluded (ADR-0045 P2).
+_TRAJECTORY_SOURCES = frozenset(
+    {SourceType.lab, SourceType.adl, SourceType.biomech, SourceType.wearable}
+)
 
 # A row/timestamp pair, effective_at coerced tz-aware once at the window filter.
 _Row = tuple[Observation, datetime]
@@ -254,6 +267,71 @@ def _adherence_gap(current: list[_Row], prior: list[_Row], *, now: datetime) -> 
     )
 
 
+def _medication_item(folded: FoldedMedication) -> MedicationItem:
+    return MedicationItem(
+        medication_id=folded.medication_id,
+        name=folded.name,
+        kind=folded.kind,
+        status=folded.status,
+        current_dose_amount=folded.current_dose_amount,
+        current_dose_unit=folded.current_dose_unit,
+        current_dose_text=folded.current_dose_text,
+        prescriber=folded.prescriber,
+        started_on=folded.started_on,
+        last_change_at=folded.last_change_at,
+    )
+
+
+def _medication_changes_in_window(
+    medication_rows: list[Observation], *, lower: datetime, upper: datetime
+) -> list[MedicationChangeDelta]:
+    """Every medication CHANGE ROW whose effective_at is in the current window (ADR-0045 P2).
+
+    Descriptive only — names what the patient recorded (drug, kind, change_type, dose,
+    date). Ordered newest-first. NO reconciliation or recommendation.
+    """
+    deltas: list[MedicationChangeDelta] = []
+    for row in _analyzable_in_window(medication_rows, lower=lower, upper=upper):
+        obs, at = row
+        payload = obs.payload if isinstance(obs.payload, dict) else {}
+        deltas.append(
+            MedicationChangeDelta(
+                medication_id=obs.code,
+                name=obs.value_text or "",
+                kind=str(payload.get("kind") or ""),
+                change_type=str(payload.get("change_type") or "added"),
+                dose_amount=obs.value_num,
+                dose_unit=obs.unit,
+                dose_text=(
+                    str(payload["dose_text"]) if isinstance(payload.get("dose_text"), str) else None
+                ),
+                effective_at=at,
+            )
+        )
+    deltas.sort(key=lambda d: d.effective_at, reverse=True)
+    return deltas
+
+
+def _patient_notes(windowed: list[_Row]) -> list[PatientEventItem]:
+    """The between-visit events/notes in the window, newest-first (ADR-0045 P2)."""
+    notes: list[PatientEventItem] = []
+    for row, at in windowed:
+        if row.source is not SourceType.event:
+            continue
+        payload = row.payload if isinstance(row.payload, dict) else {}
+        notes.append(
+            PatientEventItem(
+                type=str(payload.get("type") or ""),
+                display=str(payload.get("display") or ""),
+                effective_at=at,
+                note=row.value_text,
+                reviewed=bool(payload.get("reviewed", False)),
+            )
+        )
+    notes.sort(key=lambda n: n.effective_at, reverse=True)
+    return notes
+
+
 def assemble_visit_summary(
     rows: list[Observation],
     *,
@@ -261,12 +339,19 @@ def assemble_visit_summary(
     window: int,
     now: datetime,
     include_change_questions: bool,
+    medication_rows: list[Observation] | None = None,
 ) -> VisitSummary:
     """Build the windowed VisitSummary over one patient's rows (pure, deterministic).
 
     Same rows + same `now` + same window always yield the same VisitSummary. `now` is
     threaded in (never wall-clock here) so results are reproducible and testable.
+
+    `medication_rows` is the patient's FULL (unbounded) medication history — the
+    current-medications fold needs a med's `added` row even when it was started before the
+    2×window lookback (ADR-0045 P2). When omitted (older callers/tests), the medications
+    section is empty.
     """
+    medication_rows = medication_rows or []
     window_end = now
     current_window_start = now - timedelta(days=window)
     prior_window_start = now - timedelta(days=2 * window)
@@ -278,9 +363,13 @@ def assemble_visit_summary(
     # Engine reuse: the status hero is compute_trajectory over the CURRENT window; the
     # prior trajectory is anchored at now-window and used ONLY for the symptom-direction
     # diff (its recency/confidence baseline is intentionally shifted — see ADR-0045).
-    status = compute_trajectory(points_from_observations([r for r, _ in current]), now=now)
+    # Medication/event rows are EXCLUDED from the engine (they carry a dose + unknown code
+    # and would mint a spurious signal) — every real section filters by explicit code/source.
+    current_traj_rows = [r for r, _ in current if r.source in _TRAJECTORY_SOURCES]
+    prior_traj_rows = [r for r, _ in prior if r.source in _TRAJECTORY_SOURCES]
+    status = compute_trajectory(points_from_observations(current_traj_rows), now=now)
     prior_traj = compute_trajectory(
-        points_from_observations([r for r, _ in prior]), now=current_window_start
+        points_from_observations(prior_traj_rows), now=current_window_start
     )
     current_dirs = _signal_directions(status)
     prior_dirs = _signal_directions(prior_traj)
@@ -339,11 +428,19 @@ def assemble_visit_summary(
                 changed=current_direction != prior_direction,
             )
         )
+    # --- Medications (full-history fold) + patient notes/events (windowed) ---
+    medications = [_medication_item(folded) for folded in fold_medications(medication_rows)]
+    patient_notes = _patient_notes(windowed)
+    medication_changes = _medication_changes_in_window(
+        medication_rows, lower=current_window_start, upper=window_end
+    )
+
     what_changed = WhatChanged(
         new_labs=labs,
         symptom_trend=symptom_trend,
         adherence=adherence,
         latest_biomech=balance_gait,
+        medication_changes=medication_changes,
     )
 
     questions = _build_questions(
@@ -354,6 +451,8 @@ def assemble_visit_summary(
         symptom_trend=symptom_trend,
         balance_gait=balance_gait,
         include_change_questions=include_change_questions,
+        has_medication_changes=bool(medication_changes),
+        has_events=bool(patient_notes),
     )
 
     return VisitSummary(
@@ -373,6 +472,8 @@ def assemble_visit_summary(
         balance_gait=balance_gait,
         labs=labs,
         activity=activity,
+        medications=medications,
+        patient_notes=patient_notes,
         placeholders=list(PLACEHOLDER_ROWS),
         questions=questions,
     )
@@ -390,6 +491,8 @@ def _build_questions(
     symptom_trend: list[SymptomTrendChange],
     balance_gait: list[PriorDelta],
     include_change_questions: bool,
+    has_medication_changes: bool,
+    has_events: bool,
 ) -> QuestionsToAsk:
     """Assemble the change-surfacing prompts from the template constants only.
 
@@ -417,6 +520,14 @@ def _build_questions(
             data_completeness.append(
                 COVERAGE_GAP_QUESTION.format(missing=window - covered, window=window)
             )
+
+    # Medication/event completeness prompts (ADR-0045 P2): clearly-safe, point only at what
+    # the patient recorded in the window — no interpretation. Independent of has_data since a
+    # medication change or event is itself the recorded data.
+    if has_medication_changes:
+        data_completeness.append(MED_CHANGE_QUESTION)
+    if has_events:
+        data_completeness.append(EVENT_RECORDED_QUESTION)
 
     if include_change_questions:
         for change in symptom_trend:
@@ -452,11 +563,16 @@ async def build_visit_summary(
     the read with counts only, never values — CLAUDE.md §5).
     """
     rows = await observations.list_for_patient(subject_id, since=now - timedelta(days=2 * window))
+    # The current-medications fold needs a med's `added` row even when it predates the
+    # window, so read the FULL medication history (source-scoped, unbounded) — meds are
+    # low-volume and the (patient_id, source, effective_at) index keeps it in budget.
+    medication_rows = await observations.list_for_patient(subject_id, source=SourceType.medication)
     summary = assemble_visit_summary(
         rows,
         subject_id=subject_id,
         window=window,
         now=now,
         include_change_questions=include_change_questions,
+        medication_rows=medication_rows,
     )
-    return summary, len(rows)
+    return summary, len(rows) + len(medication_rows)

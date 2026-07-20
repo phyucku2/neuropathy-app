@@ -47,6 +47,12 @@ const CheckInPage = lazy(() =>
 const AddDataPage = lazy(() =>
   import('./features/add/AddDataPage').then((m) => ({ default: m.AddDataPage })),
 );
+const MedsPage = lazy(() =>
+  import('./features/meds/MedsPage').then((m) => ({ default: m.MedsPage })),
+);
+const EventsPage = lazy(() =>
+  import('./features/events/EventsPage').then((m) => ({ default: m.EventsPage })),
+);
 const SettingsPage = lazy(() =>
   import('./features/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })),
 );
@@ -145,6 +151,10 @@ export function App() {
                 <Route path="learn" element={<LearnPage />} />
                 <Route path="check-in" element={<CheckInPage />} />
                 <Route path="add" element={<AddDataPage />} />
+                {/* Patient-entered capture (ADR-0045 P2): the medication change-log and the
+                    between-visit notes/events surfaces, reached from cards on Add data. */}
+                <Route path="meds" element={<MedsPage />} />
+                <Route path="events" element={<EventsPage />} />
                 <Route path="settings" element={<SettingsPage />} />
                 {/* Your Records (read-only, display-only) — reached from a card on the
                     Sources surface, NOT a bottom-nav tab (ADR-0039: five is the max). */}

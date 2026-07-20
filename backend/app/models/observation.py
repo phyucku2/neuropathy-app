@@ -28,6 +28,8 @@ class SourceType(enum.StrEnum):
     adl = "adl"  # activities-of-daily-living / functional status (patient-reported)
     biomech = "biomech"  # BioMech balance/gait report, PDF-ingested (ADR-0014, app/biomech)
     wearable = "wearable"  # phone/watch mobility metrics from a health store (ADR-0035)
+    medication = "medication"  # patient-entered medication/supplement change log (ADR-0045 P2)
+    event = "event"  # patient-entered between-visit event/note (ADR-0045 P2)
 
 
 class DataOrigin(enum.StrEnum):
@@ -106,6 +108,11 @@ class Observation(UUIDPrimaryKey, Timestamps, Base):
 
     __table_args__ = (
         Index("ix_observation_patient_code_time", "patient_id", "code", "effective_at"),
+        # The medication current-state fold reads a patient's FULL medication history
+        # (unbounded by window — a med started years before the lookback still needs its
+        # `added` row, ADR-0045 P2), so a (patient_id, source, effective_at) index keeps
+        # that source-scoped read in budget instead of scanning every code.
+        Index("ix_observation_patient_source_time", "patient_id", "source", "effective_at"),
         Index("ix_observation_status", "status"),
         # The superseded-row anti-join probes revises_id per candidate row (hot path).
         Index("ix_observation_patient_revises", "patient_id", "revises_id"),
