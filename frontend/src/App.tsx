@@ -91,6 +91,11 @@ const CaregiverSummaryPage = lazy(() =>
     default: m.CaregiverSummaryPage,
   })),
 );
+const CaregiverAlertsPage = lazy(() =>
+  import('./features/caregiver/CaregiverAlertsPage').then((m) => ({
+    default: m.CaregiverAlertsPage,
+  })),
+);
 
 function RequireAuth() {
   const { status } = useAuth();
@@ -221,6 +226,9 @@ export function App() {
             <Route path="caregiver" element={<CaregiverArea />}>
               <Route element={<AppShell variant="caregiver" />}>
                 <Route index element={<CaregiverHomePage />} />
+                {/* Alerts feed (ADR-0047 B1): the caregiver area has no tab bar, so it is
+                    reached from a card on the caregiver home. */}
+                <Route path="alerts" element={<CaregiverAlertsPage />} />
                 <Route path="patients/:patientId/summary" element={<CaregiverSummaryPage />} />
                 <Route path="*" element={<Navigate to="/caregiver" replace />} />
               </Route>

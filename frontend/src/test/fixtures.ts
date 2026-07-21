@@ -4,7 +4,9 @@
  */
 
 import type {
+  AlertPreferencesOut,
   CapabilityStateOut,
+  CaregiverAlertsOut,
   CaregiverInviteCreateOut,
   CaregiverInviteOut,
   CaregiverPatientsOut,
@@ -976,6 +978,55 @@ export const CAREGIVER_PATIENTS_EMPTY: CaregiverPatientsOut = {
   emergency_notice: CAREGIVER_EMERGENCY_NOTICE,
 };
 
+// ---- caregiver alerts (ADR-0047 B1) — mirrors backend/app/schemas/caregiver_alert.py ----
+
+/** The backend's fixed non-diagnostic template copy (services/caregiver_alert_copy.py),
+ *  verbatim — each body carries the co-located 911 framing. */
+export const CAREGIVER_ALERT_MISSED_CHECKIN = {
+  id: 'a1a1a1a1-0000-4000-8000-000000000001',
+  alert_type: 'missed_checkin' as const,
+  patient_id: CAREGIVER_SHARED_PATIENT.patient_id,
+  patient_display_name: 'Pat Example',
+  title: 'A check-in was missed',
+  body:
+    "It's been a little while since the last daily check-in. You might want to check in the " +
+    `next time you talk. ${CAREGIVER_EMERGENCY_NOTICE}`,
+  created_at: '2026-07-20T10:00:00Z',
+  acknowledged_at: null,
+};
+
+export const CAREGIVER_ALERT_TREND_SHIFT = {
+  id: 'a1a1a1a1-0000-4000-8000-000000000002',
+  alert_type: 'trend_shift' as const,
+  patient_id: CAREGIVER_SHARED_PATIENT.patient_id,
+  patient_display_name: 'Pat Example',
+  title: 'A shift in the wellness trend',
+  body: `The weekly wellness trend has shifted. Take a look in the app when you get a chance. ${CAREGIVER_EMERGENCY_NOTICE}`,
+  created_at: '2026-07-19T10:00:00Z',
+  acknowledged_at: '2026-07-19T18:00:00Z',
+};
+
+/** The caregiver's feed: one NEW (unacked) alert + one already acknowledged. */
+export const CAREGIVER_ALERTS: CaregiverAlertsOut = {
+  alerts: [CAREGIVER_ALERT_MISSED_CHECKIN, CAREGIVER_ALERT_TREND_SHIFT],
+  emergency_notice: CAREGIVER_EMERGENCY_NOTICE,
+};
+
+export const CAREGIVER_ALERTS_EMPTY: CaregiverAlertsOut = {
+  alerts: [],
+  emergency_notice: CAREGIVER_EMERGENCY_NOTICE,
+};
+
+/** The patient's per-type opt-in flags — every type listed, DEFAULT OFF. */
+export const CAREGIVER_ALERT_PREFERENCES: AlertPreferencesOut = {
+  preferences: [
+    { alert_type: 'missed_checkin', enabled: false },
+    { alert_type: 'med_change', enabled: false },
+    { alert_type: 'trend_shift', enabled: false },
+    { alert_type: 'new_chart_note', enabled: false },
+  ],
+};
+
 // ---- data export (ADR-0031) — mirrors backend/app/schemas/export.py ----
 
 /** Two observations with a comma + quote in text/unit, so the CSV flattener's escaping
@@ -1021,8 +1072,9 @@ export const EXPORT_OBSERVATIONS: ExportObservation[] = [
 
 export const EXPORT: ExportOut = {
   exported_at: '2026-07-15T10:00:00Z',
-  // 1.1: caregiver_links added (ADR-0047) — mirrors backend EXPORT_SCHEMA_VERSION.
-  schema_version: '1.1',
+  // 1.2: caregiver_alerts + caregiver_alert_preferences added (ADR-0047 B1) — mirrors
+  // backend EXPORT_SCHEMA_VERSION (1.1 added caregiver_links).
+  schema_version: '1.2',
   subject_id: ME.patient_id ?? '22222222-2222-4222-8222-222222222222',
   account: {
     display_name: ME.display_name,
@@ -1054,4 +1106,16 @@ export const EXPORT: ExportOut = {
       created_at: CAREGIVER_LINK_ACTIVE.created_at,
     },
   ],
+  // Caregiver alerts + per-type opt-in state (ADR-0047 B1, export schema 1.2) — metadata
+  // only, never a value/code label/note text (the shape has no field for them).
+  caregiver_alerts: [
+    {
+      id: CAREGIVER_ALERT_TREND_SHIFT.id,
+      caregiver_display_name: CAREGIVER_LINK_ACTIVE.caregiver_display_name,
+      alert_type: CAREGIVER_ALERT_TREND_SHIFT.alert_type,
+      created_at: CAREGIVER_ALERT_TREND_SHIFT.created_at,
+      acknowledged_at: CAREGIVER_ALERT_TREND_SHIFT.acknowledged_at,
+    },
+  ],
+  caregiver_alert_preferences: [{ alert_type: 'trend_shift', enabled: true }],
 };

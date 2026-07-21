@@ -142,7 +142,7 @@ describe('saveExport — platform branch', () => {
     expect(writeFile).toHaveBeenCalledWith(
       expect.objectContaining({
         path: 'neuropathy-export-2026-07-15.json',
-        data: expect.stringContaining('"schema_version": "1.1"'),
+        data: expect.stringContaining('"schema_version": "1.2"'),
       }),
     );
     expect(share).toHaveBeenCalledWith(

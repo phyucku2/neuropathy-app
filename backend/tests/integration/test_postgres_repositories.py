@@ -21,6 +21,8 @@ from app.ingestion.labs import lab_result_to_observation
 from app.models.audit import AuditEvent
 from app.models.capability import Actor, Capability
 from app.models.caregiver import (
+    CaregiverAlert,
+    CaregiverAlertType,
     CaregiverInvite,
     CaregiverLink,
     CaregiverLinkStatus,
@@ -39,6 +41,8 @@ from app.repositories.emr_connection import ConnectionRecord
 from app.repositories.postgres import (
     PostgresAuditEventRepository,
     PostgresCapabilityRepository,
+    PostgresCaregiverAlertPreferenceRepository,
+    PostgresCaregiverAlertRepository,
     PostgresCaregiverInviteRepository,
     PostgresCaregiverLinkRepository,
     PostgresClinicConnectionRepository,
@@ -836,6 +840,102 @@ async def test_caregiver_repositories_round_trip_and_live_link_index(
         assert await links.list_for_patient(patient_id) == []
         await invites.delete_for_patient(patient_id)
         assert await invites.list_for_patient(patient_id) == []
+        await session.commit()
+
+
+async def test_caregiver_alert_repositories_round_trip(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Caregiver-alert repo round-trips (ADR-0047 B1): idempotent add_if_absent on the
+    unique dedupe index, the conditional acknowledge (owned + only-once), the preference
+    upsert (one row per pair), and the deletion sweeps (by patient and by caregiver)."""
+    now = datetime.now(UTC)
+    caregiver = UserRecord(
+        id=uuid.uuid4(),
+        email=f"care-{uuid.uuid4().hex[:12]}@example.com",
+        password_hash="argon2-hash-placeholder",
+        display_name="Synthetic Caregiver",
+        role=UserRole.caregiver,
+        patient_id=None,
+    )
+
+    async with session_factory() as session:
+        patient_id = await _new_patient(session)
+        await PostgresUserRepository(session).add(caregiver)
+        link = await PostgresCaregiverLinkRepository(session).add(
+            CaregiverLink(
+                patient_id=patient_id,
+                caregiver_user_id=caregiver.id,
+                scope=CaregiverScope.full,
+                status=CaregiverLinkStatus.active,
+                initiated_by=Initiator.patient,
+                accepted_at=now,
+            )
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        alerts = PostgresCaregiverAlertRepository(session)
+        alert = CaregiverAlert(
+            patient_id=patient_id,
+            caregiver_link_id=link.id,
+            alert_type=CaregiverAlertType.med_change,
+            dedupe_key="obs-123",
+        )
+        # First insert wins; the same logical event (link, type, dedupe_key) is absorbed
+        # as a skip by uq_caregiver_alert_link_type_dedupe — the savepoint keeps the
+        # transaction usable afterwards.
+        assert await alerts.add_if_absent(alert) is True
+        assert (
+            await alerts.add_if_absent(
+                CaregiverAlert(
+                    patient_id=patient_id,
+                    caregiver_link_id=link.id,
+                    alert_type=CaregiverAlertType.med_change,
+                    dedupe_key="obs-123",
+                )
+            )
+            is False
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        alerts = PostgresCaregiverAlertRepository(session)
+        assert [a.id for a in await alerts.list_for_link(link.id)] == [alert.id]
+        assert [a.id for a in await alerts.list_for_links([link.id])] == [alert.id]
+        # Conditional acknowledge: exactly once, and only for the owning link.
+        assert await alerts.acknowledge(alert.id, uuid.uuid4(), at=now) is False  # not owned
+        assert await alerts.acknowledge(alert.id, link.id, at=now) is True
+        assert await alerts.acknowledge(alert.id, link.id, at=now) is False  # already acked
+        reloaded = await alerts.get(alert.id)
+        assert reloaded is not None and reloaded.acknowledged_at is not None
+        await session.commit()
+
+    async with session_factory() as session:
+        prefs = PostgresCaregiverAlertPreferenceRepository(session)
+        first = await prefs.upsert(
+            patient_id=patient_id, alert_type=CaregiverAlertType.med_change, enabled=True
+        )
+        # Upsert is one-row-per-pair: a second call updates in place (same id).
+        second = await prefs.upsert(
+            patient_id=patient_id, alert_type=CaregiverAlertType.med_change, enabled=False
+        )
+        assert first.id == second.id
+        assert second.enabled is False
+        assert len(await prefs.list_for_patient(patient_id)) == 1
+        assert (await prefs.get(patient_id, CaregiverAlertType.med_change)).enabled is False  # type: ignore[union-attr]
+        await session.commit()
+
+    async with session_factory() as session:
+        # Deletion sweeps (ADR-0027/0047 B1): by caregiver (alerts on their links), then
+        # by patient (remaining alerts + preferences) — zero residual.
+        alerts = PostgresCaregiverAlertRepository(session)
+        prefs = PostgresCaregiverAlertPreferenceRepository(session)
+        await alerts.delete_for_caregiver(caregiver.id)
+        assert await alerts.list_for_link(link.id) == []
+        await alerts.delete_for_patient(patient_id)
+        await prefs.delete_for_patient(patient_id)
+        assert await prefs.list_for_patient(patient_id) == []
         await session.commit()
 
 

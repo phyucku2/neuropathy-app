@@ -13,6 +13,7 @@ import type { CapabilityStateOut } from '../../api/types';
 import { ErrorNotice, Loading } from '../../components/StatusMessages';
 import { formatDayYear } from '../../lib/format';
 import { useApi } from '../../lib/useApi';
+import { CaregiverAlertPreferencesCard } from './CaregiverAlertPreferencesCard';
 import { CaregiverShareCard } from './CaregiverShareCard';
 import { ConnectionRow } from './ConnectionRow';
 import { DeleteAccountCard } from './DeleteAccountCard';
@@ -198,6 +199,9 @@ export function SettingsPage() {
       {/* Caregiver sharing (ADR-0047) sits beside the clinic connection — the same
           patient-held, revocable consent primitive with a different grantee. */}
       <CaregiverShareCard />
+      {/* Per-type caregiver-alert opt-ins (ADR-0047 B1) — a sibling to the share card,
+          DEFAULT OFF: nothing is sent to a caregiver until the patient turns it on. */}
+      <CaregiverAlertPreferencesCard />
       {/* EMR connect (ADR-0028) sits with the clinic connections — a data-source
           concern, deliberately outside the danger zone below. */}
       <EmrConnectCard />

@@ -8,9 +8,13 @@ import { request } from './client';
 import type {
   AdlCheckInIn,
   AdlCheckInOut,
+  AlertPreferenceOut,
+  AlertPreferencesOut,
   BiomechImportOut,
   CapabilitiesOut,
   CapabilityStateOut,
+  CaregiverAlertsOut,
+  CaregiverAlertType,
   CaregiverClaimOut,
   CaregiverInviteCreateOut,
   CaregiverInviteOut,
@@ -325,6 +329,26 @@ export function getCaregiverPatients(): Promise<CaregiverPatientsOut> {
   return request<CaregiverPatientsOut>('/caregiver/patients');
 }
 
+/**
+ * The caregiver's in-app alert feed (ADR-0047 B1). The backend runs the compute-on-read
+ * evaluators for every accepted patient, persists new candidates idempotently, and
+ * returns the scope + preference-gated list — a trends-only caregiver never sees a
+ * `med_change` / `new_chart_note` alert (not even its existence). PHI, no-store; the
+ * bodies are fixed non-diagnostic template copy carrying the 911 framing.
+ */
+export function getCaregiverAlerts(): Promise<CaregiverAlertsOut> {
+  return request<CaregiverAlertsOut>('/caregiver/alerts');
+}
+
+/** Acknowledge an alert — idempotent (a double-ack is a quiet 204). 404 (never 403) for
+ *  anything not readable: an unknown alert, another caregiver's, or one hidden by
+ *  scope/preference is indistinguishable from nonexistent. */
+export async function acknowledgeCaregiverAlert(alertId: string): Promise<void> {
+  await request<unknown>(`/caregiver/alerts/${encodeURIComponent(alertId)}/ack`, {
+    method: 'POST',
+  });
+}
+
 /** The shared patient's DETERMINISTIC trajectory (trends scope suffices). A patient this
  *  caregiver may not read answers 404, indistinguishable from nonexistent. */
 export function getCaregiverPatientTrajectory(patientId: string): Promise<Trajectory> {
@@ -394,6 +418,24 @@ export function setCaregiverScope(
 /** Revoke a caregiver's access: it stops immediately and nothing can block it (ADR-0047). */
 export async function revokeCaregiverLink(linkId: string): Promise<void> {
   await request<unknown>(`/me/caregivers/${encodeURIComponent(linkId)}`, { method: 'DELETE' });
+}
+
+/** The patient's per-type caregiver-alert opt-in flags (ADR-0047 B1). Every type is
+ *  listed; a type the patient has never touched reads DEFAULT OFF. */
+export function getCaregiverAlertPreferences(): Promise<AlertPreferencesOut> {
+  return request<AlertPreferencesOut>('/me/caregiver-alert-preferences');
+}
+
+/** Turn a caregiver-alert type on or off (ADR-0047 B1 — DEFAULT OFF). A no-change write
+ *  is a quiet success; an unknown type is a 422. */
+export function setCaregiverAlertPreference(
+  alertType: CaregiverAlertType,
+  enabled: boolean,
+): Promise<AlertPreferenceOut> {
+  return request<AlertPreferenceOut>(
+    `/me/caregiver-alert-preferences/${encodeURIComponent(alertType)}`,
+    { method: 'PUT', body: { enabled } },
+  );
 }
 
 // ---- clinician surface (ADR-0012 / ADR-0013) ----

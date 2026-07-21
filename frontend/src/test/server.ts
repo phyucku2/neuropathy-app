@@ -5,6 +5,8 @@ import { setupServer } from 'msw/node';
 import type { AdlCheckInIn, CapabilitySetIn, ClinicianCapabilitySetIn } from '../api/types';
 import {
   CAPABILITIES,
+  CAREGIVER_ALERT_PREFERENCES,
+  CAREGIVER_ALERTS,
   CAREGIVER_CLAIM_ACCEPTED_DETAIL,
   CAREGIVER_CODE_INVALID_DETAIL,
   CAREGIVER_INVITE_CREATE,
@@ -449,7 +451,35 @@ export const handlers = [
     });
   }),
 
+  // Caregiver alert feed (ADR-0047 B1): compute-on-read list, PHI, no-store. The default
+  // feed carries one NEW + one already-acknowledged alert; tests override with server.use.
+  http.get('/caregiver/alerts', ({ request }) =>
+    isAuthorized(request)
+      ? HttpResponse.json(CAREGIVER_ALERTS, { headers: { 'Cache-Control': 'no-store' } })
+      : unauthorized(),
+  ),
+
+  // Acknowledge: idempotent 204 (a double-ack is a quiet success). A 404-over-403 for an
+  // unreadable alert is exercised by tests via server.use.
+  http.post('/caregiver/alerts/:alertId/ack', ({ request }) =>
+    isAuthorized(request) ? new HttpResponse(null, { status: 204 }) : unauthorized(),
+  ),
+
   // ---- patient-side caregiver lifecycle ----
+
+  // Per-type caregiver-alert opt-ins (ADR-0047 B1): every type listed, DEFAULT OFF. PUT
+  // echoes the requested flag (a no-change write is a quiet success server-side).
+  http.get('/me/caregiver-alert-preferences', ({ request }) =>
+    isAuthorized(request) ? HttpResponse.json(CAREGIVER_ALERT_PREFERENCES) : unauthorized(),
+  ),
+
+  http.put('/me/caregiver-alert-preferences/:alertType', async ({ request, params }) => {
+    if (!isAuthorized(request)) {
+      return unauthorized();
+    }
+    const body = (await request.json()) as { enabled: boolean };
+    return HttpResponse.json({ alert_type: String(params['alertType']), enabled: body.enabled });
+  }),
 
   http.post('/me/caregiver-invites', ({ request }) =>
     isAuthorized(request)

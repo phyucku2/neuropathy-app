@@ -3,6 +3,9 @@
 from app.models.audit import AuditEvent
 from app.models.capability import Actor, Capability, PatientCapability
 from app.models.caregiver import (
+    CaregiverAlert,
+    CaregiverAlertPreference,
+    CaregiverAlertType,
     CaregiverInvite,
     CaregiverLink,
     CaregiverLinkStatus,
@@ -24,6 +27,9 @@ __all__ = [
     "Actor",
     "Capability",
     "PatientCapability",
+    "CaregiverAlert",
+    "CaregiverAlertPreference",
+    "CaregiverAlertType",
     "CaregiverInvite",
     "CaregiverLink",
     "CaregiverLinkStatus",

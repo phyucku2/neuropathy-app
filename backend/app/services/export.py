@@ -37,6 +37,12 @@ from app.repositories.caregiver import (
     CaregiverLinkRepository,
     InMemoryCaregiverLinkRepository,
 )
+from app.repositories.caregiver_alert import (
+    CaregiverAlertPreferenceRepository,
+    CaregiverAlertRepository,
+    InMemoryCaregiverAlertPreferenceRepository,
+    InMemoryCaregiverAlertRepository,
+)
 from app.repositories.emr_clinical_note import (
     EmrClinicalNoteRepository,
     InMemoryEmrClinicalNoteRepository,
@@ -54,6 +60,8 @@ from app.schemas.emr import ConnectionOut as EmrConnectionOut
 from app.schemas.export import (
     EXPORT_SCHEMA_VERSION,
     ExportAccountProfile,
+    ExportCaregiverAlert,
+    ExportCaregiverAlertPreference,
     ExportCaregiverLink,
     ExportEmrClinicalNote,
     ExportObservation,
@@ -187,6 +195,14 @@ class PatientDataExportService:
     caregiver_links: CaregiverLinkRepository = field(
         default_factory=InMemoryCaregiverLinkRepository
     )
+    # Caregiver alerts + the patient's per-type opt-in state (ADR-0047 B1) — metadata
+    # only, exported like the links (no value/note text exists on either).
+    caregiver_alerts: CaregiverAlertRepository = field(
+        default_factory=InMemoryCaregiverAlertRepository
+    )
+    caregiver_alert_preferences: CaregiverAlertPreferenceRepository = field(
+        default_factory=InMemoryCaregiverAlertPreferenceRepository
+    )
     clinic: ClinicService = field(default_factory=ClinicService)
     capabilities: CapabilityService = field(default_factory=CapabilityService)
     audit: AuditEventRepository = field(default_factory=InMemoryAuditEventRepository)
@@ -233,6 +249,19 @@ class PatientDataExportService:
             caregiver_names[link.id] = (
                 caregiver.display_name if caregiver is not None else "Unknown caregiver"
             )
+        # Alerts across every link (ADR-0047 B1) — the caregiver name resolves through
+        # the same map the links use; the per-type opt-in state rides alongside.
+        caregiver_alerts = [
+            alert
+            for link in caregiver_links
+            for alert in await self.caregiver_alerts.list_for_link(link.id)
+        ]
+        alert_link_name: dict[uuid.UUID, str] = {
+            link.id: caregiver_names[link.id] for link in caregiver_links
+        }
+        caregiver_alert_preferences = await self.caregiver_alert_preferences.list_for_patient(
+            patient_id
+        )
 
         # ONE PHI-free audit event: this is a disclosure of the whole record, so it is
         # logged like every other PHI read (CLAUDE.md §5) — counts only, never values.
@@ -249,6 +278,8 @@ class PatientDataExportService:
                     "clinic_connections": len(clinic_connections),
                     "capabilities": len(capabilities),
                     "caregiver_links": len(caregiver_links),
+                    "caregiver_alerts": len(caregiver_alerts),
+                    "caregiver_alert_preferences": len(caregiver_alert_preferences),
                 },
             )
         )
@@ -311,5 +342,23 @@ class PatientDataExportService:
                     created_at=link.created_at,
                 )
                 for link in caregiver_links
+            ],
+            caregiver_alerts=[
+                ExportCaregiverAlert(
+                    id=alert.id,
+                    caregiver_display_name=alert_link_name.get(
+                        alert.caregiver_link_id, "Unknown caregiver"
+                    ),
+                    alert_type=alert.alert_type.value,
+                    created_at=alert.created_at,
+                    acknowledged_at=alert.acknowledged_at,
+                )
+                for alert in caregiver_alerts
+            ],
+            caregiver_alert_preferences=[
+                ExportCaregiverAlertPreference(
+                    alert_type=pref.alert_type.value, enabled=pref.enabled
+                )
+                for pref in caregiver_alert_preferences
             ],
         )

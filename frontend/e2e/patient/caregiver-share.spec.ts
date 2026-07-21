@@ -85,4 +85,23 @@ test.describe('Share with a loved one (patient card)', () => {
     await expect(page.getByText('Robin Example')).toBeVisible();
     await expect(page.getByText('Can see their trend and your visit summary')).toBeVisible();
   });
+
+  // Per-type caregiver-alert opt-ins (ADR-0047 B1) — the sibling card, DEFAULT OFF.
+  test('turns a caregiver-alert type on (default OFF) and it persists', async ({ page }) => {
+    const store = newCaregiverStore();
+    await signedInApp(page, { caregiverStore: store });
+    await page.goto('/settings');
+
+    await expect(page.getByRole('heading', { name: 'Updates you send to loved ones' })).toBeVisible();
+    const toggle = page.getByRole('switch', { name: 'Medication updates' });
+    // Everything is off until the patient turns it on.
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+    await toggle.click();
+    await expect(page.getByRole('switch', { name: 'Medication updates' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    // The store recorded the opt-in (the mock backend's real statefulness).
+    expect(store.preferences.med_change).toBe(true);
+  });
 });

@@ -41,6 +41,12 @@ from app.repositories.caregiver import (
     InMemoryCaregiverInviteRepository,
     InMemoryCaregiverLinkRepository,
 )
+from app.repositories.caregiver_alert import (
+    CaregiverAlertPreferenceRepository,
+    CaregiverAlertRepository,
+    InMemoryCaregiverAlertPreferenceRepository,
+    InMemoryCaregiverAlertRepository,
+)
 from app.repositories.clinic_connection import (
     ClinicConnectionRepository,
     InMemoryClinicConnectionRepository,
@@ -158,6 +164,16 @@ class AccountDeletionService:
     caregiver_links: CaregiverLinkRepository = field(
         default_factory=InMemoryCaregiverLinkRepository
     )
+    # Caregiver alerts + per-type preferences (ADR-0047 B1): alerts FK caregiver_link, so
+    # a patient deletion removes them BEFORE the invites/links; a caregiver-account
+    # deletion removes the alerts on that caregiver's links first too. Preferences FK the
+    # patient row.
+    caregiver_alerts: CaregiverAlertRepository = field(
+        default_factory=InMemoryCaregiverAlertRepository
+    )
+    caregiver_alert_preferences: CaregiverAlertPreferenceRepository = field(
+        default_factory=InMemoryCaregiverAlertPreferenceRepository
+    )
     audit: AuditEventRepository = field(default_factory=InMemoryAuditEventRepository)
 
     async def delete_patient_account(
@@ -213,6 +229,12 @@ class AccountDeletionService:
         note_rows = await self.clinical_notes.list_for_patient(patient_id)
         invite_rows = await self.caregiver_invites.list_for_patient(patient_id)
         caregiver_link_rows = await self.caregiver_links.list_for_patient(patient_id)
+        alert_rows = [
+            alert
+            for link in caregiver_link_rows
+            for alert in await self.caregiver_alerts.list_for_link(link.id)
+        ]
+        alert_pref_rows = await self.caregiver_alert_preferences.list_for_patient(patient_id)
         # Vault refs are collected BEFORE the emr_connection rows die below; the
         # purge itself runs LAST (see the ordering note there).
         token_refs = [c.token_ref for c in emr if c.token_ref is not None]
@@ -235,6 +257,8 @@ class AccountDeletionService:
                     "patient_capabilities": len(capability_rows),
                     "caregiver_invites": len(invite_rows),
                     "caregiver_links": len(caregiver_link_rows),
+                    "caregiver_alerts": len(alert_rows),
+                    "caregiver_alert_preferences": len(alert_pref_rows),
                 },
             )
         )
@@ -248,6 +272,10 @@ class AccountDeletionService:
         await self.clinic_connections.delete_for_patient(patient_id)
         await self.patient_capabilities.delete_for_patient(patient_id)
         await self.observations.delete_for_patient(patient_id)
+        # Caregiver alerts FK caregiver_link, so they die BEFORE the links (ADR-0047 B1);
+        # the per-type preferences FK the patient row.
+        await self.caregiver_alerts.delete_for_patient(patient_id)
+        await self.caregiver_alert_preferences.delete_for_patient(patient_id)
         # Caregiver invites + links FK the patient row (ADR-0047): both die before
         # it. Deleting the links also ends any live caregiver consent — with no link
         # left, _may_caregiver_read can never pass for this patient again.
@@ -317,6 +345,9 @@ class AccountDeletionService:
             return DeletionDenied(WRONG_PASSWORD_DETAIL, status_code=403)
 
         links = await self.caregiver_links.list_for_caregiver(user.id)
+        alert_rows = [
+            alert for link in links for alert in await self.caregiver_alerts.list_for_link(link.id)
+        ]
         # ONE audit event BEFORE the destructive statements (ADR-0027) — counts only.
         # No patient subject: the event records the caregiver identity's erasure.
         await self.audit.add(
@@ -325,10 +356,12 @@ class AccountDeletionService:
                 actor_role=UserRole.caregiver.value,
                 action="delete_account",
                 patient_id=None,
-                detail={"caregiver_links": len(links)},
+                detail={"caregiver_links": len(links), "caregiver_alerts": len(alert_rows)},
             )
         )
-        # FK-safe order: links reference the user row, so they die first.
+        # FK-safe order: alerts FK the caregiver_link, so they die BEFORE the links, which
+        # in turn reference the user row and die before it.
+        await self.caregiver_alerts.delete_for_caregiver(user.id)
         await self.caregiver_links.delete_for_caregiver(user.id)
         await self.users.delete_user(user.id)
         return None

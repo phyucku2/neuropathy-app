@@ -120,6 +120,13 @@ export function CaregiverHomePage() {
   return (
     <div>
       <h1>How they&apos;re doing</h1>
+      {/* Entry point to the Alerts feed (ADR-0047 B1) — the caregiver area has no tab bar,
+          so the feed hangs off a link here. Shown whenever at least one person shares. */}
+      {patients.length > 0 && (
+        <Link className="btn ghost" to="/caregiver/alerts">
+          See your updates
+        </Link>
+      )}
       {patients.length === 0 && (
         <>
           <section className="card" aria-labelledby="waiting-heading">

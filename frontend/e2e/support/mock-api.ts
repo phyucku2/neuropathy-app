@@ -17,6 +17,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Page, Route } from '@playwright/test';
 import type {
+  CaregiverAlertOut,
+  CaregiverAlertType,
   CapabilityStateOut,
   CaregiverPatientOut,
   ConnectionOut,
@@ -665,13 +667,83 @@ export const CAREGIVER_EMERGENCY_NOTICE =
  * to drive the real cross-role journey (invite → claim → accept → read → revoke) —
  * the same statefulness the real backend has.
  */
+/** One seeded caregiver alert as the store holds it (ADR-0047 B1). The compute-on-read
+ *  evaluators are simulated by seeding the events that already "happened"; the feed
+ *  projection then scope-gates them exactly as the real backend does. */
+export interface CaregiverAlertSeed {
+  id: string;
+  alert_type: CaregiverAlertType;
+  created_at: string;
+  acknowledged_at: string | null;
+}
+
 export interface CaregiverStore {
   invites: { id: string; code: string; created_at: string; expires_at: string }[];
   links: PatientCaregiverLinkOut[];
+  /** Seeded alerts (the "already computed" events) — scope-gated on read. */
+  alerts: CaregiverAlertSeed[];
+  /** The patient's per-type opt-in flags (DEFAULT OFF). */
+  preferences: Record<CaregiverAlertType, boolean>;
 }
 
 export function newCaregiverStore(): CaregiverStore {
-  return { invites: [], links: [] };
+  return {
+    invites: [],
+    links: [],
+    alerts: [],
+    preferences: {
+      missed_checkin: false,
+      med_change: false,
+      trend_shift: false,
+      new_chart_note: false,
+    },
+  };
+}
+
+/** Scope → the alert types it may ever see (mirrors backend type_allowed_for_scope). */
+const ALERT_TYPES_BY_SCOPE: Record<'trends' | 'full', CaregiverAlertType[]> = {
+  trends: ['missed_checkin', 'trend_shift'],
+  full: ['missed_checkin', 'med_change', 'trend_shift', 'new_chart_note'],
+};
+
+/** The backend's fixed non-diagnostic template copy (services/caregiver_alert_copy.py),
+ *  verbatim — each body carries the co-located 911 framing. */
+const ALERT_COPY: Record<CaregiverAlertType, { title: string; body: string }> = {
+  missed_checkin: {
+    title: 'A check-in was missed',
+    body:
+      "It's been a little while since the last daily check-in. You might want to check in the " +
+      `next time you talk. ${CAREGIVER_EMERGENCY_NOTICE}`,
+  },
+  med_change: {
+    title: 'A medication update',
+    body:
+      "There's been an update to the medication list. You can see the details in the app when " +
+      `you have a moment. ${CAREGIVER_EMERGENCY_NOTICE}`,
+  },
+  trend_shift: {
+    title: 'A shift in the wellness trend',
+    body: `The weekly wellness trend has shifted. Take a look in the app when you get a chance. ${CAREGIVER_EMERGENCY_NOTICE}`,
+  },
+  new_chart_note: {
+    title: 'A new note from the care team',
+    body:
+      'A new note from the care team is now on file. You can find it in the app when you have ' +
+      `a moment. ${CAREGIVER_EMERGENCY_NOTICE}`,
+  },
+};
+
+/** Seed one alert of a given type into the store (helper for the alerts spec). */
+export function seedCaregiverAlert(
+  alertType: CaregiverAlertType,
+  { acknowledged = false }: { acknowledged?: boolean } = {},
+): CaregiverAlertSeed {
+  return {
+    id: crypto.randomUUID(),
+    alert_type: alertType,
+    created_at: '2026-07-20T10:00:00Z',
+    acknowledged_at: acknowledged ? '2026-07-20T18:00:00Z' : null,
+  };
 }
 
 /** A pending link (the caregiver claimed a code; the patient has not said yes). */
@@ -710,6 +782,36 @@ function caregiverPatientsOf(store: CaregiverStore): CaregiverPatientOut[] {
       link_id: link.id,
       scope: link.scope,
       accepted_at: link.accepted_at ?? '',
+    }));
+}
+
+/** The scope allowed across all of the caregiver's active links (widest wins — with a
+ *  single shared patient there is at most one active link). `null` = no active link. */
+function activeScopeOf(store: CaregiverStore): 'trends' | 'full' | null {
+  const scopes = store.links
+    .filter((link) => link.status === 'active' && link.accepted_at !== null)
+    .map((link) => link.scope);
+  if (scopes.length === 0) return null;
+  return scopes.includes('full') ? 'full' : 'trends';
+}
+
+/** The caregiver's alert-feed projection: the seeded alerts scope-gated by the active
+ *  link (a trends-only caregiver never sees a med/note alert — not even its existence). */
+function caregiverAlertsOf(store: CaregiverStore): CaregiverAlertOut[] {
+  const scope = activeScopeOf(store);
+  if (scope === null) return [];
+  const allowed = ALERT_TYPES_BY_SCOPE[scope];
+  return store.alerts
+    .filter((alert) => allowed.includes(alert.alert_type))
+    .map((alert) => ({
+      id: alert.id,
+      alert_type: alert.alert_type,
+      patient_id: ME.patient_id ?? '',
+      patient_display_name: ME.display_name,
+      title: ALERT_COPY[alert.alert_type].title,
+      body: ALERT_COPY[alert.alert_type].body,
+      created_at: alert.created_at,
+      acknowledged_at: alert.acknowledged_at,
     }));
 }
 
@@ -793,8 +895,9 @@ const EXPORT_OBSERVATIONS_OUT: ExportObservation[] = [
 
 export const EXPORT_OUT: ExportOut = {
   exported_at: '2026-07-15T10:00:00Z',
-  // 1.1: caregiver_links added (ADR-0047) — mirrors backend EXPORT_SCHEMA_VERSION.
-  schema_version: '1.1',
+  // 1.2: caregiver_alerts + caregiver_alert_preferences added (ADR-0047 B1) — mirrors
+  // backend EXPORT_SCHEMA_VERSION (1.1 added caregiver_links).
+  schema_version: '1.2',
   subject_id: '22222222-2222-4222-8222-222222222222',
   account: {
     display_name: 'Pat Example',
@@ -815,6 +918,9 @@ export const EXPORT_OUT: ExportOut = {
   emr_connections: [EMR_CONNECTION_ACTIVE],
   // Caregiver-sharing metadata (ADR-0047, export schema 1.1) — never codes.
   caregiver_links: [],
+  // Caregiver alerts + per-type opt-in state (ADR-0047 B1, export schema 1.2) — metadata only.
+  caregiver_alerts: [],
+  caregiver_alert_preferences: [],
 };
 
 export interface Scenario {
@@ -1430,6 +1536,46 @@ export async function installApiMocks(page: Page, scenario: Scenario = {}): Prom
         }
         const window = Number(new URL(req.url()).searchParams.get('window') ?? '60');
         return fulfillJson(route, 200, visitSummaryForWindow(window));
+      }
+
+      // Caregiver alert feed (ADR-0047 B1): compute-on-read list, scope-gated. A
+      // trends-only caregiver never sees a med/note alert — not even its existence.
+      if (method === 'GET' && path === '/caregiver/alerts') {
+        return fulfillJson(route, 200, {
+          alerts: caregiverAlertsOf(caregiverStore),
+          emergency_notice: CAREGIVER_EMERGENCY_NOTICE,
+        });
+      }
+      const ackMatch = /^\/caregiver\/alerts\/([^/]+)\/ack$/.exec(path);
+      if (method === 'POST' && ackMatch) {
+        const id = decodeURIComponent(ackMatch[1] ?? '');
+        // Only a currently-readable (scope-gated) alert can be acked; anything else is
+        // 404-over-403 (unknown / not-owned / out-of-scope are indistinguishable).
+        const readable = caregiverAlertsOf(caregiverStore).find((alert) => alert.id === id);
+        if (readable === undefined) {
+          return fulfillJson(route, 404, { detail: 'Alert not found' });
+        }
+        const seed = caregiverStore.alerts.find((alert) => alert.id === id);
+        if (seed !== undefined && seed.acknowledged_at === null) {
+          seed.acknowledged_at = '2026-07-20T18:00:00Z';
+        }
+        return route.fulfill({ status: 204, body: '' });
+      }
+
+      // Patient side: per-type caregiver-alert opt-ins (ADR-0047 B1 — DEFAULT OFF).
+      if (method === 'GET' && path === '/me/caregiver-alert-preferences') {
+        return fulfillJson(route, 200, {
+          preferences: (Object.keys(caregiverStore.preferences) as CaregiverAlertType[]).map(
+            (alertType) => ({ alert_type: alertType, enabled: caregiverStore.preferences[alertType] }),
+          ),
+        });
+      }
+      const prefMatch = /^\/me\/caregiver-alert-preferences\/([^/]+)$/.exec(path);
+      if (method === 'PUT' && prefMatch) {
+        const alertType = decodeURIComponent(prefMatch[1] ?? '') as CaregiverAlertType;
+        const body = req.postDataJSON() as { enabled: boolean };
+        caregiverStore.preferences[alertType] = body.enabled;
+        return fulfillJson(route, 200, { alert_type: alertType, enabled: body.enabled });
       }
 
       // Any unmocked API path is a test bug — fail loudly rather than hang.

@@ -20,6 +20,8 @@ import type { AdlCheckInIn, CapabilitySetIn, ClinicianCapabilitySetIn } from '..
 import { REFRESH_TOKEN_KEY } from '../../src/auth/refreshTokenBackend';
 import {
   CAPABILITIES,
+  CAREGIVER_ALERT_PREFERENCES,
+  CAREGIVER_ALERTS,
   CAREGIVER_CLAIM_ACCEPTED_DETAIL,
   CAREGIVER_INVITE_CREATE,
   CAREGIVER_LINKS,
@@ -306,6 +308,16 @@ function handle(method: string, url: URL, init: RequestInit | undefined): Respon
     return json(201, CAREGIVER_INVITE_CREATE);
   if (method === 'DELETE' && /^\/me\/caregiver-invites\/[^/]+$/.test(path)) return json(204, null);
 
+  // Per-type caregiver-alert opt-ins (ADR-0047 B1): every type listed, DEFAULT OFF; the
+  // PUT echoes the requested flag so the demo toggle reflects immediately.
+  if (method === 'GET' && path === '/me/caregiver-alert-preferences')
+    return json(200, CAREGIVER_ALERT_PREFERENCES);
+  if (method === 'PUT' && /^\/me\/caregiver-alert-preferences\/[^/]+$/.test(path)) {
+    const alertType = decodeURIComponent(path.split('/')[3] ?? '');
+    const body = bodyJson<{ enabled: boolean }>(init);
+    return json(200, { alert_type: alertType, enabled: body.enabled });
+  }
+
   if (method === 'GET' && path === '/me/caregivers') return json(200, CAREGIVER_LINKS);
   if (method === 'POST' && /^\/me\/caregivers\/[^/]+\/accept$/.test(path)) {
     const id = decodeURIComponent(path.split('/')[3] ?? '');
@@ -328,6 +340,10 @@ function handle(method: string, url: URL, init: RequestInit | undefined): Respon
     return json(202, { detail: CAREGIVER_CLAIM_ACCEPTED_DETAIL });
   }
   if (method === 'GET' && path === '/caregiver/patients') return json(200, CAREGIVER_PATIENTS);
+  // Caregiver alert feed (ADR-0047 B1): the compute-on-read list of non-urgent updates,
+  // plus the idempotent acknowledge (a quiet 204 — the demo caregiver sees the feed).
+  if (method === 'GET' && path === '/caregiver/alerts') return json(200, CAREGIVER_ALERTS);
+  if (method === 'POST' && /^\/caregiver\/alerts\/[^/]+\/ack$/.test(path)) return json(204, null);
   const caregiverReadMatch = /^\/caregiver\/patients\/([^/]+)\/(trajectory|visit-summary)$/.exec(
     path,
   );

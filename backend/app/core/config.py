@@ -174,6 +174,14 @@ class Settings(BaseSettings):
     caregiver_claim_rate_limit_max: int = 10
     caregiver_claim_rate_limit_window_seconds: int = 3600
 
+    # Caregiver push notifications (ADR-0047 Phase B1). OFF by default: the B1 build
+    # ships the in-app alert feed + the push SEAM only. When True, deps selects the
+    # FcmPushSender stub — still a no-op in B1; the real FCM HTTP v1 client + Firebase
+    # service-account credential land in B2. Payloads are PHI-free by contract
+    # (services/push.py::PushMessage); B2 fcm_* placeholders land with the real sender,
+    # not here.
+    caregiver_push_enabled: bool = False
+
     # Bootstrap-denial audit cap (ADR-0017): failed attempts on the UNAUTHENTICATED
     # provisioning gate are audited, but at most bootstrap_denied_audit_max rows per
     # sliding window — beyond the cap the 403 is unchanged and only the audit write is
