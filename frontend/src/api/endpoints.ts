@@ -25,11 +25,16 @@ import type {
   ExportOut,
   InvitationOut,
   LoginIn,
+  LoginOut,
   MedicationChangeIn,
   MedicationChangeOut,
   MedicationLog,
   MedicationRegisterIn,
   MeOut,
+  MfaEnrollOut,
+  MfaPendingOut,
+  MfaStatusOut,
+  MfaVerifyIn,
   ObservationPage,
   PanelOut,
   RegisterIn,
@@ -42,8 +47,43 @@ import type {
 
 // ---- auth ----
 
-export function login(body: LoginIn): Promise<TokenOut> {
-  return request<TokenOut>('/auth/login', { method: 'POST', body, anonymous: true });
+export function login(body: LoginIn): Promise<LoginOut> {
+  return request<LoginOut>('/auth/login', { method: 'POST', body, anonymous: true });
+}
+
+/** Whether /auth/login answered the MFA step-up instead of full tokens (§1B C6). */
+export function isMfaPending(result: LoginOut): result is MfaPendingOut {
+  return 'mfa_pending_token' in result;
+}
+
+// ---- MFA (TOTP) for clinician/ops accounts (§1B C6) ----
+
+/** Whether the signed-in account has a confirmed authenticator factor. */
+export function getMfaStatus(): Promise<MfaStatusOut> {
+  return request<MfaStatusOut>('/auth/mfa');
+}
+
+/**
+ * Start enrollment: the backend mints a TOTP secret (stored ONLY vault-encrypted server
+ * side) and returns the otpauth:// URI + secret ONCE for the authenticator app. The UI
+ * shows it a single time and drops it after confirmation — there is no re-read endpoint.
+ */
+export function enrollMfa(): Promise<MfaEnrollOut> {
+  return request<MfaEnrollOut>('/auth/mfa/enroll', { method: 'POST' });
+}
+
+/** Prove the authenticator holds the secret: a current 6-digit code activates the factor. */
+export function confirmMfaEnrollment(code: string): Promise<MfaStatusOut> {
+  return request<MfaStatusOut>('/auth/mfa/enroll/confirm', { method: 'POST', body: { code } });
+}
+
+/**
+ * The login step-up: exchange the short-lived mfa_pending token + the 6-digit code for
+ * the real tokens. Anonymous — the pending token rides in the BODY, never as a bearer
+ * (it is not an access token, and the backend enforces the kind distinction).
+ */
+export function verifyMfa(body: MfaVerifyIn): Promise<TokenOut> {
+  return request<TokenOut>('/auth/mfa/verify', { method: 'POST', body, anonymous: true });
 }
 
 export function register(body: RegisterIn): Promise<TokenOut> {

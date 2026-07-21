@@ -11,7 +11,9 @@ from __future__ import annotations
 import enum
 from datetime import UTC, datetime
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
+
+from app.schemas.base import ApiModel
 
 
 class LabStatus(enum.StrEnum):
@@ -33,13 +35,13 @@ class Interpretation(enum.StrEnum):
     abnormal = "A"
 
 
-class ReferenceRange(BaseModel):
+class ReferenceRange(ApiModel):
     low: float | None = None
     high: float | None = None
     unit: str | None = Field(default=None, description="UCUM unit for the range bounds")
 
 
-class LabResultIn(BaseModel):
+class LabResultIn(ApiModel):
     """One lab analyte result on intake (FHIR Observation, category = laboratory)."""
 
     # Strict LOINC shape (digits-dash-digit). This is research-grade coding AND the

@@ -20,7 +20,7 @@ from app.repositories.user import (
     OpsDeactivateOutcome,
     UserRecord,
 )
-from app.services.auth import AuthApiError, AuthService
+from app.services.auth import AuthApiError, AuthService, LoginDenied
 
 # Uppercase constants keep the CI secret scanner from matching synthetic credentials.
 SYNTHETIC_PASSWORD = "a-strong-password"
@@ -200,9 +200,9 @@ async def test_deactivate_ops_blocks_login() -> None:
     assert updated is not None
     assert updated.active is False
     assert updated.disabled_at is not None
-    with pytest.raises(AuthApiError) as exc:
-        await auth.login(email="ops@example.com", password=SYNTHETIC_PASSWORD)
-    assert exc.value.status_code == 401  # same 401 as unknown email — no enumeration
+    denied = await auth.login(email="ops@example.com", password=SYNTHETIC_PASSWORD)
+    assert isinstance(denied, LoginDenied)  # returned, not raised — its audit row commits
+    assert denied.status_code == 401  # same 401 as unknown email — no enumeration
 
 
 async def test_deactivate_ops_returns_none_for_unknown_id() -> None:
@@ -217,8 +217,9 @@ async def test_deactivated_account_of_any_role_cannot_log_in() -> None:
         email="pat@example.com", password=SYNTHETIC_PASSWORD, display_name="Pat"
     )
     await auth.users.set_active(pat.id, active=False, disabled_at=datetime.now(UTC))
-    with pytest.raises(AuthApiError):
-        await auth.login(email="pat@example.com", password=SYNTHETIC_PASSWORD)
+    denied = await auth.login(email="pat@example.com", password=SYNTHETIC_PASSWORD)
+    assert isinstance(denied, LoginDenied)
+    assert denied.status_code == 401
 
 
 # ---------------------------------------------------------------- repository primitives

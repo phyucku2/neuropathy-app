@@ -7,8 +7,10 @@ from datetime import datetime
 
 from pydantic import BaseModel, EmailStr, Field, model_validator
 
+from app.schemas.base import ApiModel
 
-class ClinicianCreateIn(BaseModel):
+
+class ClinicianCreateIn(ApiModel):
     email: EmailStr
     # NIST 800-63B: length over composition rules (same bar as patient registration).
     password: str = Field(..., min_length=8, max_length=128)
@@ -32,7 +34,7 @@ class ClinicianOut(BaseModel):
     clinic_name: str
 
 
-class InvitationIn(BaseModel):
+class InvitationIn(ApiModel):
     email: EmailStr
 
 

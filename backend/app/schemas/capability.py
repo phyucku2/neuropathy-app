@@ -7,6 +7,8 @@ from typing import Literal
 
 from pydantic import AwareDatetime, BaseModel, model_validator
 
+from app.schemas.base import ApiModel
+
 
 class CapabilityStateOut(BaseModel):
     key: str
@@ -25,13 +27,13 @@ class CapabilitiesOut(BaseModel):
     capabilities: list[CapabilityStateOut]
 
 
-class CapabilitySetIn(BaseModel):
+class CapabilitySetIn(ApiModel):
     # Patients set on/off only — expiry is clinician authority (order-style renewal),
     # so the patient contract simply has no such field.
     active: bool
 
 
-class ClinicianCapabilitySetIn(BaseModel):
+class ClinicianCapabilitySetIn(ApiModel):
     active: bool
     # Optional order-style expiry; must be timezone-aware so expiry comparisons are
     # unambiguous. None = no expiry (stands until changed).

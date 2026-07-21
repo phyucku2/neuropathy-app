@@ -7,8 +7,10 @@ import uuid
 
 from pydantic import BaseModel, EmailStr, Field
 
+from app.schemas.base import ApiModel
 
-class OpsAccountCreateIn(BaseModel):
+
+class OpsAccountCreateIn(ApiModel):
     email: EmailStr
     # NIST 800-63B: length over composition rules (same bar as every other account).
     password: str = Field(..., min_length=8, max_length=128)

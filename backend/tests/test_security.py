@@ -85,3 +85,39 @@ def test_access_token_cannot_be_used_as_refresh_token() -> None:
     token = create_token(user_id=uuid4(), role="patient", kind=TokenKind.access, secret=SECRET)
     with pytest.raises(AuthError, match="refresh"):
         decode_token(token, secret=SECRET, expected_kind=TokenKind.refresh)
+
+
+def test_mfa_pending_token_cannot_be_used_as_access_or_refresh_token() -> None:
+    """§1B C6 kind confusion: an mfa_pending token proves only "knows the password" and
+    must be useless as a session credential — the same enforcement that stops
+    refresh-as-access replay."""
+    token = create_token(
+        user_id=uuid4(), role="clinician", kind=TokenKind.mfa_pending, secret=SECRET
+    )
+    with pytest.raises(AuthError, match="access"):
+        decode_token(token, secret=SECRET, expected_kind=TokenKind.access)
+    with pytest.raises(AuthError, match="refresh"):
+        decode_token(token, secret=SECRET, expected_kind=TokenKind.refresh)
+
+
+def test_access_and_refresh_tokens_cannot_be_used_as_mfa_pending() -> None:
+    """The confusion is refused in BOTH directions: a stolen access/refresh token can
+    never impersonate the step-up handshake state."""
+    for kind in (TokenKind.access, TokenKind.refresh):
+        token = create_token(user_id=uuid4(), role="clinician", kind=kind, secret=SECRET)
+        with pytest.raises(AuthError, match="mfa_pending"):
+            decode_token(token, secret=SECRET, expected_kind=TokenKind.mfa_pending)
+
+
+def test_mfa_pending_token_ttl_is_short() -> None:
+    """The step-up window is minutes, not days: an mfa_pending token minted an hour
+    ago is already dead."""
+    token = create_token(
+        user_id=uuid4(),
+        role="clinician",
+        kind=TokenKind.mfa_pending,
+        secret=SECRET,
+        now=datetime.now(UTC) - timedelta(hours=1),
+    )
+    with pytest.raises(AuthError, match="expired"):
+        decode_token(token, secret=SECRET, expected_kind=TokenKind.mfa_pending)

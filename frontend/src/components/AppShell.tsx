@@ -8,7 +8,7 @@
  *   tab bar — the panel is the clinician's home and detail screens link back.
  */
 
-import { NavLink, Outlet } from 'react-router-dom';
+import { Link, NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { initials } from '../lib/format';
 
@@ -36,6 +36,13 @@ export function AppShell({ variant = 'patient' }: { variant?: 'patient' | 'clini
         <span className="mark">◍ Neuropathy{clinician ? ' · Clinician' : ''}</span>
         <span className="status-right">
           {clinician && <span className="who">{user?.display_name}</span>}
+          {/* Clinician account settings (§1B C6): the clinician frame has no tab bar, so
+              the settings surface hangs off the header instead. Patient shell unchanged. */}
+          {clinician && (
+            <Link className="link" to="/clinic/settings">
+              Settings
+            </Link>
+          )}
           <button
             type="button"
             className="avatar"

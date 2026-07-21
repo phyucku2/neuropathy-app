@@ -12,8 +12,24 @@ import { renderApp } from '../../test/renderApp';
 import { actAsClinician, server } from '../../test/server';
 import { minRenewalDate } from './CapabilityOrders';
 import { NON_DIAGNOSTIC_TEXT } from './NonDiagnosticNote';
+// #28 — deterministic lazy route under test: this side-effect import warms vitest's module
+// registry for the SAME module App.tsx lazy-imports, so React.lazy resolves from cache in a
+// microtask instead of paying a first-use transform/load inside a findBy* window. The page
+// itself is still rendered through the real lazy route below.
+import './PatientDetailPage';
 
 const DETAIL_PATH = `/clinic/patients/${PANEL_PATIENT_ID}`;
+
+/**
+ * #28 — the flaky 404 assertion, hardened. The wait spans a multi-hop async chain (session
+ * restore → lazy chunk → the tab fetch's 404 → re-render), and findBy*'s 1s default ceiling
+ * was occasionally outrun under CI load (~1/334). findBy POLLS — it resolves the moment the
+ * heading renders — so a generous ceiling adds zero time to a passing run and is purely the
+ * failure bound. No sleeps.
+ */
+function findNotFoundHeading() {
+  return screen.findByRole('heading', { name: 'Patient not found' }, { timeout: 10_000 });
+}
 
 async function openTab(name: string) {
   const user = userEvent.setup();
@@ -75,7 +91,7 @@ describe('PatientDetailPage — trajectory tab', () => {
       ),
     );
     renderApp(DETAIL_PATH);
-    expect(await screen.findByRole('heading', { name: 'Patient not found' })).toBeInTheDocument();
+    expect(await findNotFoundHeading()).toBeInTheDocument();
   });
 });
 
@@ -113,7 +129,7 @@ describe('PatientDetailPage — visit summary tab', () => {
       ),
     );
     await openTab('Summary');
-    expect(await screen.findByRole('heading', { name: 'Patient not found' })).toBeInTheDocument();
+    expect(await findNotFoundHeading()).toBeInTheDocument();
     // No PHI header left above a not-found body.
     expect(screen.queryByText('Pat Example')).not.toBeInTheDocument();
   });
@@ -245,7 +261,7 @@ describe('PatientDetailPage — cross-source trend table', () => {
       ),
     );
     await openTab('Trend table');
-    expect(await screen.findByRole('heading', { name: 'Patient not found' })).toBeInTheDocument();
+    expect(await findNotFoundHeading()).toBeInTheDocument();
   });
 });
 
@@ -324,7 +340,7 @@ describe('PatientDetailPage — observations tab', () => {
       ),
     );
     await openTab('Observations');
-    expect(await screen.findByRole('heading', { name: 'Patient not found' })).toBeInTheDocument();
+    expect(await findNotFoundHeading()).toBeInTheDocument();
   });
 });
 
@@ -577,7 +593,7 @@ describe('PatientDetailPage — features tab (capability orders)', () => {
       ),
     );
     await openTab('Features');
-    expect(await screen.findByRole('heading', { name: 'Patient not found' })).toBeInTheDocument();
+    expect(await findNotFoundHeading()).toBeInTheDocument();
   });
 });
 
@@ -594,7 +610,7 @@ describe('PatientDetailPage — mid-session consent revocation', () => {
       ),
     );
     await user.click(screen.getByRole('button', { name: 'Trend table' }));
-    expect(await screen.findByRole('heading', { name: 'Patient not found' })).toBeInTheDocument();
+    expect(await findNotFoundHeading()).toBeInTheDocument();
     // No post-revocation PHI: name, consent date, and tab chips are ALL gone.
     expect(screen.queryByText('Pat Example')).not.toBeInTheDocument();
     expect(screen.queryByText(/Consented/)).not.toBeInTheDocument();
@@ -606,7 +622,7 @@ describe('PatientDetailPage — existence privacy', () => {
   it('renders a neutral not-found screen for an id outside the panel', async () => {
     actAsClinician();
     renderApp('/clinic/patients/00000000-0000-4000-8000-000000000000');
-    expect(await screen.findByRole('heading', { name: 'Patient not found' })).toBeInTheDocument();
+    expect(await findNotFoundHeading()).toBeInTheDocument();
     expect(screen.getByText('There is no patient record at this address.')).toBeInTheDocument();
     // Mirrors the backend's 404-over-403 posture: NEVER an access explanation.
     expect(screen.queryByText(/access/i)).not.toBeInTheDocument();

@@ -13,6 +13,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
+from app.schemas.base import ApiModel
 from app.schemas.lab import LabResultIn
 
 # One upload maps to one confirmed document/panel; anything larger is not a plausible
@@ -33,7 +34,7 @@ ADL_COMPOSITE_MAX = 12
 SYMPTOM_NRS_MAX = 10
 
 
-class LabImportIn(BaseModel):
+class LabImportIn(ApiModel):
     """A panel of lab results the patient confirmed on-device (ADR-0003)."""
 
     results: list[LabResultIn] = Field(..., min_length=1, max_length=MAX_LAB_BATCH)
@@ -46,7 +47,7 @@ class LabImportOut(BaseModel):
     skipped: int = Field(..., ge=0, description="Already imported (same content identity)")
 
 
-class AdlCheckInIn(BaseModel):
+class AdlCheckInIn(ApiModel):
     """One daily function check-in — the three questions from the mockups, each 0-4
     (higher = better). `check_in_date` defaults to today (UTC) when omitted."""
 

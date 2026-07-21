@@ -5,9 +5,15 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { AdlCheckInIn } from '../../api/types';
 import { enqueueCheckIn, listQueuedCheckIns } from '../../features/checkin/offlineQueue';
 import { markOnboardingComplete } from '../../features/onboarding/onboardingState';
-import { ME, TEST_EMAIL, TEST_PASSWORD, TEST_REFRESH_TOKEN } from '../../test/fixtures';
+import {
+  ME,
+  TEST_EMAIL,
+  TEST_MFA_CODE,
+  TEST_PASSWORD,
+  TEST_REFRESH_TOKEN,
+} from '../../test/fixtures';
 import { renderApp } from '../../test/renderApp';
-import { server } from '../../test/server';
+import { actAsClinician, actAsMfaStepUpLogin, server } from '../../test/server';
 
 const REFRESH_TOKEN_KEY = 'neuropathy.refresh_token';
 const QUEUED = { walking: 1, stairs: 2, balance_confidence: 3, check_in_date: '2026-07-01' };
@@ -191,5 +197,82 @@ describe('auth screens', () => {
       expect(screen.getByRole('heading', { name: 'Welcome back' })).toBeInTheDocument();
     });
     expect(sessionStorage.getItem('neuropathy.refresh_token')).toBeNull();
+  });
+});
+
+/** Drive the password form up to the TOTP step-up screen (§1B C6). */
+async function reachStepUp() {
+  const user = userEvent.setup();
+  renderApp('/login', { authenticated: false });
+  await user.type(await screen.findByLabelText('Email'), 'dr.rivera@example.com');
+  await user.type(screen.getByLabelText('Password'), TEST_PASSWORD);
+  await user.click(screen.getByRole('button', { name: 'Sign in' }));
+  expect(await screen.findByRole('heading', { name: 'Two-step verification' })).toBeInTheDocument();
+  return user;
+}
+
+describe('login TOTP step-up (§1B C6)', () => {
+  it('holds the session until the code verifies, then lands in the clinician area', async () => {
+    actAsClinician();
+    actAsMfaStepUpLogin();
+    const user = await reachStepUp();
+    // Password success alone stores NOTHING — no refresh token until the code clears.
+    expect(sessionStorage.getItem(REFRESH_TOKEN_KEY)).toBeNull();
+    await user.type(screen.getByLabelText('6-digit code'), TEST_MFA_CODE);
+    await user.click(screen.getByRole('button', { name: 'Verify' }));
+    expect(await screen.findByRole('heading', { name: 'Your panel' })).toBeInTheDocument();
+    expect(sessionStorage.getItem(REFRESH_TOKEN_KEY)).toBe(TEST_REFRESH_TOKEN);
+  });
+
+  it('rejects a wrong code with a code-specific message and allows a retry', async () => {
+    actAsClinician();
+    actAsMfaStepUpLogin();
+    const user = await reachStepUp();
+    await user.type(screen.getByLabelText('6-digit code'), '000000');
+    await user.click(screen.getByRole('button', { name: 'Verify' }));
+    // The 401 blames the CODE, never the email/password (the password already cleared).
+    expect(await screen.findByRole('alert')).toHaveTextContent("That code didn't match");
+    // Still on the step-up, nothing stored — the user can try again.
+    expect(screen.getByRole('heading', { name: 'Two-step verification' })).toBeInTheDocument();
+    expect(sessionStorage.getItem(REFRESH_TOKEN_KEY)).toBeNull();
+  });
+
+  it('surfaces a 429 rate-limit detail verbatim (C5 guards the verify endpoint)', async () => {
+    actAsClinician();
+    actAsMfaStepUpLogin();
+    server.use(
+      http.post('/auth/mfa/verify', () =>
+        HttpResponse.json({ detail: 'Too many attempts. Try again later.' }, { status: 429 }),
+      ),
+    );
+    const user = await reachStepUp();
+    await user.type(screen.getByLabelText('6-digit code'), TEST_MFA_CODE);
+    await user.click(screen.getByRole('button', { name: 'Verify' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Too many attempts. Try again later.',
+    );
+  });
+
+  it('abandons the pending state via "Back to sign in"', async () => {
+    actAsClinician();
+    actAsMfaStepUpLogin();
+    const user = await reachStepUp();
+    await user.click(screen.getByRole('button', { name: 'Back to sign in' }));
+    // Back on the password form, with the password cleared and nothing stored.
+    expect(await screen.findByRole('heading', { name: 'Welcome back' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Password')).toHaveValue('');
+    expect(sessionStorage.getItem(REFRESH_TOKEN_KEY)).toBeNull();
+  });
+
+  it('patients never see the step-up — the default login lands straight home', async () => {
+    const user = userEvent.setup();
+    renderApp('/login', { authenticated: false });
+    await user.type(await screen.findByLabelText('Email'), TEST_EMAIL);
+    await user.type(screen.getByLabelText('Password'), TEST_PASSWORD);
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+    expect(await screen.findByText('30 Day Score')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('heading', { name: 'Two-step verification' }),
+    ).not.toBeInTheDocument();
   });
 });

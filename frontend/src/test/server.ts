@@ -22,11 +22,15 @@ import {
   EXPORT,
   ME,
   MEDICATIONS,
+  MFA_ENROLL,
+  MFA_WRONG_CODE_DETAIL,
   OBSERVATIONS,
   PANEL,
   PANEL_PATIENT_ID,
   TEST_ACCESS_TOKEN,
   TEST_EMAIL,
+  TEST_MFA_CODE,
+  TEST_MFA_PENDING_TOKEN,
   TEST_PASSWORD,
   TEST_REFRESH_TOKEN,
   TEST_REFRESHED_ACCESS_TOKEN,
@@ -99,6 +103,41 @@ export const handlers = [
   http.get('/auth/me', ({ request }) =>
     isAuthorized(request) ? HttpResponse.json(ME) : unauthorized(),
   ),
+
+  // ---- MFA / TOTP (§1B C6) ----
+
+  // The default account has no enrolled factor; tests flip this with server.use.
+  http.get('/auth/mfa', ({ request }) =>
+    isAuthorized(request) ? HttpResponse.json({ enrolled: false }) : unauthorized(),
+  ),
+
+  // Enrollment start: the otpauth URI + secret, answered ONCE (the UI must not re-read).
+  http.post('/auth/mfa/enroll', ({ request }) =>
+    isAuthorized(request) ? HttpResponse.json(MFA_ENROLL, { status: 201 }) : unauthorized(),
+  ),
+
+  http.post('/auth/mfa/enroll/confirm', async ({ request }) => {
+    if (!isAuthorized(request)) {
+      return unauthorized();
+    }
+    const body = (await request.json()) as { code: string };
+    return body.code === TEST_MFA_CODE
+      ? HttpResponse.json({ enrolled: true })
+      : HttpResponse.json({ detail: MFA_WRONG_CODE_DETAIL }, { status: 401 });
+  }),
+
+  // Login step-up: pending token + code buy the real tokens; anything else is 401.
+  http.post('/auth/mfa/verify', async ({ request }) => {
+    const body = (await request.json()) as { mfa_pending_token: string; code: string };
+    if (body.mfa_pending_token === TEST_MFA_PENDING_TOKEN && body.code === TEST_MFA_CODE) {
+      return HttpResponse.json({
+        access_token: TEST_ACCESS_TOKEN,
+        refresh_token: TEST_REFRESH_TOKEN,
+        token_type: 'bearer',
+      });
+    }
+    return HttpResponse.json({ detail: MFA_WRONG_CODE_DETAIL }, { status: 401 });
+  }),
 
   // Account & data deletion (ADR-0027): 204 on the right password, 403 with the
   // backend's verbatim detail otherwise (nothing is deleted then).
@@ -443,6 +482,16 @@ export function actAsClinician(): void {
   server.use(
     http.get('/auth/me', ({ request }) =>
       isAuthorized(request) ? HttpResponse.json(CLINICIAN_ME) : unauthorized(),
+    ),
+  );
+}
+
+/** Make POST /auth/login answer the MFA step-up (§1B C6) — an enrolled clinician/ops
+ *  account: password success yields ONLY the short-lived mfa_pending token. */
+export function actAsMfaStepUpLogin(): void {
+  server.use(
+    http.post('/auth/login', () =>
+      HttpResponse.json({ mfa_pending_token: TEST_MFA_PENDING_TOKEN, token_type: 'mfa_pending' }),
     ),
   );
 }

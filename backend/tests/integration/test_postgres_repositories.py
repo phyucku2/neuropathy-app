@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from alembic.autogenerate import compare_metadata
@@ -36,6 +36,7 @@ from app.repositories.postgres import (
     PostgresClinicRepository,
     PostgresEmrClinicalNoteRepository,
     PostgresEmrConnectionRepository,
+    PostgresMfaFactorRepository,
     PostgresObservationRepository,
     PostgresPatientCapabilityRepository,
     PostgresUserRepository,
@@ -668,6 +669,65 @@ async def test_emr_clinical_note_repository_round_trip_and_idempotency(
         repo = PostgresEmrClinicalNoteRepository(session)
         assert await repo.list_for_patient(patient_id) == []  # erased
         assert len(await repo.list_for_patient(other_patient_id)) == 1  # other patient untouched
+
+
+async def _new_privileged_user(session: AsyncSession) -> uuid.UUID:
+    record = UserRecord(
+        id=uuid.uuid4(),
+        email=f"dr-{uuid.uuid4().hex[:12]}@example.com",
+        password_hash="argon2-hash-placeholder",
+        display_name="Synthetic Clinician",
+        role=UserRole.ops,  # ops needs neither patient nor clinic row
+        patient_id=None,
+    )
+    await PostgresUserRepository(session).add(record)
+    return record.id
+
+
+async def test_mfa_factor_repository_round_trip(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """§1B C6: get/replace/confirm across sessions, in parity with the in-memory
+    twin — one factor per user, re-enrollment replaces it (fresh + unconfirmed) and
+    surfaces the superseded vault ref, confirmation is idempotent."""
+    async with session_factory() as session:
+        user_id = await _new_privileged_user(session)
+        repo = PostgresMfaFactorRepository(session)
+        assert await repo.get_for_user(user_id) is None
+        assert await repo.replace_for_user(user_id, secret_ref="secret::first") is None
+        await session.commit()
+
+    async with session_factory() as session:
+        repo = PostgresMfaFactorRepository(session)
+        factor = await repo.get_for_user(user_id)
+        assert factor is not None
+        assert factor.user_id == user_id
+        assert factor.secret_ref == "secret::first"
+        assert factor.confirmed_at is None  # pending until confirmed
+        confirmed_at = datetime(2026, 7, 20, 12, 0, tzinfo=UTC)
+        confirmed = await repo.confirm(user_id, at=confirmed_at)
+        assert confirmed is not None and confirmed.confirmed_at == confirmed_at
+        # Idempotent: a re-confirm keeps the original timestamp.
+        again = await repo.confirm(user_id, at=confirmed_at + timedelta(hours=1))
+        assert again is not None and again.confirmed_at == confirmed_at
+        assert await repo.confirm(uuid.uuid4(), at=confirmed_at) is None  # nothing to confirm
+        await session.commit()
+
+    async with session_factory() as session:
+        repo = PostgresMfaFactorRepository(session)
+        # Re-enrollment REPLACES: exactly one row survives (the unique user_id
+        # index's invariant), unconfirmed, and the superseded ref comes back so the
+        # caller can purge the old vault entry.
+        assert await repo.replace_for_user(user_id, secret_ref="secret::second") == "secret::first"
+        await session.commit()
+
+    async with session_factory() as session:
+        repo = PostgresMfaFactorRepository(session)
+        replaced = await repo.get_for_user(user_id)
+        assert replaced is not None
+        assert replaced.secret_ref == "secret::second"
+        assert replaced.confirmed_at is None  # back to pending
+        assert await repo.get_for_user(uuid.uuid4()) is None
 
 
 def _autogenerate_diff(connection: Connection) -> list[object]:

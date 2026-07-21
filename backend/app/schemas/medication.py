@@ -18,6 +18,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.schemas.base import ApiModel
+
 
 class MedicationKind(StrEnum):
     """What kind of thing this is — a prescription, an over-the-counter drug, or a
@@ -45,7 +47,7 @@ class MedicationStatus(StrEnum):
     stopped = "stopped"
 
 
-class MedicationRegisterIn(BaseModel):
+class MedicationRegisterIn(ApiModel):
     """Register a NEW medication/supplement — emits the `added` change entry (ADR-0045 P2)."""
 
     name: str = Field(..., min_length=1, max_length=200, description="Drug/supplement name")
@@ -63,7 +65,7 @@ class MedicationRegisterIn(BaseModel):
     )
 
 
-class MedicationChangeIn(BaseModel):
+class MedicationChangeIn(ApiModel):
     """Append a dose change or a stop to an existing medication's log (ADR-0045 P2)."""
 
     change_type: MedicationChangeType = Field(

@@ -18,6 +18,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.schemas.base import ApiModel
+
 # Note length matches the Observation `value_text` cap (ADR "free-text note, short").
 EVENT_NOTE_MAX = 500
 
@@ -33,7 +35,7 @@ class EventType(StrEnum):
     note = "note"
 
 
-class EventIn(BaseModel):
+class EventIn(ApiModel):
     """Record one between-visit event or note (ADR-0045 P2)."""
 
     type: EventType
