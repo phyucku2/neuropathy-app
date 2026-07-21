@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 from uuid import UUID, uuid4
@@ -155,7 +156,7 @@ class NotesEmr(FakeEmr):
 async def _enable_ingest_notes() -> None:
     """Turn ingest_notes ON for BOTH test patients (it is opt-in/off by default) and
     override the capability service so the pull-notes gate passes — enabling USER_B too so
-    the cross-user test reaches the ownership 403 rather than the toggle 409."""
+    the cross-user test reaches the ownership 404 rather than the toggle 409."""
     from datetime import UTC, datetime
 
     from app.api.deps import get_capability_service
@@ -450,26 +451,37 @@ def test_emr_endpoints_require_auth() -> None:
         assert anon.get("/emr/callback", params={"state": "s", "code": "c"}).status_code == 401
 
 
-def test_cross_user_access_is_403(client: TestClient) -> None:
+def test_cross_user_access_is_404_indistinguishable_from_unknown(client: TestClient) -> None:
+    """Someone else's connection answers 404 — byte-identical to a nonexistent id — so a
+    leaked connection UUID can never be confirmed live from another account (the house
+    404-over-403 posture; an existence oracle would survive even revocation)."""
     # User A creates and activates a connection...
     connection_id, state = _connect(client)
     assert client.get("/emr/callback", params={"state": state, "code": "c"}).status_code == 200
 
-    # ...user B must not be able to pull or revoke it.
+    # ...user B must not be able to pull or revoke it — and must not learn it exists.
     _sign_in_as(USER_B)
-    assert client.post(f"/emr/connections/{connection_id}/pull").status_code == 403
-    assert client.delete(f"/emr/connections/{connection_id}").status_code == 403
+    cross_pull = client.post(f"/emr/connections/{connection_id}/pull")
+    unknown_pull = client.post(f"/emr/connections/{uuid4()}/pull")
+    assert cross_pull.status_code == unknown_pull.status_code == 404
+    assert cross_pull.json() == unknown_pull.json()  # indistinguishable bodies too
+    cross_revoke = client.delete(f"/emr/connections/{connection_id}")
+    unknown_revoke = client.delete(f"/emr/connections/{uuid4()}")
+    assert cross_revoke.status_code == unknown_revoke.status_code == 404
+    assert cross_revoke.json() == unknown_revoke.json()
 
     # And back as user A, it still works.
     _sign_in_as(USER_A)
     assert client.post(f"/emr/connections/{connection_id}/pull").status_code == 200
 
 
-def test_callback_for_another_users_state_is_403(client: TestClient) -> None:
+def test_callback_for_another_users_state_is_404_like_unknown_state(client: TestClient) -> None:
     _, state = _connect(client)  # started by user A
     _sign_in_as(USER_B)
-    resp = client.get("/emr/callback", params={"state": state, "code": "c"})
-    assert resp.status_code == 403
+    cross = client.get("/emr/callback", params={"state": state, "code": "c"})
+    unknown = client.get("/emr/callback", params={"state": "forged", "code": "c"})
+    assert cross.status_code == unknown.status_code == 404
+    assert cross.json() == unknown.json()  # no existence leak on the callback either
 
 
 def test_clinician_cannot_use_patient_endpoints(client: TestClient) -> None:
@@ -730,6 +742,9 @@ async def test_pull_notes_full_flow_imports_and_is_idempotent_with_one_signal() 
         assert signal.type_display == "Progress note"
         assert signal.author_display == "Dr Synthetic"
         assert signal.encounter_fhir_id == "enc-1"
+        # The signal is keyed on the STABLE source-scoped import key (consumers dedupe on
+        # it — note_id is a fresh row UUID that changes across a rolled-back retry).
+        assert signal.import_key == f"{FHIR_BASE}|docref:docref-1"
         assert "SECRET" not in repr(signal)  # existence + metadata only, never the body
     finally:
         app.dependency_overrides.clear()
@@ -753,6 +768,206 @@ async def test_pull_notes_watermark_bounds_the_second_search() -> None:
         assert "date=ge" in emr.note_search_urls[1]  # second pull carries the watermark
     finally:
         app.dependency_overrides.clear()
+
+
+def _docref_resource(doc_id: str, date: str) -> dict[str, Any]:
+    return {
+        "resourceType": "DocumentReference",
+        "id": doc_id,
+        "type": {
+            "coding": [
+                {"system": "http://loinc.org", "code": "11506-3", "display": "Progress note"}
+            ]
+        },
+        "date": date,
+        "author": [{"display": "Dr Synthetic"}],
+        "content": [
+            {"attachment": {"contentType": "text/plain", "url": f"{FHIR_BASE}/Binary/{doc_id}"}}
+        ],
+    }
+
+
+class BackdatingNotesEmr(NotesEmr):
+    """A NotesEmr whose DocumentReference search honors the ``date=ge`` bound against a
+    MUTABLE doc list — models an EHR gaining a late-signed note whose authoring date is
+    backdated to the encounter (before the previous pull ran)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.docs: list[tuple[str, str]] = [("docref-1", "2026-06-15T08:30:00+00:00")]
+
+    async def get_json(self, url: str, *, access_token: str | None = None) -> dict[str, Any]:
+        if not url.startswith(f"{FHIR_BASE}/DocumentReference"):
+            return await super().get_json(url, access_token=access_token)
+        self.note_search_urls.append(url)
+        bound: datetime | None = None
+        for value in parse_qs(urlparse(url).query).get("date", []):
+            if value.startswith("ge"):
+                bound = datetime.fromisoformat(value[2:])
+        entries = [
+            {"resource": _docref_resource(doc_id, date)}
+            for doc_id, date in self.docs
+            if bound is None or datetime.fromisoformat(date) >= bound
+        ]
+        return {"resourceType": "Bundle", "type": "searchset", "entry": entries}
+
+
+async def test_pull_notes_watermark_is_authoring_based_and_catches_backdated_notes() -> None:
+    """The watermark is max(fetched authored_at) MINUS the safety overlap — never the app
+    clock. A note signed after the first pull but authoring-DATED before it (late-signed/
+    backdated, or app-vs-EHR clock skew) still falls inside the next pull's ``date=ge``
+    bound and is imported, instead of being permanently missed by every future pull."""
+    emr = BackdatingNotesEmr()
+    service = EmrService(transport=emr, client_id="c", redirect_uri="https://a/cb")
+    try:
+        c = _client_with(service)
+        await _enable_ingest_notes()
+        connection_id = await _connect_notes_and_activate(service)
+
+        first = c.post(f"/emr/connections/{connection_id}/pull-notes")
+        assert first.json()["imported"] == 1
+
+        # A clinician signs a note AFTER the first pull, backdated 3 days before the
+        # newest already-pulled note — well inside the 7-day overlap window.
+        emr.docs.append(("docref-backdated", "2026-06-12T09:00:00+00:00"))
+
+        second = c.post(f"/emr/connections/{connection_id}/pull-notes")
+        assert second.json()["imported"] == 1  # fetched AND imported, not lost forever
+
+        # The second search's bound derives from the pulled notes' authoring time
+        # (Jun 15 minus the 7-day overlap) — NOT from the pull's wall-clock time.
+        bound = parse_qs(urlparse(emr.note_search_urls[1]).query)["date"][0]
+        assert bound == "ge2026-06-08T08:30:00+00:00"
+
+        # Idempotent overlap re-fetch: a third pull re-sees both notes, imports none.
+        third = c.post(f"/emr/connections/{connection_id}/pull-notes")
+        assert third.json()["imported"] == 0
+    finally:
+        app.dependency_overrides.clear()
+
+
+class _FailingNoteRepo:
+    """A clinical-note store whose insert always fails (synthetic transient DB error)."""
+
+    async def existing_import_keys(self, patient_id: UUID, import_keys: list[str]) -> set[str]:
+        return set()
+
+    async def add_if_absent(self, note: Any) -> bool:
+        raise RuntimeError("synthetic storage failure")
+
+    async def list_for_patient(self, patient_id: UUID, **kwargs: Any) -> list[Any]:
+        return []
+
+    async def delete_for_patient(self, patient_id: UUID) -> None:
+        return None
+
+
+async def test_pull_notes_watermark_does_not_advance_when_persist_fails() -> None:
+    """The docstring invariant, pinned: a mid-pull persistence failure leaves the
+    watermark untouched, so the NEXT pull re-fetches the same window instead of
+    permanently losing the notes behind an advanced bound. No phantom signal either."""
+    from app.repositories.emr_clinical_note import InMemoryEmrClinicalNoteRepository
+
+    emr = NotesEmr()
+    service = EmrService(transport=emr, client_id="c", redirect_uri="https://a/cb")
+    connection_id = await _connect_notes_and_activate(service)
+
+    service.clinical_notes = _FailingNoteRepo()
+    with pytest.raises(RuntimeError):
+        await service.pull_clinical_notes(connection_id)
+    assert (await service.get_connection(connection_id)).last_notes_pulled_at is None
+    assert service.note_signals.signals == []  # type: ignore[attr-defined]
+
+    # Recovery: storage heals, and the SAME (unbounded) window is re-fetched + imported.
+    service.clinical_notes = InMemoryEmrClinicalNoteRepository()
+    _fetched, imported, _skipped = await service.pull_clinical_notes(connection_id)
+    assert imported == 1
+    assert "date=ge" not in emr.note_search_urls[0]
+    assert "date=ge" not in emr.note_search_urls[1]  # the failed pull advanced nothing
+
+
+class _FailingAudit:
+    """An audit store whose write always fails (models a failure late in the batch)."""
+
+    async def add(self, event: Any) -> Any:
+        raise RuntimeError("synthetic audit failure")
+
+    async def list_for_patient(self, patient_id: UUID) -> list[Any]:
+        return []
+
+
+async def test_pull_notes_emits_no_signal_when_a_later_batch_write_fails() -> None:
+    """Signals fire only AFTER the whole batch (note rows + audit event) persisted: a
+    failure between the inserts and the batch's end must not hand the fan-out sink an
+    alert for a transaction that rolls back (no phantom caregiver alerts, ADR-0047)."""
+    service = EmrService(transport=NotesEmr(), client_id="c", redirect_uri="https://a/cb")
+    connection_id = await _connect_notes_and_activate(service)
+    service.audit = _FailingAudit()
+    with pytest.raises(RuntimeError):
+        await service.pull_clinical_notes(connection_id)
+    assert service.note_signals.signals == []  # type: ignore[attr-defined]
+
+
+FHIR_BASE_2 = "https://other-ehr.example/fhir"
+
+
+class TwoEhrNotes(NotesEmr):
+    """Answers discovery/token/DocumentReference under BOTH synthetic EHR bases; each
+    base returns a note with the SAME DocumentReference id (ids are per-server)."""
+
+    async def get_json(self, url: str, *, access_token: str | None = None) -> dict[str, Any]:
+        return await super().get_json(
+            url.replace(FHIR_BASE_2, FHIR_BASE, 1), access_token=access_token
+        )
+
+
+async def test_note_import_keys_are_scoped_per_source_ehr_no_collision() -> None:
+    """FHIR resource ids are unique only within one server: with TWO connected EHRs both
+    using DocumentReference id 'docref-1', the source-scoped import key keeps the second
+    EHR's note from being silently dropped as a duplicate of the first."""
+    service = EmrService(transport=TwoEhrNotes(), client_id="c", redirect_uri="https://a/cb")
+    assert USER_A.patient_id is not None
+    connection_ids = []
+    for base in (FHIR_BASE, FHIR_BASE_2):
+        record, _, state = await service.start_connect(
+            patient_id=USER_A.patient_id, fhir_base=base, provider_name=None, include_notes=True
+        )
+        await service.complete_callback(state=state, code="auth-code")
+        connection_ids.append(record.id)
+
+    assert (await service.pull_clinical_notes(connection_ids[0]))[1] == 1
+    assert (await service.pull_clinical_notes(connection_ids[1]))[1] == 1  # NOT a "dupe"
+    notes = await service.clinical_notes.list_for_patient(USER_A.patient_id)
+    assert sorted(n.import_key for n in notes if n.import_key is not None) == [
+        f"{FHIR_BASE}|docref:docref-1",
+        f"{FHIR_BASE_2}|docref:docref-1",
+    ]
+
+
+async def test_revoke_during_note_pull_is_not_resurrected() -> None:
+    """A patient revoking from another tab/device while a (slow) note pull is in flight
+    must STAY revoked: the pull's end-of-flow write is a targeted watermark update, never
+    a write-back of its stale pre-fetch snapshot (which would flip the status back to
+    active, erase revoked_at, and restore a dangling token_ref)."""
+    from app.models.emr_connection import EmrConnectionStatus
+
+    service = EmrService(transport=NotesEmr(), client_id="c", redirect_uri="https://a/cb")
+    connection_id = await _connect_notes_and_activate(service)
+
+    class RevokingEmr(NotesEmr):
+        async def get_json(self, url: str, *, access_token: str | None = None) -> dict[str, Any]:
+            if url.startswith(f"{FHIR_BASE}/DocumentReference"):
+                await service.revoke(connection_id)  # the concurrent revoke, mid-fetch
+            return await super().get_json(url, access_token=access_token)
+
+    service.transport = RevokingEmr()
+    _fetched, imported, _skipped = await service.pull_clinical_notes(connection_id)
+    assert imported == 1  # the in-flight pull itself completes
+
+    record = await service.get_connection(connection_id)
+    assert record.status is EmrConnectionStatus.revoked  # NOT resurrected to active
+    assert record.revoked_at is not None  # the revocation timestamp survives
+    assert record.token_ref is None  # the dangling ref was not restored
 
 
 async def test_pull_notes_no_body_in_summary_or_audit() -> None:
@@ -814,15 +1029,19 @@ async def test_pull_notes_is_gated_by_the_ingest_notes_toggle(client: TestClient
     assert "turned off" in refused.json()["detail"]
 
 
-async def test_pull_notes_cross_user_is_403() -> None:
-    """A note pull on someone else's connection is 403 (ownership), like the lab pull."""
+async def test_pull_notes_cross_user_is_404_like_unknown() -> None:
+    """A note pull on someone else's connection is 404 (ownership, no existence leak) —
+    byte-identical to a nonexistent connection id, like the lab pull."""
     service = EmrService(transport=NotesEmr(), client_id="c", redirect_uri="https://a/cb")
     try:
         c = _client_with(service)
         await _enable_ingest_notes()
         connection_id = await _connect_notes_and_activate(service)
         _sign_in_as(USER_B)
-        assert c.post(f"/emr/connections/{connection_id}/pull-notes").status_code == 403
+        cross = c.post(f"/emr/connections/{connection_id}/pull-notes")
+        unknown = c.post(f"/emr/connections/{uuid4()}/pull-notes")
+        assert cross.status_code == unknown.status_code == 404
+        assert cross.json() == unknown.json()
     finally:
         app.dependency_overrides.clear()
 

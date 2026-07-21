@@ -493,6 +493,44 @@ def test_events_in_window_trigger_event_question_and_notes_newest_first() -> Non
     assert EVENT_RECORDED_QUESTION in summary.questions.data_completeness
 
 
+def test_event_in_prior_window_is_excluded_and_no_prompt() -> None:
+    """A fall recorded BEFORE the current window (in the 2×window lookback the assembly
+    reads) must not render under 'Patient notes & events' or fire EVENT_RECORDED_QUESTION
+    ('recorded in this window') — the section is bounded to the current window exactly
+    like its medication_changes and emr_notes siblings (twin of
+    test_emr_note_outside_window_is_excluded_and_no_prompt)."""
+    prior_only = [_event_row("event_fall", event_type="fall", note="stale", days_ago=90)]
+    summary = _assemble_meds([*prior_only], medication_rows=[], window=60)
+    assert summary.patient_notes == []
+    assert EVENT_RECORDED_QUESTION not in summary.questions.data_completeness
+
+    # With an in-window sibling, ONLY the current-window event renders.
+    mixed = [*prior_only, _event_row("event_fall", event_type="fall", note="fresh", days_ago=5)]
+    summary = _assemble_meds([*mixed], medication_rows=[], window=60)
+    assert [n.note for n in summary.patient_notes] == ["fresh"]
+    assert EVENT_RECORDED_QUESTION in summary.questions.data_completeness
+
+
+def test_local_today_east_of_utc_events_and_med_changes_are_included() -> None:
+    """Date-only capture maps the patient's LOCAL calendar day to day-start UTC, so a
+    'today' entry from a UTC+14 timezone is legitimately up to 14h in the FUTURE of the
+    server clock ('now'). A summary printed minutes later must still show it — the upper
+    bound tolerates the local-day skew (mirrors _reject_future's accept window)."""
+    # Day-start of a UTC+14 local "today" while UTC is still yesterday: 12h ahead of now.
+    event = _event_row("event_fall", event_type="fall", note="today's fall", days_ago=-0.5)
+    med = _med_row("med:aaa", change_type="dose_changed", dose=600.0, days_ago=-0.5)
+    summary = _assemble_meds([event, med], medication_rows=[med])
+    assert [n.note for n in summary.patient_notes] == ["today's fall"]
+    assert EVENT_RECORDED_QUESTION in summary.questions.data_completeness
+    assert [d.medication_id for d in summary.what_changed.medication_changes] == ["med:aaa"]
+    assert MED_CHANGE_QUESTION in summary.questions.data_completeness
+
+    # Beyond the UTC+14 tolerance nothing on Earth can legitimately be dated: excluded.
+    too_far = _event_row("event_fall", event_type="fall", note="impossible", days_ago=-1)
+    summary = _assemble_meds([too_far], medication_rows=[])
+    assert summary.patient_notes == []
+
+
 def test_stopped_med_still_appears_in_medications_section() -> None:
     meds = [
         _med_row("med:aaa", change_type="added", dose=300.0, days_ago=40),

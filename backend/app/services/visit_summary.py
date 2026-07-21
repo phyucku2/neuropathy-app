@@ -58,6 +58,7 @@ from app.schemas.visit_summary import (
     WhatChanged,
 )
 from app.services.observation import counts_toward_analysis
+from app.services.trajectory import TRAJECTORY_SOURCES
 from app.trajectory.directionality import Polarity, polarity_for, signal_info
 from app.trajectory.engine import compute_trajectory
 from app.trajectory.points import points_from_observations
@@ -66,15 +67,22 @@ from app.trajectory.points import points_from_observations
 _SYMPTOM_CODES = ("symptom_pain", "symptom_numbness")
 _FUNCTION_CODES = ("adl_walking", "adl_stairs", "adl_balance_confidence")
 
-# The sources the trajectory engine judges. Medication/event rows carry a numeric dose and
-# unknown codes, so feeding them to compute_trajectory would mint a spurious
-# "unknown-polarity" signal under "What's driving it" — they are excluded (ADR-0045 P2).
-_TRAJECTORY_SOURCES = frozenset(
-    {SourceType.lab, SourceType.adl, SourceType.biomech, SourceType.wearable}
-)
+# The sources the trajectory engine judges — SHARED with services/trajectory.py (the
+# patient/clinician trajectory endpoints) so no surface can drift into feeding
+# medication/event rows to the engine (they carry a numeric dose and unknown codes, so
+# compute_trajectory would mint a spurious "unknown-polarity" signal, ADR-0045 P2).
+_TRAJECTORY_SOURCES = TRAJECTORY_SOURCES
 
 # A row/timestamp pair, effective_at coerced tz-aware once at the window filter.
 _Row = tuple[Observation, datetime]
+
+# Tolerance on the window's UPPER bound only. Date-only capture (events, medication
+# changes, ADL check-ins) records the patient's LOCAL calendar day and ingestion maps it
+# to day-start UTC, so a "today" entry east of UTC (up to UTC+14 — mirrors
+# `_reject_future`) is legitimately a few hours in the FUTURE of the server clock. A
+# strict `> now` cutoff would drop a just-recorded fall or dose change from a summary
+# printed minutes later on the way to the visit.
+_LOCAL_DAY_TOLERANCE = timedelta(hours=14)
 
 
 def _aware(value: datetime) -> datetime:
@@ -85,7 +93,8 @@ def _aware(value: datetime) -> datetime:
 def _analyzable_in_window(
     rows: list[Observation], *, lower: datetime, upper: datetime
 ) -> list[_Row]:
-    """Current, non-errored, non-superseded rows whose effective_at is in [lower, upper].
+    """Current, non-errored, non-superseded rows whose effective_at is in [lower, upper]
+    (upper stretched by `_LOCAL_DAY_TOLERANCE` for local-today, date-only capture).
 
     Re-applies the integrity filter (defense in depth — the repository already does,
     but the pure function must stand alone) and coerces naive timestamps to UTC so a
@@ -99,7 +108,7 @@ def _analyzable_in_window(
         if not counts_toward_analysis(row.status):
             continue
         effective_at = _aware(row.effective_at)
-        if effective_at < lower or effective_at > upper:
+        if effective_at < lower or effective_at > upper + _LOCAL_DAY_TOLERANCE:
             continue
         kept.append((row, effective_at))
     return kept
@@ -316,10 +325,15 @@ def _medication_changes_in_window(
     return deltas
 
 
-def _patient_notes(windowed: list[_Row]) -> list[PatientEventItem]:
-    """The between-visit events/notes in the window, newest-first (ADR-0045 P2)."""
+def _patient_notes(current: list[_Row]) -> list[PatientEventItem]:
+    """The between-visit events/notes in the CURRENT window, newest-first (ADR-0045 P2).
+
+    Callers must pass current-window rows only — like the medication_changes and
+    emr_notes siblings, this section (and the EVENT_RECORDED_QUESTION it triggers,
+    "recorded in this window") must never re-present a prior-window event as new.
+    """
     notes: list[PatientEventItem] = []
-    for row, at in windowed:
+    for row, at in current:
         if row.source is not SourceType.event:
             continue
         payload = row.payload if isinstance(row.payload, dict) else {}
@@ -456,9 +470,11 @@ def assemble_visit_summary(
                 changed=current_direction != prior_direction,
             )
         )
-    # --- Medications (full-history fold) + patient notes/events (windowed) ---
+    # --- Medications (full-history fold) + patient notes/events (CURRENT window only —
+    # bounded like its medication_changes/emr_notes siblings, so a prior-window event
+    # never renders as "recorded in this window" or re-fires EVENT_RECORDED_QUESTION) ---
     medications = [_medication_item(folded) for folded in fold_medications(medication_rows)]
-    patient_notes = _patient_notes(windowed)
+    patient_notes = _patient_notes(current)
     medication_changes = _medication_changes_in_window(
         medication_rows, lower=current_window_start, upper=window_end
     )

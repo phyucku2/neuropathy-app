@@ -34,13 +34,25 @@ test.describe('Clinician Patient detail', () => {
     await expect(
       page.getByRole('region', { name: /60 days summary for Pat Example/ }),
     ).toBeVisible();
-    // SAME sourced sections + the co-located non-diagnostic note.
+    // SAME sourced sections + the co-located non-diagnostic note — scoped by its text
+    // (role="note" carries no accessible name) so a second note never trips strict mode.
     await expect(page.getByRole('heading', { name: 'What changed' })).toBeVisible();
-    await expect(page.getByRole('note')).toContainText('not a diagnosis');
+    await expect(page.getByRole('note').filter({ hasText: 'not a diagnosis' })).toBeVisible();
 
     // Print/export must not throw or open a dialog.
     await page.getByRole('button', { name: 'Print or export' }).click();
     await expect(page.getByRole('heading', { name: 'What changed' })).toBeVisible();
+
+    // Print media: the printed sheet is a patient record sheet — the view-picker chips and
+    // the back-to-panel navigation are app chrome and must not land on the paper; the
+    // identifying header (name) and the disclaimer stay.
+    await page.emulateMedia({ media: 'print' });
+    await expect(page.getByRole('group', { name: 'Patient views' })).toBeHidden();
+    await expect(page.getByRole('link', { name: '← Back to panel' })).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Print or export' })).toBeHidden();
+    await expect(page.getByRole('heading', { name: 'Pat Example' })).toBeVisible();
+    await expect(page.getByRole('note').filter({ hasText: 'not a diagnosis' })).toBeVisible();
+    await page.emulateMedia({ media: 'screen' });
   });
 
   test('Trend table shows cross-source rows including "not judged"', async ({ page }) => {

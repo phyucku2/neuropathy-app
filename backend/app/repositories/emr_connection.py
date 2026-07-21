@@ -8,7 +8,7 @@ store (ADR-0008).
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Protocol
 
@@ -48,6 +48,18 @@ class EmrConnectionRepository(Protocol):
         """Persist the current state of an existing connection."""
         ...
 
+    async def set_last_notes_pulled_at(
+        self, connection_id: uuid.UUID, last_notes_pulled_at: datetime
+    ) -> None:
+        """Persist ONLY the note-pull watermark — a targeted single-field write.
+
+        The note pull holds its ConnectionRecord snapshot across a long EHR fetch, so
+        writing the whole record back could resurrect a concurrently revoked connection
+        (stale status/token_ref clobbering the revoke). This method must never touch any
+        field but ``last_notes_pulled_at``. An unknown id is a quiet no-op.
+        """
+        ...
+
     async def list_for_patient(self, patient_id: uuid.UUID) -> list[ConnectionRecord]:
         """All of one patient's EMR connections, every status.
 
@@ -67,22 +79,36 @@ class EmrConnectionRepository(Protocol):
 
 
 class InMemoryEmrConnectionRepository:
-    """Dict-backed store for unit tests and DB-less development."""
+    """Dict-backed store for unit tests and DB-less development.
+
+    Reads return COPIES (and writes store copies), mirroring the DB repository's
+    detached-row semantics: a caller holding a record across an await never shares
+    mutable state with the store, so stale-snapshot bugs (e.g. a pull write-back
+    racing a revoke) reproduce in unit tests instead of only in deployment.
+    """
 
     def __init__(self) -> None:
         self._connections: dict[uuid.UUID, ConnectionRecord] = {}
 
     async def add(self, connection: ConnectionRecord) -> None:
-        self._connections[connection.id] = connection
+        self._connections[connection.id] = replace(connection)
 
     async def get(self, connection_id: uuid.UUID) -> ConnectionRecord | None:
-        return self._connections.get(connection_id)
+        record = self._connections.get(connection_id)
+        return None if record is None else replace(record)
 
     async def update(self, connection: ConnectionRecord) -> None:
-        self._connections[connection.id] = connection
+        self._connections[connection.id] = replace(connection)
+
+    async def set_last_notes_pulled_at(
+        self, connection_id: uuid.UUID, last_notes_pulled_at: datetime
+    ) -> None:
+        record = self._connections.get(connection_id)
+        if record is not None:
+            record.last_notes_pulled_at = last_notes_pulled_at
 
     async def list_for_patient(self, patient_id: uuid.UUID) -> list[ConnectionRecord]:
-        return [c for c in self._connections.values() if c.patient_id == patient_id]
+        return [replace(c) for c in self._connections.values() if c.patient_id == patient_id]
 
     async def delete_for_patient(self, patient_id: uuid.UUID) -> None:
         self._connections = {

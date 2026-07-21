@@ -8,7 +8,10 @@ the shared `import_key` + add_if_absent invariant.
 
 Postures (identical to the rest of the ingest surface):
 - Patient role ONLY (`PatientUserDep` -> 403 clinician/ops, 401 anon).
-- Capability-gated: `ingest_medications` / `ingest_events` (409 when off).
+- Capability-gated WRITES only: `ingest_medications` / `ingest_events` govern ingestion
+  (409 when off). The GET list endpoints are NEVER gated — the toggle stops new capture,
+  it must not block the patient's read of their own already-captured record (the same
+  rows keep rendering in /me/visit-summary and /me/export regardless of the toggle).
 - Every read is `Cache-Control: no-store` (the body is PHI).
 - Every write/read emits ONE audit event — counts/refs only, never names/doses/note text.
 - Appending to a medication_id the patient does not own is 404, never 403 (no existence leak).
@@ -177,11 +180,11 @@ async def append_medication_change(
     )
 
 
-@router.get(
-    "/medications",
-    response_model=MedicationLog,
-    dependencies=[Depends(require_capability("ingest_medications"))],
-)
+# Deliberately NO capability gate: ingest_medications governs the WRITE paths only
+# (services/capability.py contract). Gating this read would let a clinician-managed or
+# ops kill-switch toggle block the patient's access to their own already-captured
+# record — a right-of-access inversion, while the same rows still render elsewhere.
+@router.get("/medications", response_model=MedicationLog)
 async def list_medications(
     current: PatientUserDep, service: EmrServiceDep, response: Response
 ) -> MedicationLog:
@@ -278,11 +281,8 @@ async def record_event(body: EventIn, current: PatientUserDep, service: EmrServi
     )
 
 
-@router.get(
-    "/events",
-    response_model=EventList,
-    dependencies=[Depends(require_capability("ingest_events"))],
-)
+# Deliberately NO capability gate — same read-path posture as GET /medications above.
+@router.get("/events", response_model=EventList)
 async def list_events(
     current: PatientUserDep, service: EmrServiceDep, response: Response
 ) -> EventList:

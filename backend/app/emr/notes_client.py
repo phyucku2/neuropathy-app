@@ -15,7 +15,9 @@ from __future__ import annotations
 import time
 from datetime import datetime
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
+
+import httpx
 
 from app.emr.client import FhirTransport, _next_link
 from app.fhir.mapping import clinical_notes_from_bundle_payload
@@ -32,6 +34,27 @@ class EmrClinicalNoteClient:
     def __init__(self, fhir_base: str, transport: FhirTransport) -> None:
         self._fhir_base = fhir_base.rstrip("/")
         self._transport = transport
+
+    async def _get_json(self, url: str, *, access_token: str) -> dict[str, Any]:
+        """Transport GET with httpx errors converted to a PHI-free typed error.
+
+        httpx exception messages embed the FULL request URL — which carries the patient's
+        EHR FHIR id in the query string — so letting one propagate would put that
+        MBI-adjacent identifier into server logs via the unhandled-error traceback. The
+        chain is deliberately broken (``from None``): the URL-bearing message must never
+        be rendered anywhere.
+        """
+        # Local import breaks the service<->client import cycle (service builds this client).
+        from app.emr.service import EmrError
+
+        try:
+            return await self._transport.get_json(url, access_token=access_token)
+        except httpx.HTTPError:
+            raise EmrError(
+                "Your health record could not be reached or answered with an error; "
+                "please try again later",
+                status_code=502,
+            ) from None
 
     async def fetch_clinical_notes(
         self,
@@ -74,7 +97,7 @@ class EmrClinicalNoteClient:
                     "please try again later",
                     status_code=502,
                 )
-            payload = await self._transport.get_json(url, access_token=access_token)
+            payload = await self._get_json(url, access_token=access_token)
             page_notes, page_skipped = clinical_notes_from_bundle_payload(payload)
             notes.extend(page_notes)
             skipped += page_skipped
@@ -85,7 +108,25 @@ class EmrClinicalNoteClient:
     async def fetch_note_body(self, *, attachment_url: str, access_token: str) -> dict[str, Any]:
         """Lazily fetch ONE note's Binary body on demand (never during the poll).
 
+        The attachment URL is EHR-supplied data stored verbatim, so it MUST be same-origin
+        with this connection's ``fhir_base`` before the bearer is presented: a malicious or
+        compromised EHR returning ``content.attachment.url = https://evil.example/x`` would
+        otherwise have the patient's live EMR access token handed to an attacker host (and
+        internal addresses would become fetchable server-side). Cross-origin URLs are
+        refused with a typed error and NO request is made.
+
         The bearer is presented via the shared transport (which sets ``Authorization:
         Bearer``). The returned payload is handed straight to the caller to surface as the
         VERBATIM note — it is never summarized, logged, or written into a summary/audit."""
-        return await self._transport.get_json(attachment_url, access_token=access_token)
+        # Local import breaks the service<->client import cycle (service builds this client).
+        from app.emr.service import EmrError
+
+        base = urlsplit(self._fhir_base)
+        target = urlsplit(attachment_url)
+        if (target.scheme, target.netloc) != (base.scheme, base.netloc):
+            raise EmrError(
+                "This note's attachment is not hosted by your connected health record, "
+                "so it was not fetched",
+                status_code=502,
+            )
+        return await self._get_json(attachment_url, access_token=access_token)

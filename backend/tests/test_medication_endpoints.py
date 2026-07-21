@@ -192,9 +192,15 @@ def test_future_started_on_is_422(client: TestClient) -> None:
     assert resp.status_code == 422
 
 
-async def test_medication_capability_off_is_409(
+async def test_medication_capability_off_gates_the_write_but_never_the_read(
     client: TestClient, cap_service: CapabilityService
 ) -> None:
+    """ingest_medications governs the WRITE only (capability.py contract): with the
+    toggle off — which a managing clinician or the ops kill switch can flip — the
+    patient's READ of their own already-captured medication log must keep answering 200
+    (the same rows still render in /me/visit-summary and /me/export; a 409 here would be
+    a third-party-controllable block on right-of-access)."""
+    med_id = client.post("/medications", json=_register_body()).json()["medication_id"]
     await cap_service.set_for_patient(
         patient_id=PATIENT.patient_id,
         actor_id=PATIENT.user_id,
@@ -202,8 +208,18 @@ async def test_medication_capability_off_is_409(
         active=False,
         now=NOW,
     )
+    # Writes refuse — the register AND the append-change path.
     assert client.post("/medications", json=_register_body()).status_code == 409
-    assert client.get("/medications").status_code == 409
+    change = {
+        "change_type": "stopped",
+        "effective_date": "2026-07-01",
+        "client_entry_id": str(uuid4()),
+    }
+    assert client.post(f"/medications/{med_id}/changes", json=change).status_code == 409
+    # The read of the already-captured record still works.
+    listed = client.get("/medications")
+    assert listed.status_code == 200
+    assert [m["medication_id"] for m in listed.json()["items"]] == [med_id]
 
 
 def test_clinician_cannot_register(client: TestClient) -> None:
@@ -280,9 +296,13 @@ def test_future_event_date_is_422(client: TestClient) -> None:
     assert client.post("/events", json=_event_body(effective_date=future)).status_code == 422
 
 
-async def test_event_capability_off_is_409(
+async def test_event_capability_off_gates_the_write_but_never_the_read(
     client: TestClient, cap_service: CapabilityService
 ) -> None:
+    """Mirror of the medications posture: ingest_events off refuses NEW events (409) but
+    the patient's read of already-recorded events keeps answering 200."""
+    recorded = client.post("/events", json=_event_body())
+    assert recorded.status_code == 201
     await cap_service.set_for_patient(
         patient_id=PATIENT.patient_id,
         actor_id=PATIENT.user_id,
@@ -291,7 +311,9 @@ async def test_event_capability_off_is_409(
         now=NOW,
     )
     assert client.post("/events", json=_event_body()).status_code == 409
-    assert client.get("/events").status_code == 409
+    listed = client.get("/events")
+    assert listed.status_code == 200
+    assert [e["event_id"] for e in listed.json()["items"]] == [recorded.json()["event_id"]]
 
 
 def test_event_requires_auth() -> None:

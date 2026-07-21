@@ -121,6 +121,41 @@ describe('MedsPage — medication change log', () => {
     expect(stoppedType).toBe('stopped');
   });
 
+  it('drives the change-type radiogroup with the roving-tabindex arrow-key pattern', async () => {
+    const user = userEvent.setup();
+    renderApp('/meds');
+    await user.click(
+      await screen.findByRole('button', { name: 'Record a change for Alpha-lipoic acid' }),
+    );
+    const group = screen.getByRole('radiogroup', { name: 'Change type for Alpha-lipoic acid' });
+    const doseChange = within(group).getByRole('radio', { name: 'Dose change' });
+    const stopped = within(group).getByRole('radio', { name: 'Mark stopped' });
+
+    // Roving tabindex: the selected option is the group's single tab stop.
+    expect(doseChange).toHaveAttribute('aria-checked', 'true');
+    expect(doseChange).toHaveAttribute('tabindex', '0');
+    expect(stopped).toHaveAttribute('tabindex', '-1');
+
+    // Arrow keys move focus AND select (WAI-ARIA radio-group pattern, as on the check-in).
+    doseChange.focus();
+    await user.keyboard('{ArrowRight}');
+    expect(stopped).toHaveAttribute('aria-checked', 'true');
+    expect(stopped).toHaveFocus();
+    expect(stopped).toHaveAttribute('tabindex', '0');
+    expect(doseChange).toHaveAttribute('tabindex', '-1');
+
+    // Wraps at the ends, in both directions.
+    await user.keyboard('{ArrowDown}');
+    expect(doseChange).toHaveAttribute('aria-checked', 'true');
+    expect(doseChange).toHaveFocus();
+    await user.keyboard('{ArrowUp}');
+    expect(stopped).toHaveAttribute('aria-checked', 'true');
+    expect(stopped).toHaveFocus();
+    await user.keyboard('{ArrowLeft}');
+    expect(doseChange).toHaveAttribute('aria-checked', 'true');
+    expect(doseChange).toHaveFocus();
+  });
+
   it('shows the capability-off copy when the source is turned off (409)', async () => {
     server.use(
       http.get('/medications', () =>

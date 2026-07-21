@@ -67,13 +67,18 @@ async def list_providers(q: str = "") -> list[ProviderOut]:
 async def _owned_connection(
     service: EmrService, connection_id: uuid.UUID, current: CurrentUser
 ) -> ConnectionRecord:
-    """Fetch the connection and enforce ownership (cross-user access -> 403)."""
+    """Fetch the connection and enforce ownership (cross-user access -> 404).
+
+    404 — never 403 — for someone else's connection, byte-identical to the unknown-id
+    answer (the house 404-over-403 posture, mirrors clinic.py/medications.py): a 403
+    would confirm to any authenticated caller that a leaked connection UUID is a live
+    record in the system. No existence leak."""
     try:
         record = await service.get_connection(connection_id)
     except EmrError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.reason) from exc
     if record.patient_id != current.patient_id:
-        raise HTTPException(status_code=403, detail="Not your connection")
+        raise HTTPException(status_code=404, detail="Connection not found")
     return record
 
 
@@ -135,7 +140,9 @@ async def oauth_callback(
     except EmrError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.reason) from exc
     if record.patient_id != current.patient_id:
-        raise HTTPException(status_code=403, detail="Not your connection")
+        # Same 404 body as an unknown/expired state: another user's state must be
+        # indistinguishable from a nonexistent one (no existence leak, never 403).
+        raise HTTPException(status_code=404, detail="Unknown, expired, or already-used state")
     return _to_out(record)
 
 
@@ -165,7 +172,7 @@ async def pull_labs(
 # The clinical-note pull writes to the SEPARATE append-only note store (metadata only) —
 # gated by its OWN opt-in toggle (ingest_notes), distinct from ingest_labs, so a patient
 # can import labs without notes (or vice versa). Behind _owned_connection like the lab
-# pull (cross-user -> 403). Connect/callback/revoke stay ungated as before.
+# pull (cross-user -> non-enumerating 404). Connect/callback/revoke stay ungated as before.
 @router.post(
     "/connections/{connection_id}/pull-notes",
     response_model=PullNotesOut,

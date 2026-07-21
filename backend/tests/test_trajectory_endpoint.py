@@ -157,3 +157,68 @@ async def test_lookback_bounds_the_series(client: TestClient, service: EmrServic
     resp = client.get("/trajectory")
     # Only the recent point survives -> not enough evidence for a judged trend.
     assert resp.json()["direction"] == "insufficient_data"
+
+
+async def test_medication_and_event_rows_never_reach_the_engine_or_narrator_facts(
+    client: TestClient, service: EmrService
+) -> None:
+    """Medication/event capture rows (ADR-0045 P2) are record data, not signals: a med
+    row's numeric DOSE under an unknown `med:{uuid}` code must not mint a spurious
+    unknown-polarity signal on the trajectory surfaces, and the dose magnitude must
+    never enter the facts serialized into the AI narrator prompt (the same shared
+    computation feeds both — services/trajectory.py TRAJECTORY_SOURCES)."""
+    from app.ai.narrative import _facts_for
+    from app.services.trajectory import compute_patient_trajectory
+
+    med = Observation(
+        patient_id=PATIENT.patient_id,
+        source=SourceType.medication,
+        origin=DataOrigin.patient_reported,
+        code="med:11111111-2222-3333-4444-555555555555",
+        code_system="neuropathy-app/medication",
+        value_num=613.0,  # a distinctive dose magnitude — must appear NOWHERE downstream
+        value_text="Gabapentin",
+        unit="mg",
+        effective_at=NOW - timedelta(days=10),
+        recorded_at=NOW - timedelta(days=10),
+        status=ObservationStatus.final,
+        quality={"human_confirmed": True, "source_mode": "manual"},
+        payload={"change_type": "added", "kind": "prescription"},
+    )
+    fall = Observation(
+        patient_id=PATIENT.patient_id,
+        source=SourceType.event,
+        origin=DataOrigin.patient_reported,
+        code="event_fall",
+        value_text="fell in the hall",
+        effective_at=NOW - timedelta(days=8),
+        recorded_at=NOW - timedelta(days=8),
+        status=ObservationStatus.final,
+        quality={"human_confirmed": True},
+        payload={"type": "fall", "display": "Fall", "reviewed": False},
+    )
+    await _seed(service, [med, fall, _hba1c(8.0, 30), _hba1c(7.0, 5)])
+
+    resp = client.get("/trajectory")
+    assert resp.status_code == 200
+    body = resp.json()
+    codes = {s["code"] for s in body["signals"]}
+    assert not any(code.startswith("med:") for code in codes)
+    assert "event_fall" not in codes
+    assert "613" not in resp.text  # the dose magnitude reaches no field of the payload
+    assert "fell in the hall" not in resp.text  # nor the patient's own note text
+
+    # The narrator prompt facts are built from the SAME trajectory: med/event rows can
+    # never leak into the text POSTed to the external LLM.
+    trajectory, count = await compute_patient_trajectory(
+        service.observations, PATIENT.patient_id, now=NOW
+    )
+    facts = _facts_for(trajectory)
+    assert "med:" not in facts
+    assert "613" not in facts
+    assert "fell in the hall" not in facts
+    assert count == 2  # only the two lab rows are counted as analyzable for the engine
+
+    # The audited read count matches the engine's analyzable set, not the raw row count.
+    events = await service.audit.list_for_patient(PATIENT.patient_id)
+    assert events[0].detail == {"observations": 2}

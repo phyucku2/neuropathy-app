@@ -233,10 +233,15 @@ def clinic_auth() -> AuthService:
 
 @pytest.fixture()
 def clinic_service(clinic_emr: EmrService, clinic_auth: AuthService) -> ClinicService:
-    # Wire the clinic service on the SAME stores the patient's own EmrService uses, so
-    # /me/visit-summary and /clinic/.../visit-summary read one shared record (deps parity).
+    # Wire the clinic service on the SAME stores the patient's own EmrService uses —
+    # including the clinical-note store — so /me/visit-summary and /clinic/.../visit-summary
+    # read one shared record (deps parity; a default-factory clinical_notes here would be a
+    # SEPARATE store and would mask the exact wiring regression these tests exist to catch).
     return ClinicService(
-        users=clinic_auth.users, observations=clinic_emr.observations, audit=clinic_emr.audit
+        users=clinic_auth.users,
+        observations=clinic_emr.observations,
+        clinical_notes=clinic_emr.clinical_notes,
+        audit=clinic_emr.audit,
     )
 
 
@@ -494,3 +499,122 @@ async def test_change_pointed_questions_gated_on_both_surfaces(
     on_pat = clinic_client.get("/me/visit-summary", headers=patient).json()
     assert on_clin["questions"]["change_pointed"]
     assert on_pat["questions"]["change_pointed"]
+
+
+# --------------------------------------------- pulled EMR notes reach both surfaces
+
+
+class _NotesPullEmr:
+    """SMART discovery + token (granting the note scope) + ONE DocumentReference authored
+    5 days ago — just enough fake EMR for a real note pull, with no wall-clock coupling
+    (the note date is derived from NOW so the test never ages out of the window)."""
+
+    def __init__(self) -> None:
+        self.authored_at = (NOW - timedelta(days=5)).isoformat()
+
+    async def get_json(self, url: str, *, access_token: str | None = None) -> dict[str, Any]:
+        if url.endswith("/.well-known/smart-configuration"):
+            return {
+                "authorization_endpoint": "https://ehr.example/oauth/authorize",
+                "token_endpoint": "https://ehr.example/oauth/token",
+            }
+        assert "DocumentReference" in url
+        return {
+            "resourceType": "Bundle",
+            "type": "searchset",
+            "entry": [
+                {
+                    "resource": {
+                        "resourceType": "DocumentReference",
+                        "id": "docref-visit-1",
+                        "type": {
+                            "coding": [
+                                {
+                                    "system": "http://loinc.org",
+                                    "code": "11506-3",
+                                    "display": "Progress note",
+                                }
+                            ]
+                        },
+                        "date": self.authored_at,
+                        "author": [{"display": "Dr Synthetic"}],
+                        "context": {"encounter": [{"reference": "Encounter/enc-9"}]},
+                        "content": [
+                            {
+                                "attachment": {
+                                    "contentType": "text/plain",
+                                    "url": "https://ehr.example/fhir/Binary/bin-1",
+                                    "data": "U0VDUkVULU5PVEUtQk9EWQ==",  # "SECRET-NOTE-BODY"
+                                }
+                            }
+                        ],
+                    }
+                }
+            ],
+        }
+
+    async def post_form(self, url: str, data: dict[str, str]) -> dict[str, Any]:
+        return {
+            "access_token": "the-access-token",
+            "patient": "fhir-patient-9",
+            "scope": "patient/DocumentReference.rs",
+        }
+
+
+async def _pull_one_note(emr: EmrService, patient_id: UUID) -> None:
+    """A REAL pull — connect -> callback -> pull_clinical_notes — into `emr`'s stores."""
+    record, _, state = await emr.start_connect(
+        patient_id=patient_id,
+        fhir_base="https://ehr.example/fhir",
+        provider_name=None,
+        include_notes=True,
+    )
+    await emr.complete_callback(state=state, code="auth-code")
+    _fetched, imported, _skipped = await emr.pull_clinical_notes(record.id)
+    assert imported == 1
+
+
+async def test_pulled_emr_notes_surface_in_the_patient_visit_summary() -> None:
+    """END-TO-END wiring (pull -> clinical_notes store -> /me/visit-summary): a really
+    pulled note renders in the emr_notes section with its metadata and fires
+    NEW_NOTE_QUESTION — proving the endpoint reads the SAME store the pull persists to
+    (a session-mismatched or default-constructed note repo would break exactly this)."""
+    from app.schemas.visit_summary import NEW_NOTE_QUESTION
+
+    service = EmrService(transport=_NotesPullEmr(), client_id="c", redirect_uri="https://a/cb")
+    app.dependency_overrides[get_emr_service] = lambda: service
+    app.dependency_overrides[get_current_user] = lambda: PATIENT
+    try:
+        client = TestClient(app)
+        assert PATIENT.patient_id is not None
+        await _pull_one_note(service, PATIENT.patient_id)
+
+        body = client.get("/me/visit-summary").json()
+        assert [n["type_display"] for n in body["emr_notes"]] == ["Progress note"]
+        assert body["emr_notes"][0]["author_display"] == "Dr Synthetic"
+        assert body["emr_notes"][0]["provenance"] == "emr"
+        assert NEW_NOTE_QUESTION in body["questions"]["data_completeness"]
+        assert "SECRET" not in json.dumps(body)  # metadata only — never the note body
+    finally:
+        app.dependency_overrides.clear()
+
+
+async def test_pulled_emr_notes_surface_in_the_clinician_visit_summary(
+    clinic_client: TestClient, clinic_emr: EmrService
+) -> None:
+    """The clinician surface answers from the SAME clinical-note store the pull writes:
+    after a real pull for a consented patient, /clinic/.../visit-summary renders the
+    note metadata and the existence prompt (never the body)."""
+    from app.schemas.visit_summary import NEW_NOTE_QUESTION
+
+    clinician = _create_clinician(clinic_client)
+    _, patient_id = _connect_consented(clinic_client, clinician)
+    clinic_emr.transport = _NotesPullEmr()  # the fixture default refuses all network
+    await _pull_one_note(clinic_emr, patient_id)
+
+    body = clinic_client.get(
+        f"/clinic/patients/{patient_id}/visit-summary", headers=clinician
+    ).json()
+    assert [n["type_display"] for n in body["emr_notes"]] == ["Progress note"]
+    assert NEW_NOTE_QUESTION in body["questions"]["data_completeness"]
+    assert "SECRET" not in json.dumps(body)

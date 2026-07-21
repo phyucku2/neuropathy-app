@@ -65,7 +65,7 @@ export function PatientVisitSummary({
         <button
           type="button"
           className="btn-inline"
-          disabled={summary === null}
+          disabled={loading || summary === null}
           onClick={() => {
             printHandout();
           }}
@@ -76,11 +76,13 @@ export function PatientVisitSummary({
 
       {loading && <Loading label="Preparing the summary…" />}
       {error !== null && errorStatus !== 404 && <ErrorNotice>{error}</ErrorNotice>}
-      {summary !== null && (
+      {/* Hidden while a refetch is in flight, and labelled from the payload's own window —
+          never the picker state — so the sheet on screen (or paper) always matches its label. */}
+      {!loading && summary !== null && (
         <VisitSummaryView
           summary={summary}
-          heroEyebrow={`${windowLabel(windowDays)} summary`}
-          heroAriaLabel={`${windowLabel(windowDays)} summary for ${displayName}`}
+          heroEyebrow={`${windowLabel(summary.window_days)} summary`}
+          heroAriaLabel={`${windowLabel(summary.window_days)} summary for ${displayName}`}
         />
       )}
     </div>
