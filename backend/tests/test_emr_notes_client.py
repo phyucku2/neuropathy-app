@@ -195,6 +195,77 @@ async def test_body_fetch_uses_the_bearer_and_is_a_separate_call() -> None:
     assert body["resourceType"] == "Binary"
 
 
+@pytest.mark.parametrize(
+    "attachment_url",
+    [
+        "https://evil.example/exfiltrate",  # attacker host
+        "http://ehr.example/fhir/Binary/bin-1",  # scheme downgrade, same host
+        "https://ehr.example:8443/fhir/Binary/bin-1",  # same host, different port
+        "http://169.254.169.254/latest/meta-data",  # cloud metadata (SSRF)
+    ],
+)
+async def test_body_fetch_refuses_cross_origin_attachment_urls(attachment_url: str) -> None:
+    """attachment_url is EHR-supplied data stored verbatim: a URL whose origin differs
+    from the connection's fhir_base must be refused BEFORE any request is made — the
+    bearer (the patient's live EMR access token) is never presented to another host,
+    and internal addresses never become fetchable server-side."""
+    transport = FakeTransport([])
+    client = EmrClinicalNoteClient("https://ehr.example/fhir", transport)
+    with pytest.raises(EmrError) as exc:
+        await client.fetch_note_body(attachment_url=attachment_url, access_token="the-bearer")
+    assert exc.value.status_code == 502
+    assert "not hosted by your connected health record" in exc.value.reason
+    assert transport.calls == []  # NO request was made — the token never left the app
+    assert transport.tokens == []
+
+
+class _HttpxErrorTransport:
+    """A transport that fails the way the real one does: an httpx error whose message
+    embeds the FULL request URL (patient FHIR id and all)."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def get_json(self, url: str, *, access_token: str | None = None) -> dict[str, Any]:
+        import httpx
+
+        self.calls.append(url)
+        request = httpx.Request("GET", url)
+        response = httpx.Response(429, request=request)
+        raise httpx.HTTPStatusError(
+            f"Client error '429 Too Many Requests' for url '{url}'",
+            request=request,
+            response=response,
+        )
+
+
+async def test_ehr_http_errors_are_wrapped_phi_free() -> None:
+    """An EHR 4xx/5xx mid-pull must surface as the module's typed EmrError with a STATIC
+    message: httpx's own exception text carries the full search URL — including the
+    patient's EHR FHIR id (MBI-adjacent) — which must never reach server logs via an
+    unhandled traceback."""
+    transport = _HttpxErrorTransport()
+    client = EmrClinicalNoteClient("https://ehr.example/fhir", transport)
+    with pytest.raises(EmrError) as exc:
+        await client.fetch_clinical_notes(
+            patient_fhir_id="fhir-patient-9", access_token="the-bearer"
+        )
+    assert exc.value.status_code == 502
+    rendered = str(exc.value)
+    assert "fhir-patient-9" not in rendered  # no patient FHIR id
+    assert "ehr.example" not in rendered  # no URL fragments at all
+    assert exc.value.__cause__ is None  # chain broken: the URL-bearing httpx error
+    assert exc.value.__suppress_context__  # cannot be rendered from this exception
+
+    # The lazy body fetch takes the same PHI-free wrapping.
+    with pytest.raises(EmrError) as body_exc:
+        await client.fetch_note_body(
+            attachment_url="https://ehr.example/fhir/Binary/bin-1", access_token="the-bearer"
+        )
+    assert body_exc.value.status_code == 502
+    assert "Binary" not in str(body_exc.value)
+
+
 def test_parser_reads_no_body_field() -> None:
     """The lenient parser produces metadata only — the parsed note has no body/text field
     even when the attachment carries inline data."""

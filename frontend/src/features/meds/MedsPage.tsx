@@ -11,7 +11,8 @@
  * source is turned off, handled here with a pointer to Sources (mirrors AddDataPage/CheckIn).
  */
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import type { KeyboardEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { ApiError, messageFor } from '../../api/client';
 import { getMedications, postMedication, postMedicationChange } from '../../api/endpoints';
@@ -45,6 +46,12 @@ const CHANGE_LABEL: Record<string, string> = {
   dose_changed: 'Dose changed',
   stopped: 'Stopped',
 };
+
+/** The two recordable change kinds, in radiogroup order (index = roving-focus position). */
+const CHANGE_TYPE_OPTIONS: { value: 'dose_changed' | 'stopped'; label: string }[] = [
+  { value: 'dose_changed', label: 'Dose change' },
+  { value: 'stopped', label: 'Mark stopped' },
+];
 
 /** "50 mg", "1 tablet twice daily", or null when there is no dose to describe. */
 function doseLine(amount: number | null, unit: string | null, text: string | null): string | null {
@@ -282,6 +289,29 @@ function ChangeForm({ med, onChanged }: { med: MedicationOut; onChanged: () => v
   const [effectiveDate, setEffectiveDate] = useState(todayLocalIso());
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const changeTypeRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  // WAI-ARIA radio-group keyboard pattern (same as CheckInPage's SegmentedAnswer): arrow keys
+  // move focus AND select, wrapping at the ends; the selected option is the single tab stop.
+  const onChangeTypeKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    const step =
+      event.key === 'ArrowRight' || event.key === 'ArrowDown'
+        ? 1
+        : event.key === 'ArrowLeft' || event.key === 'ArrowUp'
+          ? -1
+          : 0;
+    if (step === 0) {
+      return;
+    }
+    event.preventDefault();
+    const next = (index + step + CHANGE_TYPE_OPTIONS.length) % CHANGE_TYPE_OPTIONS.length;
+    const option = CHANGE_TYPE_OPTIONS[next];
+    if (option === undefined) {
+      return;
+    }
+    setChangeType(option.value);
+    changeTypeRefs.current[next]?.focus();
+  };
 
   // A dose_changed entry with no dose at all records nothing (the backend 422s it), so the
   // submit stays disabled until at least one dose field is present; `stopped` needs none.
@@ -339,28 +369,28 @@ function ChangeForm({ med, onChanged }: { med: MedicationOut; onChanged: () => v
       <fieldset className="seg-group">
         <legend>What kind of change?</legend>
         <div className="seg-row" role="radiogroup" aria-label={`Change type for ${med.name}`}>
-          <button
-            type="button"
-            className="seg"
-            role="radio"
-            aria-checked={changeType === 'dose_changed'}
-            onClick={() => {
-              setChangeType('dose_changed');
-            }}
-          >
-            Dose change
-          </button>
-          <button
-            type="button"
-            className="seg"
-            role="radio"
-            aria-checked={changeType === 'stopped'}
-            onClick={() => {
-              setChangeType('stopped');
-            }}
-          >
-            Mark stopped
-          </button>
+          {CHANGE_TYPE_OPTIONS.map((option, index) => (
+            <button
+              key={option.value}
+              ref={(element) => {
+                changeTypeRefs.current[index] = element;
+              }}
+              type="button"
+              className="seg"
+              role="radio"
+              aria-checked={changeType === option.value}
+              // Roving tabindex: the selected option is the group's single tab stop.
+              tabIndex={changeType === option.value ? 0 : -1}
+              onKeyDown={(event) => {
+                onChangeTypeKeyDown(event, index);
+              }}
+              onClick={() => {
+                setChangeType(option.value);
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
         </div>
       </fieldset>
       {changeType === 'dose_changed' && (

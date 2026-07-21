@@ -19,10 +19,13 @@ test.describe('Visit-Ready Summary handout (patient)', () => {
     await signedInApp(page);
     await page.goto('/handout');
 
-    // The page + shared status hero (default 60-day window) + co-located disclaimer.
+    // The page + shared status hero (default 60-day window) + co-located disclaimer. The
+    // note is scoped by its text (role="note" carries no accessible name) so a second
+    // role="note" landing on this page can never trip a strict-mode collision.
     await expect(page.getByRole('heading', { level: 1, name: 'Visit summary' })).toBeVisible();
     await expect(page.getByRole('region', { name: /Your 60 days summary/ })).toBeVisible();
-    await expect(page.getByRole('note')).toContainText('not a diagnosis');
+    const disclaimer = page.getByRole('note').filter({ hasText: 'not a diagnosis' });
+    await expect(disclaimer).toBeVisible();
 
     // Sourced sections render.
     await expect(page.getByRole('heading', { name: 'What changed' })).toBeVisible();
@@ -38,7 +41,7 @@ test.describe('Visit-Ready Summary handout (patient)', () => {
     await page.emulateMedia({ media: 'print' });
     await expect(page.locator('.status-bar')).toBeHidden();
     await expect(page.locator('.tabbar')).toBeHidden();
-    await expect(page.getByRole('note')).toBeVisible();
+    await expect(disclaimer).toBeVisible();
     await page.emulateMedia({ media: 'screen' });
   });
 

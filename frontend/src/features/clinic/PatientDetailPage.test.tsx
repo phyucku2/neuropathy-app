@@ -1,13 +1,13 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import type {
   CapabilityStateOut,
   ClinicianCapabilitySetIn,
   ObservationItem,
 } from '../../api/types';
-import { CLINIC_CAPABILITIES, PANEL_PATIENT_ID } from '../../test/fixtures';
+import { CLINIC_CAPABILITIES, PANEL_PATIENT_ID, visitSummaryForWindow } from '../../test/fixtures';
 import { renderApp } from '../../test/renderApp';
 import { actAsClinician, server } from '../../test/server';
 import { minRenewalDate } from './CapabilityOrders';
@@ -119,6 +119,67 @@ describe('PatientDetailPage — visit summary tab', () => {
     expect(
       await screen.findByRole('region', { name: /1 year summary for Pat Example/ }),
     ).toBeInTheDocument();
+  });
+
+  it('keeps a stale summary under its OWN window label when the refetch fails', async () => {
+    actAsClinician();
+    server.use(
+      http.get('/clinic/patients/:patientId/visit-summary', ({ request }) => {
+        const windowDays = Number(new URL(request.url).searchParams.get('window') ?? '60');
+        if (windowDays === 365) {
+          return HttpResponse.json({ detail: 'Summary unavailable' }, { status: 503 });
+        }
+        return HttpResponse.json(visitSummaryForWindow(windowDays));
+      }),
+    );
+    const user = await openTab('Summary');
+    await screen.findByRole('region', { name: /60 days summary for Pat Example/ });
+    await user.click(screen.getByRole('button', { name: '1 year' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Summary unavailable');
+    // The still-rendered data is labelled from its own payload — never the picker's failed
+    // "1 year" — so a printed/exported sheet can never contradict its label.
+    expect(
+      screen.getByRole('region', { name: /60 days summary for Pat Example/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('region', { name: /1 year summary for Pat Example/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('hides the stale summary and disables print/export while a new window loads', async () => {
+    actAsClinician();
+    server.use(
+      http.get('/clinic/patients/:patientId/visit-summary', async ({ request }) => {
+        const windowDays = Number(new URL(request.url).searchParams.get('window') ?? '60');
+        if (windowDays === 365) {
+          await delay(200);
+        }
+        return HttpResponse.json(visitSummaryForWindow(windowDays));
+      }),
+    );
+    const user = await openTab('Summary');
+    await screen.findByRole('region', { name: /60 days summary for Pat Example/ });
+    await user.click(screen.getByRole('button', { name: '1 year' }));
+    // In flight: the old payload must not render under the new label, and print is disabled.
+    expect(
+      screen.queryByRole('region', { name: /summary for Pat Example/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Print or export' })).toBeDisabled();
+    expect(
+      await screen.findByRole('region', { name: /1 year summary for Pat Example/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Print or export' })).toBeEnabled();
+  });
+
+  it('marks the view picker and back link as screen-only so they never print', async () => {
+    actAsClinician();
+    renderApp(DETAIL_PATH);
+    await screen.findByRole('heading', { name: 'Pat Example' });
+    // The print stylesheet hides `.no-print` — the chips and navigation are app chrome that
+    // must never land on the printed patient record sheet (the name/consent header stays).
+    expect(screen.getByRole('group', { name: 'Patient views' })).toHaveClass('no-print');
+    const back = screen.getByRole('link', { name: '← Back to panel' });
+    expect(back.closest('p')).toHaveClass('no-print');
   });
 
   it('collapses the whole view to the neutral not-found screen on a 404', async () => {

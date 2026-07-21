@@ -312,6 +312,19 @@ class PostgresEmrConnectionRepository:
         row.last_notes_pulled_at = connection.last_notes_pulled_at
         await self._session.flush()
 
+    async def set_last_notes_pulled_at(
+        self, connection_id: uuid.UUID, last_notes_pulled_at: datetime
+    ) -> None:
+        # Targeted single-column UPDATE — deliberately NOT `update(record)`: the note
+        # pull's snapshot can be minutes stale after a long EHR fetch, and writing the
+        # whole record back would resurrect a concurrently revoked connection.
+        await self._session.execute(
+            update(EmrConnection)
+            .where(EmrConnection.id == connection_id)
+            .values(last_notes_pulled_at=last_notes_pulled_at)
+        )
+        await self._session.flush()
+
     async def list_for_patient(self, patient_id: uuid.UUID) -> list[ConnectionRecord]:
         stmt = (
             select(EmrConnection)

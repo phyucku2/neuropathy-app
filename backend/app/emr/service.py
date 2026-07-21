@@ -65,6 +65,13 @@ from app.schemas.lab import LabResultIn
 # the opt-in `.rs` scope this build requests, plus the plain `.read` some EHRs grant.
 _NOTE_READ_SCOPES = frozenset({NOTE_READ_SCOPE, "patient/DocumentReference.read"})
 
+# Safety overlap subtracted from the note-pull watermark. The watermark is derived from
+# the newest FETCHED note's authoring date (never the app clock — app-vs-EHR clock skew
+# would otherwise permanently skip notes), and a clinician can sign a note days after
+# the encounter with `DocumentReference.date` backdated to it. Re-fetching the overlap
+# window is free: the idempotent import absorbs already-imported notes as skips.
+NOTES_WATERMARK_OVERLAP = timedelta(days=7)
+
 __all__ = [
     "UNCONFIGURED_CLIENT_ID",
     "ConnectionRecord",
@@ -380,7 +387,9 @@ class EmrService:
         Returns ``(fetched, newly persisted, skipped)``. Metadata-eager, body-lazy: only
         the note's existence + metadata is written; the body is never fetched here. Import
         is idempotent per source note, so a re-pull persists 0 and re-alerts nothing. The
-        watermark (``last_notes_pulled_at``) advances only after a successful persist.
+        watermark (``last_notes_pulled_at``) is max(fetched ``authored_at``) minus a
+        safety overlap — never the app clock — and advances only after a successful
+        persist, so a mid-pull failure re-fetches the same window next time.
         """
         record = await self.get_connection(connection_id)
         if record.status is not EmrConnectionStatus.active:
@@ -412,9 +421,17 @@ class EmrService:
         )
         imported = await self._persist_pulled_notes(record, notes)
         # Advance the watermark only AFTER a successful persist, so a mid-pull failure
-        # re-fetches the same window next time rather than silently dropping notes.
-        record.last_notes_pulled_at = datetime.now(UTC)
-        await self.connections.update(record)
+        # re-fetches the same window next time rather than silently dropping notes. The
+        # watermark is derived from the FETCHED notes' authoring dates minus an overlap
+        # (never datetime.now: a late-signed/backdated note or app-vs-EHR clock skew
+        # would fall permanently below an app-clock watermark). A pull that fetched
+        # nothing learned nothing new — the existing bound stays. The write is a
+        # TARGETED single-field update: this method's `record` snapshot can be minutes
+        # stale after the EHR fetch, and writing the whole record back could resurrect
+        # a concurrently revoked connection.
+        if notes:
+            watermark = max(note.authored_at for note in notes) - NOTES_WATERMARK_OVERLAP
+            await self.connections.set_last_notes_pulled_at(record.id, watermark)
         return len(notes), imported, skipped
 
     async def _persist_pulled_notes(
@@ -423,14 +440,15 @@ class EmrService:
         """Persist pulled note METADATA as append-only rows + one audit event + one signal
         per newly-persisted note (existence only).
 
-        Idempotent: each note carries an import key (its source DocumentReference id when
-        provided, else type+time+author); already-imported notes are skipped so repeated
-        pulls never duplicate the store OR re-alert. The audit detail and the signal carry
+        Idempotent: each note carries a source-scoped import key (its DocumentReference id
+        when provided, else type+time+author, always prefixed with the connection's
+        ``fhir_base``); already-imported notes are skipped so repeated pulls never
+        duplicate the store OR re-alert. The audit detail and the signal carry
         counts/references only — NEVER note text (CLAUDE.md).
         """
-        keys = [_note_import_key(note) for note in notes]
+        keys = [_note_import_key(note, fhir_base=record.fhir_base) for note in notes]
         on_file = await self.clinical_notes.existing_import_keys(record.patient_id, keys)
-        imported = 0
+        inserted_rows: list[tuple[ClinicalNoteIn, EmrClinicalNote]] = []
         seen: set[str] = set()
         for note, import_key in zip(notes, keys, strict=True):
             if import_key in on_file or import_key in seen:
@@ -440,23 +458,9 @@ class EmrService:
             # add_if_absent, not add: the on_file probe narrows the common case, but a
             # concurrent pull can commit between it and this write — the DB partial-unique
             # index makes the duplicate impossible and this returns False rather than raising.
-            inserted = await self.clinical_notes.add_if_absent(row)
-            if not inserted:
-                continue
-            imported += 1
-            # Signal ONLY on the True branch (idempotent, no re-alert). Existence + metadata
-            # only — no body, no interpretation (ADR-0047 caregiver alert's data source).
-            await self.note_signals.emit(
-                NewChartNoteSignal(
-                    patient_id=record.patient_id,
-                    connection_id=record.id,
-                    note_id=row.id,
-                    type_display=note.type_display,
-                    author_display=note.author_display,
-                    authored_at=note.authored_at,
-                    encounter_fhir_id=note.encounter_fhir_id,
-                )
-            )
+            if await self.clinical_notes.add_if_absent(row):
+                inserted_rows.append((note, row))
+        imported = len(inserted_rows)
         await self.audit.add(
             AuditEvent(
                 actor_id=None,
@@ -471,6 +475,27 @@ class EmrService:
                 },
             )
         )
+        # Signal ONLY for real inserts (idempotent, no re-alert), and only AFTER the whole
+        # batch + audit event persisted: emitting inside the loop would hand a real fan-out
+        # sink (push/queue) phantom alerts for rows a later failure rolls back. Existence +
+        # metadata only — no body, no interpretation (ADR-0047 caregiver alert's data
+        # source). Residual: emission still precedes the request-level COMMIT (a true
+        # post-commit/outbox hook is out of scope this wave), so the signal is keyed on the
+        # stable import_key — a consumer dedupes re-emissions after a commit-time rollback.
+        for note, row in inserted_rows:
+            assert row.import_key is not None  # set by _clinical_note_to_model above
+            await self.note_signals.emit(
+                NewChartNoteSignal(
+                    patient_id=record.patient_id,
+                    connection_id=record.id,
+                    note_id=row.id,
+                    import_key=row.import_key,
+                    type_display=note.type_display,
+                    author_display=note.author_display,
+                    authored_at=note.authored_at,
+                    encounter_fhir_id=note.encounter_fhir_id,
+                )
+            )
         return imported
 
     async def revoke(self, connection_id: uuid.UUID) -> ConnectionRecord:
@@ -501,13 +526,21 @@ def _granted_scopes(scope: str | None) -> set[str]:
     return set(scope.split()) if scope else set()
 
 
-def _note_import_key(note: ClinicalNoteIn) -> str:
-    """Stable idempotency key for one clinical note: its content identity. The source's
-    own DocumentReference id when the EMR provides one, else type+time+author — so the
-    same note arriving twice is never double-stored (mirrors lab_import_key)."""
+def _note_import_key(note: ClinicalNoteIn, *, fhir_base: str) -> str:
+    """Stable idempotency key for one clinical note, SCOPED to its source system.
+
+    Key format: ``{fhir_base}|docref:{id}`` when the EMR provides a DocumentReference id,
+    else ``{fhir_base}|note:{type}:{time}:{author}``. FHIR resource ids are unique only
+    within one server, so an unscoped key would let two different EHRs' notes that share
+    an id (common with sequential-id servers) collide on (patient_id, import_key) — the
+    second note silently dropped. Prefixing the connection's ``fhir_base`` (stable across
+    re-links, unlike connection_id) makes the key globally unique per source while a
+    re-pull of the same note from the same EHR still dedupes (mirrors lab_import_key).
+    Pre-existing rows keyed without the prefix are not migrated (synthetic data only).
+    """
     if note.document_fhir_id:
-        return f"docref:{note.document_fhir_id}"
-    return f"note:{note.type_code}:{note.authored_at.isoformat()}:{note.author_display}"
+        return f"{fhir_base}|docref:{note.document_fhir_id}"
+    return f"{fhir_base}|note:{note.type_code}:{note.authored_at.isoformat()}:{note.author_display}"
 
 
 def _clinical_note_to_model(

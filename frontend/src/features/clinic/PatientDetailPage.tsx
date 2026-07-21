@@ -126,7 +126,10 @@ export function PatientDetailPage() {
 
   return (
     <div>
-      <p style={{ margin: '0 0 8px' }}>
+      {/* Screen-only app chrome (`.no-print`): the print/export sheet from the Summary tab is a
+          patient record sheet — navigation and view chips must never land on the paper. The
+          patient name and consent date DO print (they identify the sheet). */}
+      <p className="no-print" style={{ margin: '0 0 8px' }}>
         <Link className="link" to="/clinic">
           ← Back to panel
         </Link>
@@ -135,7 +138,7 @@ export function PatientDetailPage() {
       <p className="muted" style={{ marginTop: 0 }}>
         Consented {formatDayYear(Date.parse(entry.consent_granted_at))}
       </p>
-      <div className="metric-picker" role="group" aria-label="Patient views">
+      <div className="metric-picker no-print" role="group" aria-label="Patient views">
         {TABS.map((entryTab) => (
           <button
             key={entryTab.key}
