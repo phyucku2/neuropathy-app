@@ -26,7 +26,7 @@ import '../../src/styles/app.css';
 import { App } from '../../src/App';
 import { AuthProvider } from '../../src/auth/AuthContext';
 import { installDemoMock, seedSession } from './mock';
-import { mountDemoBar } from './demoBar';
+import { mountDemoBanner, mountDemoBar } from './demoBar';
 
 // Order matters: the mock must own window.fetch and the session must be seeded
 // BEFORE React mounts and the AuthProvider fires its restore effect.
@@ -48,4 +48,5 @@ createRoot(container).render(
   </StrictMode>,
 );
 
+mountDemoBanner();
 mountDemoBar();
