@@ -35,7 +35,7 @@ export class ApiError extends Error {
 }
 
 interface RequestOptions {
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   /** JSON body — serialized with the right content type. */
   body?: unknown;
   /** Multipart body — sent as-is (the browser sets the boundary). */

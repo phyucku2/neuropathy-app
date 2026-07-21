@@ -29,7 +29,8 @@ from app.schemas.trajectory import Trajectory
 
 # Bump on any breaking shape change so a downloaded file stays interpretable by later
 # tooling (forward-compat, ADR-0031). The envelope always carries this string.
-EXPORT_SCHEMA_VERSION = "1.0"
+# 1.1: added caregiver_links (ADR-0047 — caregiver-sharing metadata).
+EXPORT_SCHEMA_VERSION = "1.1"
 
 
 class ExportAccountProfile(BaseModel):
@@ -99,6 +100,23 @@ class ExportEmrClinicalNote(BaseModel):
     has_inline_data: bool
 
 
+class ExportCaregiverLink(BaseModel):
+    """One caregiver-sharing link (ADR-0047) — METADATA ONLY.
+
+    Who the patient shares with, at what scope, and the lifecycle timestamps; no
+    invite codes or hashes exist here to leak (structural absence, like the
+    token-free ConnectionOut).
+    """
+
+    id: uuid.UUID
+    caregiver_display_name: str
+    scope: str
+    status: str
+    accepted_at: datetime | None
+    revoked_at: datetime | None
+    created_at: datetime | None
+
+
 class ExportOut(BaseModel):
     """The current-record export envelope for one patient (ADR-0031)."""
 
@@ -118,3 +136,6 @@ class ExportOut(BaseModel):
     # Metadata-only projection of the SEPARATE clinical-note store (ADR-0045 P2 #27).
     # Defaulted so older constructions stay valid; no body field exists to leak text.
     emr_clinical_notes: list[ExportEmrClinicalNote] = Field(default_factory=list)
+    # Caregiver-sharing metadata (ADR-0047): who the patient shares with, scope, and
+    # lifecycle timestamps — never codes. Defaulted for the same reason as above.
+    caregiver_links: list[ExportCaregiverLink] = Field(default_factory=list)

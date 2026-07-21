@@ -33,6 +33,10 @@ from app.models.emr_clinical_note import EmrClinicalNote
 from app.models.observation import Observation
 from app.models.user import UserRole
 from app.repositories.audit import AuditEventRepository, InMemoryAuditEventRepository
+from app.repositories.caregiver import (
+    CaregiverLinkRepository,
+    InMemoryCaregiverLinkRepository,
+)
 from app.repositories.emr_clinical_note import (
     EmrClinicalNoteRepository,
     InMemoryEmrClinicalNoteRepository,
@@ -50,6 +54,7 @@ from app.schemas.emr import ConnectionOut as EmrConnectionOut
 from app.schemas.export import (
     EXPORT_SCHEMA_VERSION,
     ExportAccountProfile,
+    ExportCaregiverLink,
     ExportEmrClinicalNote,
     ExportObservation,
     ExportOut,
@@ -177,6 +182,11 @@ class PatientDataExportService:
     clinical_notes: EmrClinicalNoteRepository = field(
         default_factory=InMemoryEmrClinicalNoteRepository
     )
+    # Caregiver-sharing metadata (ADR-0047): the export names who the patient shares
+    # with and at what scope — links only, never invite codes or hashes.
+    caregiver_links: CaregiverLinkRepository = field(
+        default_factory=InMemoryCaregiverLinkRepository
+    )
     clinic: ClinicService = field(default_factory=ClinicService)
     capabilities: CapabilityService = field(default_factory=CapabilityService)
     audit: AuditEventRepository = field(default_factory=InMemoryAuditEventRepository)
@@ -215,6 +225,14 @@ class PatientDataExportService:
         clinic_connections = await self.clinic.list_connections(patient_id)
         emr_connections = await self.emr_connections.list_for_patient(patient_id)
         clinical_notes = await self.clinical_notes.list_for_patient(patient_id)
+        caregiver_links = await self.caregiver_links.list_for_patient(patient_id)
+        caregiver_names: dict[uuid.UUID, str] = {}
+        for link in caregiver_links:
+            caregiver = await self.users.get_by_id(link.caregiver_user_id)
+            # A deleted caregiver account leaves no name behind — export stays honest.
+            caregiver_names[link.id] = (
+                caregiver.display_name if caregiver is not None else "Unknown caregiver"
+            )
 
         # ONE PHI-free audit event: this is a disclosure of the whole record, so it is
         # logged like every other PHI read (CLAUDE.md §5) — counts only, never values.
@@ -230,6 +248,7 @@ class PatientDataExportService:
                     "emr_clinical_notes": len(clinical_notes),
                     "clinic_connections": len(clinic_connections),
                     "capabilities": len(capabilities),
+                    "caregiver_links": len(caregiver_links),
                 },
             )
         )
@@ -281,4 +300,16 @@ class PatientDataExportService:
             ],
             emr_connections=[_emr_connection_out(row) for row in emr_connections],
             emr_clinical_notes=[_clinical_note_out(row) for row in clinical_notes],
+            caregiver_links=[
+                ExportCaregiverLink(
+                    id=link.id,
+                    caregiver_display_name=caregiver_names[link.id],
+                    scope=link.scope.value,
+                    status=link.status.value,
+                    accepted_at=link.accepted_at,
+                    revoked_at=link.revoked_at,
+                    created_at=link.created_at,
+                )
+                for link in caregiver_links
+            ],
         )

@@ -186,6 +186,13 @@ export function LoginPage() {
             Create an account
           </Link>
         </p>
+        {/* Caregiver entry (ADR-0047): a loved one with an invite code starts here. */}
+        <p className="muted centered">
+          Caring for someone?{' '}
+          <Link className="link" to="/caregiver/join">
+            Use your invite code
+          </Link>
+        </p>
       </div>
       <p className="muted centered">Your data stays private until you approve a connection.</p>
       {/* Auth-less About/Privacy links (ADR-0032): reachable by a logged-out user and a

@@ -23,6 +23,7 @@ from sqlalchemy.orm import aliased
 
 from app.models.audit import AuditEvent
 from app.models.capability import Actor, Capability, PatientCapability
+from app.models.caregiver import CaregiverInvite, CaregiverLink
 from app.models.clinic import Clinic
 from app.models.connection import ClinicConnection, ConnectionStatus
 from app.models.emr_clinical_note import EmrClinicalNote
@@ -34,6 +35,7 @@ from app.models.pending_auth import PendingAuthState
 from app.models.secret import StoredSecret
 from app.models.user import User, UserRole
 from app.repositories.capability import DuplicateCapabilityKeyError
+from app.repositories.caregiver import DuplicateLiveCaregiverLinkError
 from app.repositories.clinic_connection import DuplicateLiveConnectionError
 from app.repositories.emr_connection import ConnectionRecord
 from app.repositories.mfa import MfaFactorRecord
@@ -179,6 +181,12 @@ class PostgresUserRepository:
         await self._session.execute(delete(Patient).where(Patient.id == patient_id))
         await self._session.flush()
 
+    async def delete_user(self, user_id: uuid.UUID) -> None:
+        # Patient-less identities only (caregiver accounts, ADR-0047): no Patient row
+        # falls with the user, so no audit-event detach fires either.
+        await self._session.execute(delete(User).where(User.id == user_id))
+        await self._session.flush()
+
 
 class PostgresClinicRepository:
     """ClinicRepository over the clinic table."""
@@ -267,6 +275,135 @@ class PostgresClinicConnectionRepository:
     async def delete_for_patient(self, patient_id: uuid.UUID) -> None:
         await self._session.execute(
             delete(ClinicConnection).where(ClinicConnection.patient_id == patient_id)
+        )
+        await self._session.flush()
+
+
+class PostgresCaregiverInviteRepository:
+    """CaregiverInviteRepository over the caregiver_invite table (ADR-0047)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, invite: CaregiverInvite) -> CaregiverInvite:
+        self._session.add(invite)
+        await self._session.flush()
+        await self._session.refresh(invite)
+        return invite
+
+    async def get(self, invite_id: uuid.UUID) -> CaregiverInvite | None:
+        return await self._session.get(CaregiverInvite, invite_id)
+
+    async def get_by_code_hash(self, code_hash: str) -> CaregiverInvite | None:
+        invite: CaregiverInvite | None = await self._session.scalar(
+            select(CaregiverInvite).where(CaregiverInvite.code_hash == code_hash)
+        )
+        return invite
+
+    async def list_for_patient(self, patient_id: uuid.UUID) -> list[CaregiverInvite]:
+        stmt = (
+            select(CaregiverInvite)
+            .where(CaregiverInvite.patient_id == patient_id)
+            .order_by(CaregiverInvite.created_at)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def consume(self, invite_id: uuid.UUID, *, now: datetime) -> bool:
+        # Single-use enforced by the database, not check-then-write: one conditional
+        # UPDATE ... RETURNING, so of two claims racing on the same code the second
+        # waits on the row lock and then updates nothing — exactly one wins.
+        row = (
+            await self._session.execute(
+                update(CaregiverInvite)
+                .where(
+                    CaregiverInvite.id == invite_id,
+                    CaregiverInvite.consumed_at.is_(None),
+                    CaregiverInvite.cancelled_at.is_(None),
+                )
+                .values(consumed_at=now)
+                .returning(CaregiverInvite.id)
+            )
+        ).one_or_none()
+        await self._session.flush()
+        return row is not None
+
+    async def update(self, invite: CaregiverInvite) -> None:
+        row = await self._session.get(CaregiverInvite, invite.id)
+        if row is None:
+            raise LookupError(f"caregiver_invite {invite.id} does not exist")
+        row.expires_at = invite.expires_at
+        row.consumed_at = invite.consumed_at
+        row.cancelled_at = invite.cancelled_at
+        await self._session.flush()
+
+    async def delete_for_patient(self, patient_id: uuid.UUID) -> None:
+        await self._session.execute(
+            delete(CaregiverInvite).where(CaregiverInvite.patient_id == patient_id)
+        )
+        await self._session.flush()
+
+
+class PostgresCaregiverLinkRepository:
+    """CaregiverLinkRepository over the caregiver_link table (ADR-0047)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, link: CaregiverLink) -> CaregiverLink:
+        # A savepoint scopes the flush: when uq_caregiver_link_live fires, only this
+        # insert rolls back and the caller's transaction stays usable (the claim flow
+        # still writes its audit event after absorbing the duplicate).
+        try:
+            async with self._session.begin_nested():
+                self._session.add(link)
+                await self._session.flush()
+        except IntegrityError as exc:
+            if "uq_caregiver_link_live" in str(exc.orig):
+                raise DuplicateLiveCaregiverLinkError(
+                    link.patient_id, link.caregiver_user_id
+                ) from exc
+            raise
+        await self._session.refresh(link)
+        return link
+
+    async def get(self, link_id: uuid.UUID) -> CaregiverLink | None:
+        return await self._session.get(CaregiverLink, link_id)
+
+    async def list_for_patient(self, patient_id: uuid.UUID) -> list[CaregiverLink]:
+        stmt = (
+            select(CaregiverLink)
+            .where(CaregiverLink.patient_id == patient_id)
+            .order_by(CaregiverLink.created_at)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def list_for_caregiver(self, caregiver_user_id: uuid.UUID) -> list[CaregiverLink]:
+        stmt = (
+            select(CaregiverLink)
+            .where(CaregiverLink.caregiver_user_id == caregiver_user_id)
+            .order_by(CaregiverLink.created_at)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def update(self, link: CaregiverLink) -> None:
+        row = await self._session.get(CaregiverLink, link.id)
+        if row is None:
+            raise LookupError(f"caregiver_link {link.id} does not exist")
+        row.scope = link.scope
+        row.status = link.status
+        row.accepted_at = link.accepted_at
+        row.revoked_at = link.revoked_at
+        await self._session.flush()
+
+    async def delete_for_patient(self, patient_id: uuid.UUID) -> None:
+        await self._session.execute(
+            delete(CaregiverLink).where(CaregiverLink.patient_id == patient_id)
+        )
+        await self._session.flush()
+
+    async def delete_for_caregiver(self, caregiver_user_id: uuid.UUID) -> None:
+        await self._session.execute(
+            delete(CaregiverLink).where(CaregiverLink.caregiver_user_id == caregiver_user_id)
         )
         await self._session.flush()
 

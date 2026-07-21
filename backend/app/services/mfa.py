@@ -172,9 +172,11 @@ class MfaService:
         user = await self.users.get_by_id(user_id)
         if user is None:
             raise MfaApiError("Account no longer exists", status_code=401)
-        if user.role is UserRole.patient:
-            # Defense in depth behind the route's require_privileged gate: patients
-            # never hold a factor (§1B C6 — patients completely unaffected).
+        if user.role is not UserRole.clinician and user.role is not UserRole.ops:
+            # Defense in depth behind the route's require_privileged gate — explicitly
+            # clinician-or-ops, not merely "not a patient": patients never hold a
+            # factor (§1B C6 — patients completely unaffected), and caregivers
+            # (ADR-0047 — no clinical authority) are refused identically.
             raise MfaApiError("Clinician or ops account required", status_code=403)
         totp_secret = generate_totp_secret()
         ref = await self.secret_store.put({"totp_secret": totp_secret})
@@ -234,12 +236,14 @@ class MfaService:
     ) -> MfaStepUpRequired | MfaEnrollmentRequired | None:
         """The post-password decision for /auth/login (§1B C6).
 
-        Patients: always None — their flow is byte-identical to today. Privileged
-        principals: a confirmed factor yields the mfa_pending step-up (full tokens
-        are withheld); no confirmed factor is None (today's behavior) unless
+        Patients and caregivers: always None — their flows are byte-identical to
+        today (a caregiver can never enroll, so the required-flag must never lock one
+        out of login — ADR-0047). Privileged (clinician/ops) principals: a confirmed
+        factor yields the mfa_pending step-up (full tokens are withheld); no
+        confirmed factor is None (today's behavior) unless
         `mfa_required_for_privileged` is on, which refuses with enrollment-required.
         """
-        if user.role is UserRole.patient:
+        if user.role is not UserRole.clinician and user.role is not UserRole.ops:
             return None
         if await self.enrolled(user.id):
             return MfaStepUpRequired(

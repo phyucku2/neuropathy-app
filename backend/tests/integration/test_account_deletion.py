@@ -412,7 +412,7 @@ def test_clinician_and_ops_roles_cannot_reach_the_deletion_flow(
         login = client.post("/auth/login", json={"email": email, "password": SYNTHETIC_PASSWORD})
         resp = _delete(client, login.json()["access_token"], SYNTHETIC_PASSWORD)
         assert resp.status_code == 403
-        assert resp.json()["detail"] == "Patient account required"
+        assert resp.json()["detail"] == "Patient or caregiver account required"
 
 
 async def test_fk_detaches_audit_rows_when_the_patient_row_dies(

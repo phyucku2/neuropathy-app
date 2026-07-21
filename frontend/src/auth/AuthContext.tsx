@@ -23,6 +23,7 @@ import {
   isMfaPending,
   login as apiLogin,
   register as apiRegister,
+  registerCaregiver as apiRegisterCaregiver,
   verifyMfa,
 } from '../api/endpoints';
 import type { MeOut, TokenOut } from '../api/types';
@@ -48,6 +49,14 @@ export interface AuthValue {
   login: (email: string, password: string) => Promise<LoginResult>;
   completeMfaLogin: (mfaPendingToken: string, code: string) => Promise<void>;
   register: (displayName: string, email: string, password: string) => Promise<void>;
+  /** Caregiver self-registration (ADR-0047): only possible WITH a patient's invite code.
+   *  The resulting link is pending — nothing is visible until the patient accepts. */
+  registerCaregiver: (
+    code: string,
+    displayName: string,
+    email: string,
+    password: string,
+  ) => Promise<void>;
   logout: () => void;
 }
 
@@ -180,6 +189,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [establishSession],
   );
 
+  const registerCaregiver = useCallback(
+    async (code: string, displayName: string, email: string, password: string) => {
+      await establishSession(
+        await apiRegisterCaregiver({ code, email, password, display_name: displayName }),
+      );
+    },
+    [establishSession],
+  );
+
   const logout = useCallback(() => {
     clearSession();
     setUser(null);
@@ -187,8 +205,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ status, user, login, completeMfaLogin, register, logout }),
-    [status, user, login, completeMfaLogin, register, logout],
+    () => ({ status, user, login, completeMfaLogin, register, registerCaregiver, logout }),
+    [status, user, login, completeMfaLogin, register, registerCaregiver, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

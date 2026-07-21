@@ -76,6 +76,21 @@ const ClinicianSettingsPage = lazy(() =>
     default: m.ClinicianSettingsPage,
   })),
 );
+const CaregiverJoinPage = lazy(() =>
+  import('./features/caregiver/CaregiverJoinPage').then((m) => ({
+    default: m.CaregiverJoinPage,
+  })),
+);
+const CaregiverHomePage = lazy(() =>
+  import('./features/caregiver/CaregiverHomePage').then((m) => ({
+    default: m.CaregiverHomePage,
+  })),
+);
+const CaregiverSummaryPage = lazy(() =>
+  import('./features/caregiver/CaregiverSummaryPage').then((m) => ({
+    default: m.CaregiverSummaryPage,
+  })),
+);
 
 function RequireAuth() {
   const { status } = useAuth();
@@ -90,9 +105,10 @@ function RequireAuth() {
 
 /**
  * Role-aware area guards: /auth/me's role decides which area a signed-in user
- * lands in. A clinician on a patient route goes to the panel; anyone else on a
- * clinician route goes to the patient home — each rule targets the OTHER
- * area's home, so the pair can never redirect in a loop.
+ * lands in. A clinician on a patient route goes to the panel, a caregiver goes
+ * to the caregiver home (ADR-0047); anyone else on a clinician or caregiver
+ * route goes to the patient home — each rule targets ANOTHER area's home, so
+ * the guards can never redirect in a loop.
  */
 function PatientArea() {
   const { user } = useAuth();
@@ -103,6 +119,9 @@ function PatientArea() {
   }
   if (user.role === 'clinician') {
     return <Navigate to="/clinic" replace />;
+  }
+  if (user.role === 'caregiver') {
+    return <Navigate to="/caregiver" replace />;
   }
   // First-run welcome (ADR-0044): a new patient sees the wizard once, full-screen (no tab
   // bar), before the app. Persisted per user_id in localStorage — a returning patient skips
@@ -128,6 +147,14 @@ function ClinicianArea() {
   return user.role === 'clinician' ? <Outlet /> : <Navigate to="/" replace />;
 }
 
+function CaregiverArea() {
+  const { user } = useAuth();
+  if (user === null) {
+    return <Loading label="Loading your account…" />;
+  }
+  return user.role === 'caregiver' ? <Outlet /> : <Navigate to="/" replace />;
+}
+
 export function App() {
   // Native-only shell wiring (status bar, splash, hardware back). No-op on web (ADR-0025).
   useNativeShell();
@@ -144,6 +171,10 @@ export function App() {
             so /about and /privacy sit OUTSIDE RequireAuth alongside /login (ADR-0032). */}
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          {/* Caregiver registration (ADR-0047): auth-less like /register — a NEW caregiver
+              creates their account WITH the patient's invite code. A static path, so it
+              outranks the authenticated /caregiver area's catch-all below. */}
+          <Route path="/caregiver/join" element={<CaregiverJoinPage />} />
           <Route path="/about" element={<AboutPage />} />
           <Route path="/privacy" element={<PrivacyPage />} />
           <Route element={<RequireAuth />}>
@@ -183,6 +214,15 @@ export function App() {
                     Clinician area only — the patient settings surface is untouched. */}
                 <Route path="settings" element={<ClinicianSettingsPage />} />
                 <Route path="*" element={<Navigate to="/clinic" replace />} />
+              </Route>
+            </Route>
+            {/* Caregiver area (ADR-0047): gated like /clinic; the caregiver AppShell
+                variant renders the persistent 911 banner on every screen. */}
+            <Route path="caregiver" element={<CaregiverArea />}>
+              <Route element={<AppShell variant="caregiver" />}>
+                <Route index element={<CaregiverHomePage />} />
+                <Route path="patients/:patientId/summary" element={<CaregiverSummaryPage />} />
+                <Route path="*" element={<Navigate to="/caregiver" replace />} />
               </Route>
             </Route>
           </Route>

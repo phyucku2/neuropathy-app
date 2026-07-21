@@ -162,7 +162,7 @@ def test_export_assembles_every_class_and_leaks_no_secret(vault_db: str) -> None
         body = resp.json()
 
         # Every class assembled from the real DB.
-        assert body["schema_version"] == "1.0"
+        assert body["schema_version"] == "1.1"
         assert body["subject_id"] == str(patient_id)
         assert body["account"]["email"] == email
         assert body["account"]["created_at"] is not None

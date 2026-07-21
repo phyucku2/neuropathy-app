@@ -23,6 +23,7 @@ from app.api.deps import (
     get_account_deletion_service,
     get_auth_service,
     get_capability_service,
+    get_caregiver_service,
     get_clinic_service,
     get_emr_service,
 )
@@ -31,6 +32,7 @@ from app.emr.service import EmrService, InMemorySecretStore
 from app.main import app
 from app.models.audit import AuditEvent
 from app.models.capability import Actor
+from app.models.caregiver import CaregiverLink, CaregiverLinkStatus
 from app.models.clinic import Clinic
 from app.models.connection import ClinicConnection, ConnectionStatus, Initiator
 from app.models.emr_clinical_note import EmrClinicalNote
@@ -47,6 +49,7 @@ from app.services.account_deletion import (
 )
 from app.services.auth import AuthService
 from app.services.capability import CapabilityService
+from app.services.caregiver import CaregiverService
 from app.services.clinic import ClinicService
 
 SYNTHETIC_PASSWORD = "a-strong-password"
@@ -92,6 +95,12 @@ class World:
             connections=self.clinic.connections,
             audit=self.emr.audit,
         )
+        self.caregiver = CaregiverService(
+            users=self.auth.users,
+            observations=self.emr.observations,
+            clinical_notes=self.emr.clinical_notes,
+            audit=self.emr.audit,
+        )
         self.deletion = AccountDeletionService(
             users=self.auth.users,
             emr_connections=self.emr.connections,
@@ -101,6 +110,8 @@ class World:
             patient_capabilities=self.patient_capabilities,
             observations=self.emr.observations,
             clinical_notes=self.emr.clinical_notes,
+            caregiver_invites=self.caregiver.invites,
+            caregiver_links=self.caregiver.links,
             audit=self.emr.audit,
         )
 
@@ -112,6 +123,7 @@ def world() -> Iterator[World]:
     app.dependency_overrides[get_emr_service] = lambda: built.emr
     app.dependency_overrides[get_clinic_service] = lambda: built.clinic
     app.dependency_overrides[get_capability_service] = lambda: built.capability
+    app.dependency_overrides[get_caregiver_service] = lambda: built.caregiver
     app.dependency_overrides[get_account_deletion_service] = lambda: built.deletion
     try:
         yield built
@@ -215,6 +227,18 @@ async def _populate(world: World, patient_id_str: str) -> None:
         )
     )
 
+    # A caregiver share (ADR-0047): one open invite + one accepted link — both must die.
+    await world.caregiver.create_invite(patient_id=patient_id, actor_id=uuid.uuid4())
+    await world.caregiver.links.add(
+        CaregiverLink(
+            patient_id=patient_id,
+            caregiver_user_id=uuid.uuid4(),
+            status=CaregiverLinkStatus.active,
+            accepted_at=datetime(2026, 7, 1, tzinfo=UTC),
+            initiated_by=Initiator.patient,
+        )
+    )
+
 
 async def _assert_everything_gone(world: World, patient_id_str: str) -> None:
     patient_id = uuid.UUID(patient_id_str)
@@ -230,6 +254,10 @@ async def _assert_everything_gone(world: World, patient_id_str: str) -> None:
     observations = world.emr.observations
     assert observations._observations == []  # type: ignore[attr-defined]  # superseded rows gone too
     assert await world.emr.clinical_notes.list_for_patient(patient_id) == []  # notes erased
+    # Caregiver invites + links purged (ADR-0047): no dangling consent rows survive,
+    # and with no link left _may_caregiver_read can never pass for this patient again.
+    assert await world.caregiver.invites.list_for_patient(patient_id) == []
+    assert await world.caregiver.links.list_for_patient(patient_id) == []
     assert await world.auth.users.get_by_patient_id(patient_id) is None
     users = world.auth.users
     assert patient_id not in users.patients  # type: ignore[attr-defined]  # the Patient record itself
@@ -260,6 +288,8 @@ def test_happy_path_deletes_every_store_and_retains_anonymous_audit(
         "vault_secrets": 1,
         "clinic_connections": 1,
         "patient_capabilities": 1,
+        "caregiver_invites": 1,
+        "caregiver_links": 1,
     }
     # EVERY retained event for this patient is anonymous now — none still points at
     # the deleted record — and the log itself was never truncated.
@@ -325,7 +355,7 @@ def test_clinician_cannot_delete_via_this_endpoint(world: World, client: TestCli
     )
     resp = _delete(client, login.json()["access_token"], SYNTHETIC_PASSWORD)
     assert resp.status_code == 403
-    assert resp.json()["detail"] == "Patient account required"
+    assert resp.json()["detail"] == "Patient or caregiver account required"
     # The clinician account is untouched.
     assert client.get("/auth/me", headers=_auth(login.json()["access_token"])).status_code == 200
 
@@ -347,7 +377,7 @@ def test_ops_cannot_delete_via_this_endpoint(world: World, client: TestClient) -
     )
     resp = _delete(client, login.json()["access_token"], SYNTHETIC_PASSWORD)
     assert resp.status_code == 403
-    assert resp.json()["detail"] == "Patient account required"
+    assert resp.json()["detail"] == "Patient or caregiver account required"
 
 
 def test_after_deletion_every_credential_is_dead(client: TestClient) -> None:
@@ -646,6 +676,100 @@ def test_correct_password_still_deletes_inside_an_open_window(
     denials = [e for e in events if e.action == "account_delete_denied"]
     assert len(denials) == small_budget - 1
     assert all(e.patient_id is None for e in denials)
+
+
+# --- Caregiver-account deletion (ADR-0047): same re-auth, far smaller footprint ---
+
+
+def _register_caregiver(
+    client: TestClient, code: str, email: str = "care@example.com"
+) -> dict[str, str]:
+    resp = client.post(
+        "/caregiver/register",
+        json={
+            "code": code,
+            "email": email,
+            "password": SYNTHETIC_PASSWORD,
+            "display_name": "Cam Caregiver",
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    tokens: dict[str, str] = resp.json()
+    return tokens
+
+
+def test_caregiver_deletes_own_account_and_links_only(world: World, client: TestClient) -> None:
+    """A caregiver deletion removes the caregiver identity and its links — and NOTHING
+    of the patient's record; the patient's account and surfaces survive untouched."""
+    tokens, _patient_id = _register(client)
+    code = client.post("/me/caregiver-invites", headers=_auth(tokens["access_token"])).json()[
+        "code"
+    ]
+    care_tokens = _register_caregiver(client, code)
+    link_id = client.get("/me/caregivers", headers=_auth(tokens["access_token"])).json()[0]["id"]
+    assert (
+        client.post(
+            f"/me/caregivers/{link_id}/accept", headers=_auth(tokens["access_token"])
+        ).status_code
+        == 200
+    )
+
+    assert _delete(client, care_tokens["access_token"], SYNTHETIC_PASSWORD).status_code == 204
+
+    # Every caregiver credential is dead; the link is gone from the patient's list.
+    assert client.get("/auth/me", headers=_auth(care_tokens["access_token"])).status_code == 401
+    login = client.post(
+        "/auth/login", json={"email": "care@example.com", "password": SYNTHETIC_PASSWORD}
+    )
+    assert login.status_code == 401
+    assert client.get("/me/caregivers", headers=_auth(tokens["access_token"])).json() == []
+    # The patient is untouched.
+    assert client.get("/auth/me", headers=_auth(tokens["access_token"])).status_code == 200
+    # ONE PHI-free deletion event, caregiver as actor, counts only, no patient subject.
+    events = world.emr.audit._events  # type: ignore[attr-defined]
+    deletions = [e for e in events if e.action == "delete_account"]
+    assert len(deletions) == 1
+    assert deletions[0].actor_role == "caregiver"
+    assert deletions[0].patient_id is None
+    assert deletions[0].detail == {"caregiver_links": 1}
+
+
+def test_caregiver_wrong_password_is_403_and_deletes_nothing(
+    world: World, client: TestClient
+) -> None:
+    tokens, _ = _register(client)
+    code = client.post("/me/caregiver-invites", headers=_auth(tokens["access_token"])).json()[
+        "code"
+    ]
+    care_tokens = _register_caregiver(client, code)
+
+    resp = _delete(client, care_tokens["access_token"], "not-the-password")
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == WRONG_PASSWORD_DETAIL
+    # Nothing was deleted: the caregiver session and the pending link both survive.
+    assert client.get("/auth/me", headers=_auth(care_tokens["access_token"])).status_code == 200
+    assert len(client.get("/me/caregivers", headers=_auth(tokens["access_token"])).json()) == 1
+    denials = [
+        e
+        for e in world.emr.audit._events  # type: ignore[attr-defined]
+        if e.action == "account_delete_denied"
+    ]
+    assert len(denials) == 1
+    assert denials[0].actor_role == "caregiver"
+
+
+async def test_caregiver_delete_service_refuses_non_caregiver_principals() -> None:
+    """Defense in depth behind the route dispatch: the caregiver deleter refuses a
+    patient principal outright (the patient path owns patient deletions)."""
+    service = AccountDeletionService()
+    auth = AuthService(users=service.users)
+    patient = await auth.register_patient(
+        email="pat@example.com", password=SYNTHETIC_PASSWORD, display_name="Pat"
+    )
+    with pytest.raises(AccountDeletionError) as excinfo:
+        await service.delete_caregiver_account(user_id=patient.id, password=SYNTHETIC_PASSWORD)
+    assert excinfo.value.status_code == 403
+    assert excinfo.value.reason == "Caregiver account required"
 
 
 # --- Narrative cache invalidation (review finding): no cached narrative outlives ---

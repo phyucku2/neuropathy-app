@@ -5,6 +5,9 @@
 
 import type {
   CapabilityStateOut,
+  CaregiverInviteCreateOut,
+  CaregiverInviteOut,
+  CaregiverPatientsOut,
   ConnectionOut,
   EmrConnectionOut,
   EmrConnectStartOut,
@@ -20,6 +23,7 @@ import type {
   MfaEnrollOut,
   ObservationItem,
   PanelOut,
+  PatientCaregiverLinkOut,
   PlaceholderRow,
   Trajectory,
   VisitSummary,
@@ -882,6 +886,96 @@ export const CONNECTION_ACTIVE: ConnectionOut = {
   consent_granted_at: '2026-06-01T12:00:00Z',
 };
 
+// ---- caregiver companion (ADR-0047) — mirrors backend/app/schemas/caregiver.py ----
+
+export const CAREGIVER_ME: MeOut = {
+  user_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+  email: 'casey.example@example.com',
+  display_name: 'Casey Example',
+  role: 'caregiver',
+  patient_id: null,
+};
+
+/** A synthetic read-aloud invite code (the backend's XXXX-XXXX-XXXX alphabet). */
+export const TEST_CAREGIVER_CODE = 'ABCD-EFGH-JKMN';
+
+/** The backend's fixed responses, verbatim (services/caregiver.py). */
+export const CAREGIVER_CLAIM_ACCEPTED_DETAIL =
+  "If this code is valid, your request is now waiting for the patient's approval.";
+export const CAREGIVER_CODE_INVALID_DETAIL =
+  "That code didn't work. Check it, or ask for a new code.";
+
+/** The backend's co-located EMERGENCY_NOTICE (schemas/caregiver.py), verbatim. */
+export const CAREGIVER_EMERGENCY_NOTICE =
+  "This isn't for emergencies. If something's wrong right now, call 911.";
+
+export const CAREGIVER_INVITE_CREATE: CaregiverInviteCreateOut = {
+  id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+  code: TEST_CAREGIVER_CODE,
+  expires_at: '2026-07-22T10:00:00Z',
+};
+
+export const CAREGIVER_INVITES: CaregiverInviteOut[] = [
+  {
+    id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+    created_at: '2026-07-15T10:00:00Z',
+    expires_at: '2026-07-22T10:00:00Z',
+  },
+];
+
+/** One pending request (the double opt-in's first half) + one active trends-only link. */
+export const CAREGIVER_LINK_PENDING: PatientCaregiverLinkOut = {
+  id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+  caregiver_display_name: 'Casey Example',
+  scope: 'trends',
+  status: 'pending',
+  accepted_at: null,
+  revoked_at: null,
+  created_at: '2026-07-14T09:00:00Z',
+};
+
+export const CAREGIVER_LINK_ACTIVE: PatientCaregiverLinkOut = {
+  id: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+  caregiver_display_name: 'Robin Example',
+  scope: 'trends',
+  status: 'active',
+  accepted_at: '2026-07-10T12:00:00Z',
+  revoked_at: null,
+  created_at: '2026-07-09T12:00:00Z',
+};
+
+export const CAREGIVER_LINKS: PatientCaregiverLinkOut[] = [
+  CAREGIVER_LINK_PENDING,
+  CAREGIVER_LINK_ACTIVE,
+];
+
+/** The one shared patient the default caregiver handlers serve. */
+export const CAREGIVER_SHARED_PATIENT = {
+  patient_id: ME.patient_id ?? '22222222-2222-4222-8222-222222222222',
+  display_name: 'Pat Example',
+  link_id: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+  scope: 'full',
+  accepted_at: '2026-07-10T12:00:00Z',
+};
+
+/** The caregiver's shared-patients answer: one FULL-scope patient (both read surfaces). */
+export const CAREGIVER_PATIENTS: CaregiverPatientsOut = {
+  patients: [CAREGIVER_SHARED_PATIENT],
+  emergency_notice: CAREGIVER_EMERGENCY_NOTICE,
+};
+
+/** Trends-only variant: the Visit-Ready Summary must NOT be offered (and the server
+ *  would answer its read with a 404 indistinguishable from nonexistent). */
+export const CAREGIVER_PATIENTS_TRENDS_ONLY: CaregiverPatientsOut = {
+  patients: [{ ...CAREGIVER_SHARED_PATIENT, scope: 'trends' }],
+  emergency_notice: CAREGIVER_EMERGENCY_NOTICE,
+};
+
+export const CAREGIVER_PATIENTS_EMPTY: CaregiverPatientsOut = {
+  patients: [],
+  emergency_notice: CAREGIVER_EMERGENCY_NOTICE,
+};
+
 // ---- data export (ADR-0031) — mirrors backend/app/schemas/export.py ----
 
 /** Two observations with a comma + quote in text/unit, so the CSV flattener's escaping
@@ -927,7 +1021,8 @@ export const EXPORT_OBSERVATIONS: ExportObservation[] = [
 
 export const EXPORT: ExportOut = {
   exported_at: '2026-07-15T10:00:00Z',
-  schema_version: '1.0',
+  // 1.1: caregiver_links added (ADR-0047) — mirrors backend EXPORT_SCHEMA_VERSION.
+  schema_version: '1.1',
   subject_id: ME.patient_id ?? '22222222-2222-4222-8222-222222222222',
   account: {
     display_name: ME.display_name,
@@ -946,4 +1041,17 @@ export const EXPORT: ExportOut = {
   capabilities: CAPABILITIES,
   clinic_connections: [CONNECTION_ACTIVE],
   emr_connections: [EMR_CONNECTION_ACTIVE],
+  // Caregiver-sharing metadata (ADR-0047, export schema 1.1) — who/scope/lifecycle,
+  // never codes (the shape has no field for them).
+  caregiver_links: [
+    {
+      id: CAREGIVER_LINK_ACTIVE.id,
+      caregiver_display_name: CAREGIVER_LINK_ACTIVE.caregiver_display_name,
+      scope: CAREGIVER_LINK_ACTIVE.scope,
+      status: CAREGIVER_LINK_ACTIVE.status,
+      accepted_at: CAREGIVER_LINK_ACTIVE.accepted_at,
+      revoked_at: null,
+      created_at: CAREGIVER_LINK_ACTIVE.created_at,
+    },
+  ],
 };

@@ -11,6 +11,12 @@ import type {
   BiomechImportOut,
   CapabilitiesOut,
   CapabilityStateOut,
+  CaregiverClaimOut,
+  CaregiverInviteCreateOut,
+  CaregiverInviteOut,
+  CaregiverPatientsOut,
+  CaregiverRegisterIn,
+  CaregiverScope,
   ClinicianCapabilitySetIn,
   ConnectionOut,
   EmrConnectionOut,
@@ -37,6 +43,7 @@ import type {
   MfaVerifyIn,
   ObservationPage,
   PanelOut,
+  PatientCaregiverLinkOut,
   RegisterIn,
   TokenOut,
   Trajectory,
@@ -293,6 +300,100 @@ export function revokeEmrConnection(connectionId: string): Promise<EmrConnection
   return request<EmrConnectionOut>(`/emr/connections/${encodeURIComponent(connectionId)}`, {
     method: 'DELETE',
   });
+}
+
+// ---- caregiver companion (ADR-0047 Phase A) ----
+
+/**
+ * Caregiver self-registration — ONLY with a valid invite code (the code is judged before
+ * the account is created; a dead code answers 404 with one fixed message). Anonymous.
+ * Success creates a PENDING link: nothing is visible until the patient accepts.
+ */
+export function registerCaregiver(body: CaregiverRegisterIn): Promise<TokenOut> {
+  return request<TokenOut>('/caregiver/register', { method: 'POST', body, anonymous: true });
+}
+
+/** An existing caregiver claims another patient's code. NON-ENUMERATING: the 202 body is
+ *  byte-identical whether or not the code matched; a match creates a PENDING link the
+ *  patient must accept before anything is visible (double opt-in). */
+export function claimCaregiverCode(code: string): Promise<CaregiverClaimOut> {
+  return request<CaregiverClaimOut>('/caregiver/claims', { method: 'POST', body: { code } });
+}
+
+/** The caregiver's shared patients — accepted, non-revoked links only. PHI, no-store. */
+export function getCaregiverPatients(): Promise<CaregiverPatientsOut> {
+  return request<CaregiverPatientsOut>('/caregiver/patients');
+}
+
+/** The shared patient's DETERMINISTIC trajectory (trends scope suffices). A patient this
+ *  caregiver may not read answers 404, indistinguishable from nonexistent. */
+export function getCaregiverPatientTrajectory(patientId: string): Promise<Trajectory> {
+  return request<Trajectory>(`/caregiver/patients/${encodeURIComponent(patientId)}/trajectory`);
+}
+
+/** The shared patient's Visit-Ready Summary — FULL scope only; a trends-scope caller gets
+ *  the same 404 as a nonexistent patient. `window` must be one of 30/60/90/120/365. */
+export function getCaregiverPatientVisitSummary(
+  patientId: string,
+  windowDays: number,
+): Promise<VisitSummary> {
+  return request<VisitSummary>(
+    `/caregiver/patients/${encodeURIComponent(patientId)}/visit-summary?window=${String(windowDays)}`,
+  );
+}
+
+/** Generate a share code for a loved one. The plaintext code appears in THIS response
+ *  only — it is stored hashed server-side and can never be re-read. */
+export function createCaregiverInvite(): Promise<CaregiverInviteCreateOut> {
+  return request<CaregiverInviteCreateOut>('/me/caregiver-invites', { method: 'POST' });
+}
+
+/** The patient's still-claimable invites (the codes themselves are unrecoverable). */
+export function getCaregiverInvites(): Promise<CaregiverInviteOut[]> {
+  return request<CaregiverInviteOut[]>('/me/caregiver-invites');
+}
+
+/** Cancel the patient's own invite: the code dies immediately. */
+export async function cancelCaregiverInvite(inviteId: string): Promise<void> {
+  await request<unknown>(`/me/caregiver-invites/${encodeURIComponent(inviteId)}`, {
+    method: 'DELETE',
+  });
+}
+
+/** The patient's caregiver links — pending requests, active caregivers, revoked history. */
+export function getCaregiverLinks(): Promise<PatientCaregiverLinkOut[]> {
+  return request<PatientCaregiverLinkOut[]>('/me/caregivers');
+}
+
+/** Accept a pending caregiver request — the double opt-in's second step; only now does
+ *  anything become visible (ADR-0047). */
+export function acceptCaregiverLink(linkId: string): Promise<PatientCaregiverLinkOut> {
+  return request<PatientCaregiverLinkOut>(`/me/caregivers/${encodeURIComponent(linkId)}/accept`, {
+    method: 'POST',
+  });
+}
+
+/** Decline a pending caregiver request: the link dies without ever having been readable. */
+export async function declineCaregiverLink(linkId: string): Promise<void> {
+  await request<unknown>(`/me/caregivers/${encodeURIComponent(linkId)}/decline`, {
+    method: 'POST',
+  });
+}
+
+/** Change what THIS caregiver can see (trends <-> full) — effective on their next read. */
+export function setCaregiverScope(
+  linkId: string,
+  scope: CaregiverScope,
+): Promise<PatientCaregiverLinkOut> {
+  return request<PatientCaregiverLinkOut>(`/me/caregivers/${encodeURIComponent(linkId)}`, {
+    method: 'PATCH',
+    body: { scope },
+  });
+}
+
+/** Revoke a caregiver's access: it stops immediately and nothing can block it (ADR-0047). */
+export async function revokeCaregiverLink(linkId: string): Promise<void> {
+  await request<unknown>(`/me/caregivers/${encodeURIComponent(linkId)}`, { method: 'DELETE' });
 }
 
 // ---- clinician surface (ADR-0012 / ADR-0013) ----

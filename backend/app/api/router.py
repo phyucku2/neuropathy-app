@@ -8,6 +8,7 @@ from app.api.routes import (
     auth,
     biomech,
     capabilities,
+    caregiver,
     clinic,
     connections,
     emr,
@@ -32,3 +33,4 @@ api_router.include_router(ops.router)
 api_router.include_router(clinic.router)
 api_router.include_router(connections.router)
 api_router.include_router(capabilities.router)
+api_router.include_router(caregiver.router)

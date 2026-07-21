@@ -645,6 +645,19 @@ export interface ExportObservation {
   payload: Record<string, unknown>;
 }
 
+/** ExportCaregiverLink — one caregiver-sharing link (ADR-0047), METADATA ONLY: who the
+ *  patient shares with, scope, and lifecycle timestamps. No invite codes or hashes exist
+ *  in this shape to leak (structural absence, like the token-free EMR connection). */
+export interface ExportCaregiverLink {
+  id: string;
+  caregiver_display_name: string;
+  scope: string;
+  status: string;
+  accepted_at: string | null;
+  revoked_at: string | null;
+  created_at: string | null;
+}
+
 /** ExportOut — the complete "Download my data" envelope. NEVER carries tokens,
  *  secrets, or the password hash (the shapes above have no field for them). */
 export interface ExportOut {
@@ -658,6 +671,76 @@ export interface ExportOut {
   capabilities: CapabilityStateOut[];
   clinic_connections: ConnectionOut[];
   emr_connections: EmrConnectionOut[];
+  /** Caregiver-sharing metadata (ADR-0047, export schema 1.1) — never codes. */
+  caregiver_links: ExportCaregiverLink[];
+}
+
+// ---- caregiver.py (ADR-0047 — Caregiver Companion Phase A) ----
+
+/** CaregiverScope — what the PATIENT lets this caregiver see: the wellness trend only,
+ *  or the full read surfaces (trend + the Visit-Ready Summary). */
+export type CaregiverScope = 'trends' | 'full';
+
+/** CaregiverLinkStatus — the link lifecycle. Nothing is visible until the patient
+ *  explicitly accepts (double opt-in); a revoked link stops access instantly. */
+export type CaregiverLinkStatus = 'pending' | 'active' | 'revoked';
+
+/** CaregiverRegisterIn — caregiver self-registration exists ONLY inside the
+ *  invite-claim flow: a valid code is required to create the account. */
+export interface CaregiverRegisterIn {
+  code: string;
+  email: string;
+  password: string;
+  display_name: string;
+}
+
+/** InviteCreateOut — the ONE-TIME answer to creating an invite: the plaintext code
+ *  appears here and never again (only its hash is stored server-side). */
+export interface CaregiverInviteCreateOut {
+  id: string;
+  code: string;
+  expires_at: string;
+}
+
+/** InviteOut — an open invite as the patient lists it; the code is unrecoverable. */
+export interface CaregiverInviteOut {
+  id: string;
+  created_at: string;
+  expires_at: string;
+}
+
+/** ClaimOut — one fixed sentence for EVERY outcome (non-enumeration: the response
+ *  never reveals whether the code matched an invite). */
+export interface CaregiverClaimOut {
+  detail: string;
+}
+
+/** PatientLinkOut — one caregiver link as the PATIENT sees it: who, scope, lifecycle. */
+export interface PatientCaregiverLinkOut {
+  id: string;
+  caregiver_display_name: string;
+  scope: string;
+  status: string;
+  accepted_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+}
+
+/** CaregiverPatientOut — one shared patient as the CAREGIVER sees it: display name +
+ *  scope only (accepted, non-revoked links; the server's single access predicate). */
+export interface CaregiverPatientOut {
+  patient_id: string;
+  display_name: string;
+  link_id: string;
+  scope: string;
+  accepted_at: string;
+}
+
+/** CaregiverPatientsOut — the caregiver's shared patients. The non-urgent framing
+ *  rides WITH the data (`emergency_notice`), co-located, never implied (ADR-0047). */
+export interface CaregiverPatientsOut {
+  patients: CaregiverPatientOut[];
+  emergency_notice: string;
 }
 
 // ---- clinic.py ----

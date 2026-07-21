@@ -32,6 +32,7 @@ from app.core.config import settings
 from app.emr.service import EmrService
 from app.main import app
 from app.models.audit import AuditEvent
+from app.models.caregiver import CaregiverLink, CaregiverLinkStatus, CaregiverScope
 from app.models.clinic import Clinic
 from app.models.connection import ClinicConnection, ConnectionStatus, Initiator
 from app.models.emr_clinical_note import EmrClinicalNote
@@ -40,6 +41,7 @@ from app.repositories.audit import InMemoryAuditEventRepository
 from app.repositories.patient_capability import InMemoryPatientCapabilityRepository
 from app.services.auth import AuthService
 from app.services.capability import CapabilityService
+from app.services.caregiver import CaregiverService
 from app.services.clinic import ClinicService
 from app.services.export import (
     RATE_LIMITED_DETAIL,
@@ -95,11 +97,18 @@ class World:
             connections=self.clinic.connections,
             audit=self.emr.audit,
         )
+        self.caregiver = CaregiverService(
+            users=self.auth.users,
+            observations=self.emr.observations,
+            clinical_notes=self.emr.clinical_notes,
+            audit=self.emr.audit,
+        )
         self.export = PatientDataExportService(
             users=self.auth.users,
             observations=self.emr.observations,
             emr_connections=self.emr.connections,
             clinical_notes=self.emr.clinical_notes,
+            caregiver_links=self.caregiver.links,
             clinic=self.clinic,
             capabilities=self.capability,
             audit=self.emr.audit,
@@ -216,6 +225,21 @@ async def _populate(world: World, patient_id_str: str) -> None:
         )
     )
 
+    # An accepted caregiver share (ADR-0047) — exported as link METADATA only.
+    caregiver_user = await world.auth.create_caregiver(
+        email="care@example.com", password=SYNTHETIC_PASSWORD, display_name="Cam Caregiver"
+    )
+    await world.caregiver.links.add(
+        CaregiverLink(
+            patient_id=patient_id,
+            caregiver_user_id=caregiver_user.id,
+            scope=CaregiverScope.full,
+            status=CaregiverLinkStatus.active,
+            accepted_at=datetime(2026, 7, 2, tzinfo=UTC),
+            initiated_by=Initiator.patient,
+        )
+    )
+
     # A pulled EMR clinical note (separate store) — exported as METADATA ONLY, no body.
     emr_connections = await world.emr.connections.list_for_patient(patient_id)
     await world.emr.clinical_notes.add_if_absent(
@@ -257,7 +281,7 @@ def test_export_returns_every_data_class_with_correct_values(
     body = resp.json()
 
     # Envelope.
-    assert body["schema_version"] == "1.0"
+    assert body["schema_version"] == "1.1"
     assert body["subject_id"] == patient_id
     assert "exported_at" in body
 
@@ -318,6 +342,16 @@ def test_export_returns_every_data_class_with_correct_values(
     assert note["document_fhir_id"] == "DocRef/synthetic-1"
     assert "body" not in note and "text" not in note  # the note text is structurally absent
 
+    # Caregiver link — sharing METADATA only (ADR-0047): who, scope, lifecycle; the
+    # invite code has no field to leak into.
+    assert len(body["caregiver_links"]) == 1
+    caregiver_link = body["caregiver_links"][0]
+    assert caregiver_link["caregiver_display_name"] == "Cam Caregiver"
+    assert caregiver_link["scope"] == "full"
+    assert caregiver_link["status"] == "active"
+    assert caregiver_link["accepted_at"].startswith("2026-07-02")
+    assert "code" not in caregiver_link and "code_hash" not in caregiver_link
+
 
 def test_export_never_contains_a_token_secret_or_password_hash(
     world: World, client: TestClient
@@ -373,6 +407,7 @@ def test_export_writes_one_phi_free_audit_event(world: World, client: TestClient
         "emr_clinical_notes": 1,  # the pulled note (metadata-only export, ADR-0045 P2 #27)
         "clinic_connections": 1,
         "capabilities": 11,  # + ADR-0045 P2 ingest_medications, ingest_events, ingest_notes
+        "caregiver_links": 1,  # the accepted caregiver share (ADR-0047)
     }
     assert "Synthetic" not in json.dumps(event.detail)
 
@@ -389,6 +424,7 @@ def test_export_on_an_empty_account_is_honest_and_still_audited(
     assert body["observations"] == []
     assert body["clinic_connections"] == []
     assert body["emr_connections"] == []
+    assert body["caregiver_links"] == []
     assert body["capabilities"]  # the registry defaults are always present
     exports = [e for e in world.emr.audit._events if e.action == "export_account"]  # type: ignore[attr-defined]
     assert len(exports) == 1

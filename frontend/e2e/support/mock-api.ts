@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import type { Page, Route } from '@playwright/test';
 import type {
   CapabilityStateOut,
+  CaregiverPatientOut,
   ConnectionOut,
   EmrConnectionOut,
   EmrProviderOut,
@@ -32,6 +33,7 @@ import type {
   MeOut,
   ObservationItem,
   PanelOut,
+  PatientCaregiverLinkOut,
   PlaceholderRow,
   Trajectory,
   VisitSummary,
@@ -637,6 +639,80 @@ function visitSummaryForWindow(windowDays: number): VisitSummary {
   return { ...VISIT_SUMMARY, window_days: windowDays, lead_section: lead };
 }
 
+// ---- caregiver fixtures (ADR-0047; mirror backend/app/schemas/caregiver.py) ----
+
+export const CAREGIVER_ME: MeOut = {
+  user_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+  email: 'casey.example@example.com',
+  display_name: 'Casey Example',
+  role: 'caregiver',
+  patient_id: null,
+};
+
+/** The backend's fixed sentences + co-located notice, verbatim. */
+export const CAREGIVER_CLAIM_ACCEPTED_DETAIL =
+  "If this code is valid, your request is now waiting for the patient's approval.";
+export const CAREGIVER_CODE_INVALID_DETAIL =
+  "That code didn't work. Check it, or ask for a new code.";
+export const CAREGIVER_EMERGENCY_NOTICE =
+  "This isn't for emergencies. If something's wrong right now, call 911.";
+
+/**
+ * The caregiver-sharing world as the mock backend holds it: the patient's open
+ * invites (with their plaintext codes, which the real backend hands out exactly
+ * once) and the caregiver links in every lifecycle state. Create ONE store per test
+ * and pass it to BOTH the patient page's and the caregiver page's `installApiMocks`
+ * to drive the real cross-role journey (invite → claim → accept → read → revoke) —
+ * the same statefulness the real backend has.
+ */
+export interface CaregiverStore {
+  invites: { id: string; code: string; created_at: string; expires_at: string }[];
+  links: PatientCaregiverLinkOut[];
+}
+
+export function newCaregiverStore(): CaregiverStore {
+  return { invites: [], links: [] };
+}
+
+/** A pending link (the caregiver claimed a code; the patient has not said yes). */
+export function pendingCaregiverLink(name = 'Casey Example'): PatientCaregiverLinkOut {
+  return {
+    id: crypto.randomUUID(),
+    caregiver_display_name: name,
+    scope: 'trends',
+    status: 'pending',
+    accepted_at: null,
+    revoked_at: null,
+    created_at: '2026-07-14T09:00:00Z',
+  };
+}
+
+/** An accepted link at the given scope. */
+export function activeCaregiverLink(
+  scope: 'trends' | 'full' = 'trends',
+  name = 'Casey Example',
+): PatientCaregiverLinkOut {
+  return {
+    ...pendingCaregiverLink(name),
+    scope,
+    status: 'active',
+    accepted_at: '2026-07-10T12:00:00Z',
+  };
+}
+
+/** The caregiver's shared-patients projection of the store: accepted links only. */
+function caregiverPatientsOf(store: CaregiverStore): CaregiverPatientOut[] {
+  return store.links
+    .filter((link) => link.status === 'active' && link.accepted_at !== null)
+    .map((link) => ({
+      patient_id: ME.patient_id ?? '',
+      display_name: ME.display_name,
+      link_id: link.id,
+      scope: link.scope,
+      accepted_at: link.accepted_at ?? '',
+    }));
+}
+
 // ---- clinician fixtures ----
 
 export const PANEL_PATIENT_ID = '22222222-2222-4222-8222-222222222222';
@@ -717,7 +793,8 @@ const EXPORT_OBSERVATIONS_OUT: ExportObservation[] = [
 
 export const EXPORT_OUT: ExportOut = {
   exported_at: '2026-07-15T10:00:00Z',
-  schema_version: '1.0',
+  // 1.1: caregiver_links added (ADR-0047) — mirrors backend EXPORT_SCHEMA_VERSION.
+  schema_version: '1.1',
   subject_id: '22222222-2222-4222-8222-222222222222',
   account: {
     display_name: 'Pat Example',
@@ -736,6 +813,8 @@ export const EXPORT_OUT: ExportOut = {
   capabilities: CAPABILITIES,
   clinic_connections: [CONNECTION_ACTIVE],
   emr_connections: [EMR_CONNECTION_ACTIVE],
+  // Caregiver-sharing metadata (ADR-0047, export schema 1.1) — never codes.
+  caregiver_links: [],
 };
 
 export interface Scenario {
@@ -762,6 +841,10 @@ export interface Scenario {
   /** MFA factor state (§1B C6). enrolled=true makes a clinician/ops login answer the
    *  TOTP step-up; enrollment via the settings card flips it statefully. Default false. */
   mfa?: { enrolled?: boolean };
+  /** Caregiver-sharing state (ADR-0047). Pass the SAME store to a patient page and a
+   *  caregiver page to drive the cross-role invite → claim → accept → revoke journey;
+   *  defaults to a fresh empty store. */
+  caregiverStore?: CaregiverStore;
 }
 
 const CLINICALLY_MANAGED_409 = {
@@ -811,13 +894,17 @@ export async function installApiMocks(page: Page, scenario: Scenario = {}): Prom
   // MFA factor state (§1B C6): confirming enrollment flips it, so a later login answers
   // the step-up — the same statefulness the real backend has.
   let mfaEnrolled = scenario.mfa?.enrolled ?? false;
+  // Caregiver-sharing state (ADR-0047): possibly SHARED with another page's install so
+  // the patient's accept/revoke is immediately visible to the caregiver's reads.
+  const caregiverStore = scenario.caregiverStore ?? newCaregiverStore();
+  let caregiverInviteSerial = 0;
 
   await page.route('**/favicon.ico', (route) => route.fulfill({ status: 204, body: '' }));
 
   await page.route(
     // /emr shares its prefix between API paths and the SPA's /emr/callback relay
     // route, exactly like /clinic (see the document-navigation note below).
-    /\/(auth|me|observations|adl|biomech|trajectory|capabilities|connections|clinic|emr|medications|events)(\/|$|\?)/,
+    /\/(auth|me|observations|adl|biomech|trajectory|capabilities|connections|clinic|emr|medications|events|caregiver)(\/|$|\?)/,
     async (route) => {
       const req = route.request();
       // Only intercept the app's fetch/XHR API calls. The client routes /clinic and
@@ -883,6 +970,19 @@ export async function installApiMocks(page: Page, scenario: Scenario = {}): Prom
           });
         }
         return fulfillJson(route, 401, { detail: 'Invalid token' });
+      }
+      // Caregiver registration (ADR-0047) — anonymous, and possible ONLY with a live
+      // invite code. The code is single-use (consumed here) and a dead one answers the
+      // real backend's fixed 404 sentence. Success creates a PENDING link (double opt-in).
+      if (method === 'POST' && path === '/caregiver/register') {
+        const body = req.postDataJSON() as { code: string; display_name: string };
+        const invite = caregiverStore.invites.find((entry) => entry.code === body.code);
+        if (invite === undefined) {
+          return fulfillJson(route, 404, { detail: CAREGIVER_CODE_INVALID_DETAIL });
+        }
+        caregiverStore.invites = caregiverStore.invites.filter((entry) => entry !== invite);
+        caregiverStore.links.push(pendingCaregiverLink(body.display_name));
+        return fulfillJson(route, 201, tokenBody());
       }
 
       // ---- everything below requires a valid bearer ----
@@ -1224,6 +1324,112 @@ export async function installApiMocks(page: Page, scenario: Scenario = {}): Prom
           active: body.active,
           expires_at: body.expires_at ?? null,
         });
+      }
+
+      // ---- caregiver companion (ADR-0047; mirrors backend/app/api/routes/caregiver.py) ----
+
+      // Patient side: invite lifecycle. The plaintext code appears ONLY in the create
+      // response (the list never carries it — the real backend stores just its hash).
+      if (method === 'POST' && path === '/me/caregiver-invites') {
+        caregiverInviteSerial += 1;
+        const invite = {
+          id: crypto.randomUUID(),
+          code: `SYNT-CODE-${String(caregiverInviteSerial).padStart(4, '0')}`,
+          created_at: '2026-07-15T10:00:00Z',
+          expires_at: '2026-07-22T10:00:00Z',
+        };
+        caregiverStore.invites.push(invite);
+        return fulfillJson(route, 201, {
+          id: invite.id,
+          code: invite.code,
+          expires_at: invite.expires_at,
+        });
+      }
+      if (method === 'GET' && path === '/me/caregiver-invites') {
+        return fulfillJson(
+          route,
+          200,
+          caregiverStore.invites.map(({ id, created_at, expires_at }) => ({
+            id,
+            created_at,
+            expires_at,
+          })),
+        );
+      }
+      const inviteMatch = /^\/me\/caregiver-invites\/([^/]+)$/.exec(path);
+      if (method === 'DELETE' && inviteMatch) {
+        const id = decodeURIComponent(inviteMatch[1] ?? '');
+        caregiverStore.invites = caregiverStore.invites.filter((entry) => entry.id !== id);
+        return route.fulfill({ status: 204, body: '' });
+      }
+
+      // Patient side: link lifecycle (accept / decline / scope / revoke).
+      if (method === 'GET' && path === '/me/caregivers') {
+        return fulfillJson(route, 200, caregiverStore.links);
+      }
+      const linkActionMatch = /^\/me\/caregivers\/([^/]+)(?:\/(accept|decline))?$/.exec(path);
+      if (linkActionMatch) {
+        const id = decodeURIComponent(linkActionMatch[1] ?? '');
+        const action = linkActionMatch[2];
+        const link = caregiverStore.links.find((entry) => entry.id === id);
+        if (link === undefined) {
+          return fulfillJson(route, 404, { detail: 'Caregiver not found' });
+        }
+        if (method === 'POST' && action === 'accept') {
+          link.status = 'active';
+          link.accepted_at = '2026-07-15T12:00:00Z';
+          return fulfillJson(route, 200, link);
+        }
+        if (method === 'POST' && action === 'decline') {
+          link.status = 'revoked';
+          link.revoked_at = '2026-07-15T12:00:00Z';
+          return route.fulfill({ status: 204, body: '' });
+        }
+        if (method === 'PATCH' && action === undefined) {
+          const body = req.postDataJSON() as { scope: 'trends' | 'full' };
+          link.scope = body.scope;
+          return fulfillJson(route, 200, link);
+        }
+        if (method === 'DELETE' && action === undefined) {
+          // Revocation is instant, idempotent, and never blockable (ADR-0047).
+          link.status = 'revoked';
+          link.revoked_at = '2026-07-15T12:00:00Z';
+          return route.fulfill({ status: 204, body: '' });
+        }
+      }
+
+      // Caregiver side: claim + reads. The claim's 202 is byte-identical whether or
+      // not the code matched (non-enumeration); a match creates a PENDING link.
+      if (method === 'POST' && path === '/caregiver/claims') {
+        const body = req.postDataJSON() as { code: string };
+        const invite = caregiverStore.invites.find((entry) => entry.code === body.code);
+        if (invite !== undefined) {
+          caregiverStore.invites = caregiverStore.invites.filter((entry) => entry !== invite);
+          caregiverStore.links.push(pendingCaregiverLink(me.display_name));
+        }
+        return fulfillJson(route, 202, { detail: CAREGIVER_CLAIM_ACCEPTED_DETAIL });
+      }
+      if (method === 'GET' && path === '/caregiver/patients') {
+        return fulfillJson(route, 200, {
+          patients: caregiverPatientsOf(caregiverStore),
+          emergency_notice: CAREGIVER_EMERGENCY_NOTICE,
+        });
+      }
+      const caregiverReadMatch =
+        /^\/caregiver\/patients\/([^/]+)\/(trajectory|visit-summary)$/.exec(path);
+      if (method === 'GET' && caregiverReadMatch) {
+        const id = decodeURIComponent(caregiverReadMatch[1] ?? '');
+        const kind = caregiverReadMatch[2];
+        const shared = caregiverPatientsOf(caregiverStore).find((entry) => entry.patient_id === id);
+        // 404-over-403: unknown, revoked, AND insufficient-scope are indistinguishable.
+        if (shared === undefined || (kind === 'visit-summary' && shared.scope !== 'full')) {
+          return patientNotFound(route);
+        }
+        if (kind === 'trajectory') {
+          return fulfillJson(route, 200, trajectory);
+        }
+        const window = Number(new URL(req.url()).searchParams.get('window') ?? '60');
+        return fulfillJson(route, 200, visitSummaryForWindow(window));
       }
 
       // Any unmocked API path is a test bug — fail loudly rather than hang.
