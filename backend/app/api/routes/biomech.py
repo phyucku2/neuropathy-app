@@ -67,7 +67,12 @@ async def import_biomech_report(
         # of this request) off the event loop (review finding).
         text = await run_in_threadpool(extract_text, data)
     except BiomechPdfError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        # Static message (readiness plan §1B C3): never build a route detail from an
+        # exception string — a widened message upstream could echo document content.
+        raise HTTPException(
+            status_code=422,
+            detail="The PDF could not be read (not a valid PDF, or over the page/text caps)",
+        ) from exc
 
     report = parse_report(text)
     warnings = list(report.warnings)

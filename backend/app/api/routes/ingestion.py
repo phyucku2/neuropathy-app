@@ -165,7 +165,14 @@ async def import_wearable(
                 sample, patient_id=current.patient_id, import_key=key
             )
         except WearableValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+            # Static message (readiness plan §1B C3): never build a route detail from an
+            # exception string — one widened message upstream would echo the measured
+            # value into the response body.
+            raise HTTPException(
+                status_code=422,
+                detail="A sample is out of range or has an invalid time window; "
+                "nothing was imported",
+            ) from exc
         if key in seen:
             continue
         seen.add(key)

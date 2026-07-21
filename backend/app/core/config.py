@@ -9,6 +9,8 @@ land in boot-loop logs, and a nearly-valid secret printed there is still a secre
 
 from __future__ import annotations
 
+import os
+
 from cryptography.fernet import Fernet
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -17,6 +19,20 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # token would make the constant-time compare in routes/clinic.py guard a guessable
 # value. 32 chars of a generated token ≈ 190+ bits from token_urlsafe.
 OPS_BOOTSTRAP_TOKEN_MIN_LENGTH = 32
+
+
+def configured_worker_count() -> int:
+    """The gunicorn worker count for this deployment, from WEB_CONCURRENCY (Dockerfile /
+    the standard gunicorn env var). Unset or unparseable → 1 (single process: the test
+    harness, `uvicorn` dev, `WEB_CONCURRENCY=1`).
+
+    Read from os.environ at CALL time — never captured into a Settings field — so the
+    serving guards (app/main.py) and the TLS auto-mode (app/db/session.py) see the env
+    the process actually runs with, not the one at import time."""
+    try:
+        return max(1, int(os.environ.get("WEB_CONCURRENCY", "1")))
+    except ValueError:
+        return 1
 
 
 class Settings(BaseSettings):
@@ -35,6 +51,22 @@ class Settings(BaseSettings):
     # per-process and non-durable, for unit tests and DB-less development only.
     # Alembic reads this too; apply migrations before first boot (backend/README.md).
     database_url: str | None = None
+
+    # Postgres TLS enforcement (readiness plan §1B C2), applied lexically to
+    # DATABASE_URL when the serving engine is created (app/db/session.py) — alembic and
+    # the integration suite build their own engines and are structurally unaffected.
+    # Tri-state:
+    #   None (default) = AUTO — TLS is required when this deployment is really serving
+    #     (WEB_CONCURRENCY > 1, read at engine-creation time) or app_env=production;
+    #   True  = always required;
+    #   False = the DOCUMENTED opt-out for local dev / tests against a plaintext local
+    #     Postgres (e.g. docker-compose, the TEST_DATABASE_URL integration service).
+    #     Never set this in production.
+    # "Required" means the URL must carry an ssl/sslmode directive that actually turns
+    # TLS on (ssl=require / sslmode=require / verify-ca / verify-full); a missing
+    # directive — or ssl=disable/allow/prefer, which can silently downgrade — refuses
+    # to boot. verify-full with the platform CA is the recommended production value.
+    database_tls_required: bool | None = None
 
     # External providers — must be BAA-covered before any PHI flows (ADR-0003).
     # ai_provider selects the narrator: unset/"anthropic" → Anthropic Messages API;
@@ -100,6 +132,28 @@ class Settings(BaseSettings):
     # denial audit volume (no log-flood primitive).
     delete_account_rate_limit_max: int = 5
     delete_account_rate_limit_window_seconds: int = 900
+
+    # Login throttle (readiness plan §1B C5): failed /auth/login attempts are audited
+    # ('login_failed') under a per-email-hash sentinel actor and capped per sliding
+    # window — over the budget the endpoint answers 429 BEFORE the Argon2id verify (or
+    # any repository lookup) runs, so the limiter caps both the password oracle and its
+    # CPU cost without ever keying on the raw email (non-enumerating by construction).
+    login_rate_limit_max: int = 10
+    login_rate_limit_window_seconds: int = 900
+
+    # Refresh throttle (readiness plan §1B C5): failed /auth/refresh attempts on a
+    # signature-valid token are audited ('refresh_failed') under a per-subject sentinel
+    # actor and capped the same way — 429 before the repository lookup. Generous by
+    # default: a healthy client refreshes at most every access-token TTL.
+    refresh_rate_limit_max: int = 30
+    refresh_rate_limit_window_seconds: int = 3600
+
+    # MFA enforcement flag (readiness plan §1B C6). False (default): clinician/ops
+    # accounts WITH a confirmed TOTP factor get the login step-up; unenrolled ones log
+    # in exactly as before. True — the go-live act — additionally REFUSES password
+    # login for unenrolled clinician/ops principals with an enrollment-required
+    # response. Patients are never gated by this flag.
+    mfa_required_for_privileged: bool = False
 
     # Data-export throttle (ADR-0031): GET /me/export runs an unbounded O(n) full-account
     # assembly, so it is capped per actor exactly like deletion. Each successful export

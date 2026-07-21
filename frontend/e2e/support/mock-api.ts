@@ -51,6 +51,15 @@ export const SYNTHETIC_REFRESH_TOKEN = 'synthetic-refresh-token';
 /** sessionStorage key the token store uses (src/auth/tokenStore.ts). */
 export const REFRESH_TOKEN_KEY = 'neuropathy.refresh_token';
 
+// ---- MFA / TOTP step-up for clinician+ops accounts (§1B C6) ----
+
+export const SYNTHETIC_MFA_CODE = '123456';
+export const SYNTHETIC_MFA_SECRET = 'SYNTHETICSECRETBASE32AAA';
+export const SYNTHETIC_OTPAUTH_URI =
+  `otpauth://totp/Neuropathy:dr.rivera%40example.com?secret=${SYNTHETIC_MFA_SECRET}` +
+  '&issuer=Neuropathy&algorithm=SHA1&digits=6&period=30';
+const SYNTHETIC_MFA_PENDING_TOKEN = 'synthetic-mfa-pending-token';
+
 function isAuthorized(route: Route): boolean {
   const header = route.request().headers()['authorization'];
   return (
@@ -750,6 +759,9 @@ export interface Scenario {
   clinicTrajectory?: Trajectory;
   clinicObservations?: ObservationItem[];
   clinicCapabilities?: CapabilityStateOut[];
+  /** MFA factor state (§1B C6). enrolled=true makes a clinician/ops login answer the
+   *  TOTP step-up; enrollment via the settings card flips it statefully. Default false. */
+  mfa?: { enrolled?: boolean };
 }
 
 const CLINICALLY_MANAGED_409 = {
@@ -796,6 +808,9 @@ export async function installApiMocks(page: Page, scenario: Scenario = {}): Prom
   // POSTs mutate these so an added med / recorded event shows up on the next GET.
   const medications: MedicationOut[] = scenario.medications ? [...scenario.medications] : [];
   const events: EventOut[] = scenario.events ? [...scenario.events] : [];
+  // MFA factor state (§1B C6): confirming enrollment flips it, so a later login answers
+  // the step-up — the same statefulness the real backend has.
+  let mfaEnrolled = scenario.mfa?.enrolled ?? false;
 
   await page.route('**/favicon.ico', (route) => route.fulfill({ status: 204, body: '' }));
 
@@ -828,10 +843,33 @@ export async function installApiMocks(page: Page, scenario: Scenario = {}): Prom
       // ---- auth (anonymous endpoints) ----
       if (method === 'POST' && path === '/auth/login') {
         const body = req.postDataJSON() as { email: string; password: string };
-        if (body.email === SYNTHETIC_EMAIL && body.password === SYNTHETIC_PASSWORD) {
+        if (
+          (body.email === SYNTHETIC_EMAIL || body.email === me.email) &&
+          body.password === SYNTHETIC_PASSWORD
+        ) {
+          // §1B C6: an enrolled clinician/ops factor turns password success into the
+          // TOTP step-up — a short-lived mfa_pending token, never access/refresh.
+          // Patients always get full tokens (their flow is unchanged).
+          if (mfaEnrolled && me.role !== 'patient') {
+            return fulfillJson(route, 200, {
+              mfa_pending_token: SYNTHETIC_MFA_PENDING_TOKEN,
+              token_type: 'mfa_pending',
+            });
+          }
           return fulfillJson(route, 200, tokenBody());
         }
         return fulfillJson(route, 401, { detail: 'Invalid email or password' });
+      }
+      // The login step-up (§1B C6): anonymous — the pending token rides in the body.
+      if (method === 'POST' && path === '/auth/mfa/verify') {
+        const body = req.postDataJSON() as { mfa_pending_token: string; code: string };
+        if (
+          body.mfa_pending_token === SYNTHETIC_MFA_PENDING_TOKEN &&
+          body.code === SYNTHETIC_MFA_CODE
+        ) {
+          return fulfillJson(route, 200, tokenBody());
+        }
+        return fulfillJson(route, 401, { detail: 'Invalid code' });
       }
       if (method === 'POST' && path === '/auth/register') {
         return fulfillJson(route, 201, tokenBody());
@@ -854,6 +892,24 @@ export async function installApiMocks(page: Page, scenario: Scenario = {}): Prom
 
       if (method === 'GET' && path === '/auth/me') {
         return fulfillJson(route, 200, me);
+      }
+      // ---- MFA enrollment (§1B C6): status, the ONE-TIME secret showing, confirm ----
+      if (method === 'GET' && path === '/auth/mfa') {
+        return fulfillJson(route, 200, { enrolled: mfaEnrolled });
+      }
+      if (method === 'POST' && path === '/auth/mfa/enroll') {
+        return fulfillJson(route, 201, {
+          otpauth_uri: SYNTHETIC_OTPAUTH_URI,
+          secret: SYNTHETIC_MFA_SECRET,
+        });
+      }
+      if (method === 'POST' && path === '/auth/mfa/enroll/confirm') {
+        const body = req.postDataJSON() as { code: string };
+        if (body.code === SYNTHETIC_MFA_CODE) {
+          mfaEnrolled = true;
+          return fulfillJson(route, 200, { enrolled: true });
+        }
+        return fulfillJson(route, 401, { detail: 'Invalid code' });
       }
       // Account & data deletion (ADR-0027): 204 on the right password (recorded in
       // MockApiState), 403 with the backend's verbatim detail otherwise.

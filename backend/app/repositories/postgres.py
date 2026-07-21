@@ -27,6 +27,7 @@ from app.models.clinic import Clinic
 from app.models.connection import ClinicConnection, ConnectionStatus
 from app.models.emr_clinical_note import EmrClinicalNote
 from app.models.emr_connection import EmrConnection
+from app.models.mfa import MfaFactor
 from app.models.observation import Observation, ObservationStatus, SourceType
 from app.models.patient import Patient
 from app.models.pending_auth import PendingAuthState
@@ -35,6 +36,7 @@ from app.models.user import User, UserRole
 from app.repositories.capability import DuplicateCapabilityKeyError
 from app.repositories.clinic_connection import DuplicateLiveConnectionError
 from app.repositories.emr_connection import ConnectionRecord
+from app.repositories.mfa import MfaFactorRecord
 from app.repositories.pending_auth import PendingAuth, pending_auth_ttl
 from app.repositories.user import (
     DuplicateEmailError,
@@ -728,6 +730,49 @@ class PostgresPatientCapabilityRepository:
             delete(PatientCapability).where(PatientCapability.patient_id == patient_id)
         )
         await self._session.flush()
+
+
+class PostgresMfaFactorRepository:
+    """MfaFactorRepository over the mfa_factor table (§1B C6).
+
+    One factor per user is the ix_mfa_factor_user_id UNIQUE index's invariant;
+    replacement is DELETE ... RETURNING + insert, so two concurrent re-enrollments
+    serialize on the row lock (the pending-auth consume pattern) — never
+    check-then-write (docs/lessons.md).
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get_for_user(self, user_id: uuid.UUID) -> MfaFactorRecord | None:
+        row = await self._session.scalar(select(MfaFactor).where(MfaFactor.user_id == user_id))
+        return None if row is None else _mfa_factor_to_record(row)
+
+    async def replace_for_user(self, user_id: uuid.UUID, *, secret_ref: str) -> str | None:
+        superseded = await self._session.scalar(
+            delete(MfaFactor).where(MfaFactor.user_id == user_id).returning(MfaFactor.secret_ref)
+        )
+        self._session.add(MfaFactor(id=uuid.uuid4(), user_id=user_id, secret_ref=secret_ref))
+        await self._session.flush()
+        return superseded
+
+    async def confirm(self, user_id: uuid.UUID, *, at: datetime) -> MfaFactorRecord | None:
+        row = await self._session.scalar(select(MfaFactor).where(MfaFactor.user_id == user_id))
+        if row is None:
+            return None
+        if row.confirmed_at is None:
+            row.confirmed_at = at
+            await self._session.flush()
+        return _mfa_factor_to_record(row)
+
+
+def _mfa_factor_to_record(row: MfaFactor) -> MfaFactorRecord:
+    return MfaFactorRecord(
+        id=row.id,
+        user_id=row.user_id,
+        secret_ref=row.secret_ref,
+        confirmed_at=row.confirmed_at,
+    )
 
 
 def _user_to_record(row: User) -> UserRecord:

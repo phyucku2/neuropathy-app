@@ -18,7 +18,13 @@ import {
   type ReactNode,
 } from 'react';
 import { ApiError } from '../api/client';
-import { getMe, login as apiLogin, register as apiRegister } from '../api/endpoints';
+import {
+  getMe,
+  isMfaPending,
+  login as apiLogin,
+  register as apiRegister,
+  verifyMfa,
+} from '../api/endpoints';
 import type { MeOut, TokenOut } from '../api/types';
 import { purgeQueuedCheckInsForOtherOwners } from '../features/checkin/offlineQueue';
 import { resolveNativeRestore } from './nativeRestore';
@@ -27,10 +33,20 @@ import { clearSession, getRefreshToken, onSessionExpired, storeSession } from '.
 
 export type AuthStatus = 'restoring' | 'authenticated' | 'anonymous';
 
+/**
+ * The outcome of a password login (§1B C6): fully signed in, or — for a clinician/ops
+ * account with an enrolled authenticator — an MFA code still owed. In the pending case
+ * NOTHING is stored: the short-lived mfa_pending token lives only in the login screen's
+ * state until `completeMfaLogin` exchanges it (plus the code) for the real tokens.
+ */
+export type LoginResult =
+  { kind: 'authenticated' } | { kind: 'mfa_required'; mfaPendingToken: string };
+
 export interface AuthValue {
   status: AuthStatus;
   user: MeOut | null;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<LoginResult>;
+  completeMfaLogin: (mfaPendingToken: string, code: string) => Promise<void>;
   register: (displayName: string, email: string, password: string) => Promise<void>;
   logout: () => void;
 }
@@ -136,8 +152,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = useCallback(
-    async (email: string, password: string) => {
-      await establishSession(await apiLogin({ email, password }));
+    async (email: string, password: string): Promise<LoginResult> => {
+      const result = await apiLogin({ email, password });
+      if (isMfaPending(result)) {
+        // Password success alone establishes NO session (§1B C6): no token is stored
+        // until the 6-digit code clears /auth/mfa/verify. Patients never take this
+        // branch — their login always answers full tokens.
+        return { kind: 'mfa_required', mfaPendingToken: result.mfa_pending_token };
+      }
+      await establishSession(result);
+      return { kind: 'authenticated' };
+    },
+    [establishSession],
+  );
+
+  const completeMfaLogin = useCallback(
+    async (mfaPendingToken: string, code: string) => {
+      await establishSession(await verifyMfa({ mfa_pending_token: mfaPendingToken, code }));
     },
     [establishSession],
   );
@@ -156,8 +187,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ status, user, login, register, logout }),
-    [status, user, login, register, logout],
+    () => ({ status, user, login, completeMfaLogin, register, logout }),
+    [status, user, login, completeMfaLogin, register, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

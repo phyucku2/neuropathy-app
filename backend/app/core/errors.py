@@ -4,8 +4,10 @@
 Mirrors the Narrator seam (app/ai/narrative.py): a swappable ``ErrorReporter`` PROTOCOL
 that stays OFF until an operator configures a self-hosted, permissive collector
 (``settings.error_reporting_dsn``). It is wired by ``ErrorReportingMiddleware`` to capture
-**unhandled** exceptions (the ones that become a 5xx) WITHOUT changing the client-facing
-response and WITHOUT logging PHI.
+**unhandled** exceptions (the ones that become a 5xx) and CONTAIN them (readiness plan
+§1B C3): the client always receives the same static, PHI-free 500 body, and the exception
+never propagates to the ASGI server — so ``str(exc)`` (which can echo request values)
+never reaches uvicorn.error or a server-rendered traceback.
 
 **PHI scrub by construction.** The emitted event (``ErrorEvent``) is built from a fixed
 whitelist of safe fields only — exception *type* name, route *template*, method, status,
@@ -14,8 +16,8 @@ a patient id/email/value), and neither is the query string, body, headers, or an
 parameter value. There is no code path that widens this set.
 
 **Fail-safe.** A reporter that raises, times out, or is misconfigured must never break the
-request: the middleware swallows every reporter error and lets the original response (the
-app's normal 500) proceed unchanged.
+request: the middleware swallows every reporter error and still renders the same static
+500 body.
 """
 
 from __future__ import annotations
@@ -29,7 +31,7 @@ from typing import Protocol
 import httpx
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
 from app.core.logging import REQUEST_ID_HEADER
 from app.core.metrics import route_template
@@ -39,6 +41,11 @@ _log = logging.getLogger(__name__)
 # The status recorded for an unhandled exception: it becomes a 500 once normal error
 # handling renders it. We report at the point the exception propagates, before rendering.
 _UNHANDLED_STATUS = 500
+
+# The ONE body every unhandled exception renders (readiness plan §1B C3): static and
+# PHI-free by construction — there is no code path that puts str(exc), a value, or any
+# request datum into it. Kept a module constant so tests assert the exact contract.
+INTERNAL_ERROR_DETAIL = "Internal server error"
 
 
 @dataclass(frozen=True)
@@ -124,12 +131,19 @@ class HttpErrorReporter:
 
 
 class ErrorReportingMiddleware(BaseHTTPMiddleware):
-    """Capture unhandled exceptions and forward a scrubbed event — fail-safe (ADR-0021).
+    """Capture unhandled exceptions: ONE scrubbed event, then CONTAINMENT (ADR-0021 +
+    readiness plan §1B C3).
 
     Composed INSIDE the request-logging + metrics middleware and OUTSIDE the router, so it
-    sees the exception on its way to the normal 500 handler. It re-raises unchanged, so the
-    client still gets the app's normal error response; only a scrubbed event is emitted, and
-    only when a reporter is configured. Any reporter failure is swallowed."""
+    is the first thing an unhandled exception reaches. It emits the one scrubbed event
+    (only when a reporter is configured; any reporter failure is swallowed) and then
+    RETURNS the static PHI-free 500 body instead of re-raising: an exception message can
+    echo a patient value, and re-raising would hand exactly that string to uvicorn.error
+    and the ASGI server's traceback renderer. Note Starlette's
+    ``add_exception_handler(Exception, ...)`` cannot do this — ServerErrorMiddleware sends
+    the handler's response and then re-raises anyway — which is why containment lives
+    here, in the app's own middleware. Logging/metrics (outside) see an ordinary 500
+    response on their normal paths, so 'one log line / one count per request' holds."""
 
     def __init__(
         self,
@@ -149,7 +163,12 @@ class ErrorReportingMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         except Exception as exc:
             await self._safe_report(request, exc)
-            raise  # unchanged propagation → normal error handling renders the 500
+            # Containment (§1B C3): the static body, never str(exc) or a rendered
+            # traceback. The exception stops HERE — nothing downstream of this
+            # middleware ever sees it, so no server layer can print its message.
+            return JSONResponse(
+                status_code=_UNHANDLED_STATUS, content={"detail": INTERNAL_ERROR_DETAIL}
+            )
 
     async def _safe_report(self, request: Request, exc: BaseException) -> None:
         """Report the exception if a reporter is configured; never let this break the
@@ -164,6 +183,7 @@ class ErrorReportingMiddleware(BaseHTTPMiddleware):
 
 
 __all__ = [
+    "INTERNAL_ERROR_DETAIL",
     "ErrorEvent",
     "ErrorReporter",
     "ErrorReportingMiddleware",

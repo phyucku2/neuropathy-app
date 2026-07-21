@@ -17,6 +17,7 @@ import type {
   LeadSection,
   MedicationLog,
   MeOut,
+  MfaEnrollOut,
   ObservationItem,
   PanelOut,
   PlaceholderRow,
@@ -32,6 +33,21 @@ export const TEST_PASSWORD = 'synthetic-test-passphrase';
 
 /** The real backend's DELETE /auth/me wrong-password detail (ADR-0027), verbatim. */
 export const DELETE_WRONG_PASSWORD_DETAIL = "That password didn't match. Nothing was deleted.";
+
+// ---- MFA / TOTP step-up for clinician+ops accounts (§1B C6) ----
+
+/** The one accepted authenticator code in tests — synthetic, obviously not a secret. */
+export const TEST_MFA_CODE = '123456';
+export const TEST_MFA_PENDING_TOKEN = 'synthetic-mfa-pending-token';
+export const MFA_WRONG_CODE_DETAIL = 'Invalid code';
+
+/** The one-time enrollment showing: otpauth URI + base32 secret (synthetic). */
+export const MFA_ENROLL: MfaEnrollOut = {
+  otpauth_uri:
+    'otpauth://totp/Neuropathy:dr.rivera%40example.com?secret=SYNTHETICSECRETBASE32AAA' +
+    '&issuer=Neuropathy&algorithm=SHA1&digits=6&period=30',
+  secret: 'SYNTHETICSECRETBASE32AAA',
+};
 
 export const ME: MeOut = {
   user_id: '11111111-1111-4111-8111-111111111111',

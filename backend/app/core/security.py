@@ -18,6 +18,10 @@ from argon2.exceptions import VerificationError, VerifyMismatchError
 
 ACCESS_TOKEN_TTL = timedelta(minutes=15)
 REFRESH_TOKEN_TTL = timedelta(days=30)
+# The MFA step-up handshake window (§1B C6): password success to 6-digit code entry.
+# Deliberately short — an mfa_pending token proves only "knows the password" and must
+# never linger as a durable credential.
+MFA_PENDING_TTL = timedelta(minutes=5)
 
 _hasher = PasswordHasher()  # argon2id with library defaults
 
@@ -33,6 +37,10 @@ class AuthError(Exception):
 class TokenKind(enum.StrEnum):
     access = "access"
     refresh = "refresh"
+    # Half-authenticated MFA step-up state (§1B C6): password verified, 6-digit code
+    # still owed. decode_token's kind check makes it useless as an access or refresh
+    # token — the same enforcement that stops refresh-as-access replay.
+    mfa_pending = "mfa_pending"
 
 
 @dataclass(frozen=True)
@@ -63,7 +71,14 @@ def create_token(
     ttl: timedelta | None = None,
 ) -> str:
     issued_at = now or datetime.now(UTC)
-    lifetime = ttl or (ACCESS_TOKEN_TTL if kind is TokenKind.access else REFRESH_TOKEN_TTL)
+    if ttl is not None:
+        lifetime = ttl
+    elif kind is TokenKind.access:
+        lifetime = ACCESS_TOKEN_TTL
+    elif kind is TokenKind.mfa_pending:
+        lifetime = MFA_PENDING_TTL
+    else:
+        lifetime = REFRESH_TOKEN_TTL
     payload = {
         "sub": str(user_id),
         "role": role,

@@ -34,6 +34,38 @@ export interface AccessTokenOut {
   token_type: string;
 }
 
+/** MfaPendingOut — password verified, 6-digit code still owed (§1B C6). The token is a
+ *  distinct short-lived `mfa_pending` JWT kind: the backend refuses it as access/refresh,
+ *  and the client never stores it — it only rides back in POST /auth/mfa/verify. */
+export interface MfaPendingOut {
+  mfa_pending_token: string;
+  token_type: 'mfa_pending';
+}
+
+/** LoginOut — POST /auth/login answers full tokens, or the MFA step-up when the
+ *  clinician/ops account has an enrolled authenticator factor. Patients always get
+ *  TokenOut (their flow is unchanged). */
+export type LoginOut = TokenOut | MfaPendingOut;
+
+/** MfaVerifyIn — the login step-up: the pending token + the authenticator code. */
+export interface MfaVerifyIn {
+  mfa_pending_token: string;
+  code: string;
+}
+
+/** MfaEnrollOut — the otpauth:// provisioning URI + base32 secret, returned ONCE at
+ *  enrollment (the backend keeps only the vault-encrypted copy). Render, confirm, drop —
+ *  never persisted client-side. */
+export interface MfaEnrollOut {
+  otpauth_uri: string;
+  secret: string;
+}
+
+/** MfaStatusOut — whether the signed-in account has a confirmed authenticator factor. */
+export interface MfaStatusOut {
+  enrolled: boolean;
+}
+
 /** MeOut */
 export interface MeOut {
   user_id: string;

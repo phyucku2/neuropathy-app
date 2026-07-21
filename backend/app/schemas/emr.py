@@ -7,6 +7,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.schemas.base import ApiModel
 from app.schemas.lab import LabResultIn
 
 
@@ -18,7 +19,7 @@ class ProviderOut(BaseModel):
     note: str
 
 
-class ConnectStartIn(BaseModel):
+class ConnectStartIn(ApiModel):
     """Start an EMR connection: pick a registry provider OR supply a custom FHIR base.
 
     The patient is the authenticated caller (ADR-0010) — never supplied by the client.
@@ -66,7 +67,7 @@ class PullOut(BaseModel):
     results: list[LabResultIn]
 
 
-class ClinicalNoteIn(BaseModel):
+class ClinicalNoteIn(ApiModel):
     """One clinical note parsed from a FHIR DocumentReference — METADATA ONLY (ADR-0045 P2).
 
     NEVER carries the note body: the text is fetched lazily from the Binary on demand and

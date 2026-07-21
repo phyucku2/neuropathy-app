@@ -52,6 +52,7 @@ from app.emr.transport import HttpxTransport
 from app.models.user import UserRole
 from app.repositories.capability import InMemoryCapabilityRepository
 from app.repositories.emr_clinical_note import InMemoryEmrClinicalNoteRepository
+from app.repositories.mfa import InMemoryMfaFactorRepository
 from app.repositories.patient_capability import InMemoryPatientCapabilityRepository
 from app.repositories.postgres import (
     PostgresAuditEventRepository,
@@ -60,6 +61,7 @@ from app.repositories.postgres import (
     PostgresClinicRepository,
     PostgresEmrClinicalNoteRepository,
     PostgresEmrConnectionRepository,
+    PostgresMfaFactorRepository,
     PostgresObservationRepository,
     PostgresPatientCapabilityRepository,
     PostgresPendingAuthStore,
@@ -71,6 +73,7 @@ from app.services.auth import AuthService
 from app.services.capability import CapabilityService
 from app.services.clinic import ClinicService
 from app.services.export import PatientDataExportService
+from app.services.mfa import MfaService
 
 _bearer = HTTPBearer(auto_error=False)
 _log = logging.getLogger(__name__)
@@ -90,15 +93,23 @@ def _process_jwt_secret() -> str:
 
 @lru_cache(maxsize=1)
 def _default_auth_service() -> AuthService:
+    # The audit store is the SAME singleton every other in-memory feature uses
+    # (the EMR service owns it), so the login/refresh throttle (§1B C5) counts and
+    # writes into the one shared trail.
+    audit = _default_emr_service().audit
     if settings.jwt_secret:
-        return AuthService(secret=settings.jwt_secret)
-    return AuthService()  # ephemeral dev secret (ADR-0010)
+        return AuthService(secret=settings.jwt_secret, audit=audit)
+    return AuthService(audit=audit)  # ephemeral dev secret (ADR-0010)
 
 
 def get_auth_service(session: DbSessionDep = None) -> AuthService:
     if session is None:
         return _default_auth_service()
-    return AuthService(secret=_process_jwt_secret(), users=PostgresUserRepository(session))
+    return AuthService(
+        secret=_process_jwt_secret(),
+        users=PostgresUserRepository(session),
+        audit=PostgresAuditEventRepository(session),
+    )
 
 
 AuthDep = Annotated[AuthService, Depends(get_auth_service)]
@@ -177,6 +188,19 @@ def require_clinician(current: CurrentUserDep) -> CurrentUser:
 
 
 ClinicianUserDep = Annotated[CurrentUser, Depends(require_clinician)]
+
+
+def require_privileged(current: CurrentUserDep) -> CurrentUser:
+    """Privileged (clinician/ops) endpoints — the MFA enrollment surface (§1B C6).
+
+    Patients are refused outright: they can never hold an MFA factor, so their auth
+    flow is structurally untouched by the whole feature."""
+    if current.role is UserRole.patient:
+        raise HTTPException(status_code=403, detail="Clinician or ops account required")
+    return current
+
+
+PrivilegedUserDep = Annotated[CurrentUser, Depends(require_privileged)]
 
 
 def require_ops(current: CurrentUserDep) -> CurrentUser:
@@ -448,6 +472,48 @@ def get_account_deletion_service(session: DbSessionDep = None) -> AccountDeletio
 
 
 AccountDeletionDep = Annotated[AccountDeletionService, Depends(get_account_deletion_service)]
+
+
+@lru_cache(maxsize=1)
+def _process_mfa_factor_repo() -> InMemoryMfaFactorRepository:
+    """Process-wide MFA factor store for in-memory mode (§1B C6) — one store shared
+    by the enrollment endpoints and the login step-up, so a factor confirmed on one
+    request gates the very next login."""
+    return InMemoryMfaFactorRepository()
+
+
+@lru_cache(maxsize=1)
+def _default_mfa_service() -> MfaService:
+    """Process-wide MfaService for in-memory mode (§1B C6). The JWT secret is the
+    SAME one the auth service signs with (an mfa_pending token minted at login must
+    verify here), and the vault/audit stores are the shared EMR singletons — the
+    TOTP secret lives in exactly the vault EMR tokens use, never anywhere else."""
+    emr = _default_emr_service()
+    return MfaService(
+        secret=_default_auth_service().secret,
+        users=_default_auth_service().users,
+        factors=_process_mfa_factor_repo(),
+        secret_store=emr.secret_store,
+        audit=emr.audit,
+    )
+
+
+def get_mfa_service(session: DbSessionDep = None) -> MfaService:
+    if session is None:
+        return _default_mfa_service()
+    return MfaService(
+        secret=_process_jwt_secret(),
+        users=PostgresUserRepository(session),
+        factors=PostgresMfaFactorRepository(session),
+        # The same fail-closed vault selection every EMR request gets (ADR-0017):
+        # encrypted Postgres vault with a key, the per-process store without one —
+        # the TOTP secret is never written to the database unencrypted.
+        secret_store=_secret_store_for(session),
+        audit=PostgresAuditEventRepository(session),
+    )
+
+
+MfaDep = Annotated[MfaService, Depends(get_mfa_service)]
 
 
 @lru_cache(maxsize=1)

@@ -6,6 +6,7 @@ from app.models.clinic import Clinic
 from app.models.connection import ClinicConnection, ConnectionStatus, Initiator
 from app.models.emr_clinical_note import EmrClinicalNote
 from app.models.emr_connection import EmrConnection, EmrConnectionStatus
+from app.models.mfa import MfaFactor
 from app.models.observation import DataOrigin, Observation, ObservationStatus, SourceType
 from app.models.patient import ConnectionMode, Patient
 from app.models.pending_auth import PendingAuthState
@@ -24,6 +25,7 @@ __all__ = [
     "EmrClinicalNote",
     "EmrConnection",
     "EmrConnectionStatus",
+    "MfaFactor",
     "DataOrigin",
     "Observation",
     "ObservationStatus",

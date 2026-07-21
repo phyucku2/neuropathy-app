@@ -71,6 +71,11 @@ const PanelPage = lazy(() =>
 const PatientDetailPage = lazy(() =>
   import('./features/clinic/PatientDetailPage').then((m) => ({ default: m.PatientDetailPage })),
 );
+const ClinicianSettingsPage = lazy(() =>
+  import('./features/clinic/ClinicianSettingsPage').then((m) => ({
+    default: m.ClinicianSettingsPage,
+  })),
+);
 
 function RequireAuth() {
   const { status } = useAuth();
@@ -174,6 +179,9 @@ export function App() {
               <Route element={<AppShell variant="clinician" />}>
                 <Route index element={<PanelPage />} />
                 <Route path="patients/:patientId" element={<PatientDetailPage />} />
+                {/* Clinician account settings (§1B C6): two-step verification enrollment.
+                    Clinician area only — the patient settings surface is untouched. */}
+                <Route path="settings" element={<ClinicianSettingsPage />} />
                 <Route path="*" element={<Navigate to="/clinic" replace />} />
               </Route>
             </Route>

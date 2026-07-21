@@ -30,6 +30,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from app.schemas.base import ApiModel
+
 # A daily sync can carry many short walking-bout samples across several metrics; cap the
 # batch at a generous-but-bounded size so one request is never an implausible flood.
 MAX_WEARABLE_BATCH = 500
@@ -74,7 +76,7 @@ class SourceDevice(enum.StrEnum):
     unknown = "unknown"
 
 
-class WearableSampleIn(BaseModel):
+class WearableSampleIn(ApiModel):
     """One imported mobility sample over a walking-bout window.
 
     The client sends the `metric` (closed set) and `value` only — the unit is derived
@@ -96,7 +98,7 @@ class WearableSampleIn(BaseModel):
     external_id: str | None = Field(default=None, max_length=200)
 
 
-class WearableImportIn(BaseModel):
+class WearableImportIn(ApiModel):
     """A batch of mobility samples from one health-store sync."""
 
     samples: list[WearableSampleIn] = Field(..., min_length=1, max_length=MAX_WEARABLE_BATCH)
