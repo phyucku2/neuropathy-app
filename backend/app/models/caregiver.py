@@ -19,7 +19,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, String, text
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, String, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -106,3 +106,95 @@ class CaregiverLink(UUIDPrimaryKey, Timestamps, Base):
     # opt-in's second step. Null = the patient has not accepted, nothing flows.
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class CaregiverAlertType(enum.StrEnum):
+    """The four caregiver alert kinds (ADR-0047 Phase B1). Scope-gated: a trends-only
+    caregiver may see only missed_checkin + trend_shift (type_allowed_for_scope)."""
+
+    missed_checkin = "missed_checkin"  # no ADL check-in within the missed window
+    med_change = "med_change"  # a medication change/event landed
+    trend_shift = "trend_shift"  # a weekly NSI/trajectory direction change (per code/ISO week)
+    new_chart_note = "new_chart_note"  # a new EMR clinical note (DocumentReference) exists
+
+
+class CaregiverAlert(UUIDPrimaryKey, Timestamps, Base):
+    """One compute-on-read caregiver alert (ADR-0047 Phase B1) — an append-only fact.
+
+    Evaluators persist candidate alerts idempotently via ``add_if_absent`` on the
+    once-only-per-logical-event backstop ``uq_caregiver_alert_link_type_dedupe``: a
+    re-read of the feed never duplicates a row (mirrors the observation/emr-note
+    ``add_if_absent`` idempotency, but ``dedupe_key`` is NOT NULL for every type, so a
+    plain composite UNIQUE is the faithful analog of the partial-unique import index).
+    ``acknowledged_at`` is the one lifecycle mutation (a conditional UPDATE), so
+    ``Timestamps`` is correct here just as it is on ``CaregiverAlertPreference``.
+    """
+
+    __tablename__ = "caregiver_alert"
+
+    __table_args__ = (
+        # Once-only per logical event: the same (link, type, dedupe_key) can never
+        # produce a second row — the storage backstop ``add_if_absent`` absorbs as a
+        # skip, exactly like uq_emr_note_patient_import_key. dedupe_key is NOT NULL for
+        # every type, so a plain composite UNIQUE is the faithful analog (no partial WHERE).
+        Index(
+            "uq_caregiver_alert_link_type_dedupe",
+            "caregiver_link_id",
+            "alert_type",
+            "dedupe_key",
+            unique=True,
+        ),
+    )
+
+    patient_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("patient.id"), nullable=False, index=True
+    )
+    # Alerts FK the caregiver_link (account deletion must remove them BEFORE the
+    # caregiver_invite/caregiver_link rows — FK-safe order, ADR-0047 B1).
+    caregiver_link_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("caregiver_link.id"), nullable=False, index=True
+    )
+    alert_type: Mapped[CaregiverAlertType] = mapped_column(
+        Enum(CaregiverAlertType, name="caregiver_alert_type"), nullable=False
+    )
+    # The per-type logical-event identity (ADR-0047 B1): trend_shift = "{code}:{ISO week}",
+    # new_chart_note = the note's import_key, med_change = the med-change event id,
+    # missed_checkin = the missed-window date key. NEVER a value — a reference only.
+    dedupe_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    # Null = unacknowledged; set once by the caregiver's idempotent ack (a conditional
+    # UPDATE ... WHERE acknowledged_at IS NULL, so a double-ack is a quiet no-op).
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class CaregiverAlertPreference(UUIDPrimaryKey, Timestamps, Base):
+    """Per-patient, per-type caregiver-alert opt-in (ADR-0047 Phase B1) — DEFAULT OFF.
+
+    One row per (patient, alert_type); ``uq_caregiver_alert_preference_patient_type``
+    owns that invariant and enables the insert-first upsert (mirrors PatientCapability).
+    A missing row means OFF: an alert is emitted/shown ONLY when the patient's
+    preference for the type is ON, the type is allowed for the link's scope, AND the
+    link is active+accepted (the single _may_caregiver_read consent gate).
+    """
+
+    __tablename__ = "caregiver_alert_preference"
+
+    __table_args__ = (
+        Index(
+            "uq_caregiver_alert_preference_patient_type",
+            "patient_id",
+            "alert_type",
+            unique=True,
+        ),
+    )
+
+    patient_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("patient.id"), nullable=False, index=True
+    )
+    alert_type: Mapped[CaregiverAlertType] = mapped_column(
+        Enum(CaregiverAlertType, name="caregiver_alert_type"), nullable=False
+    )
+    # DEFAULT OFF (ADR-0047 B1): both the Python-side default and the DB server_default
+    # are false, so an unset preference never leaks an alert.
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false"), default=False
+    )

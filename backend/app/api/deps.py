@@ -55,12 +55,18 @@ from app.repositories.caregiver import (
     InMemoryCaregiverInviteRepository,
     InMemoryCaregiverLinkRepository,
 )
+from app.repositories.caregiver_alert import (
+    InMemoryCaregiverAlertPreferenceRepository,
+    InMemoryCaregiverAlertRepository,
+)
 from app.repositories.emr_clinical_note import InMemoryEmrClinicalNoteRepository
 from app.repositories.mfa import InMemoryMfaFactorRepository
 from app.repositories.patient_capability import InMemoryPatientCapabilityRepository
 from app.repositories.postgres import (
     PostgresAuditEventRepository,
     PostgresCapabilityRepository,
+    PostgresCaregiverAlertPreferenceRepository,
+    PostgresCaregiverAlertRepository,
     PostgresCaregiverInviteRepository,
     PostgresCaregiverLinkRepository,
     PostgresClinicConnectionRepository,
@@ -78,9 +84,11 @@ from app.services.account_deletion import AccountDeletionService
 from app.services.auth import AuthService
 from app.services.capability import CapabilityService
 from app.services.caregiver import CaregiverService
+from app.services.caregiver_alert import CaregiverAlertService
 from app.services.clinic import ClinicService
 from app.services.export import PatientDataExportService
 from app.services.mfa import MfaService
+from app.services.push import FcmPushSender, InMemoryPushSender, PushSender
 
 _bearer = HTTPBearer(auto_error=False)
 _log = logging.getLogger(__name__)
@@ -473,6 +481,74 @@ CaregiverServiceDep = Annotated[CaregiverService, Depends(get_caregiver_service)
 
 
 @lru_cache(maxsize=1)
+def _process_caregiver_alert_repo() -> InMemoryCaregiverAlertRepository:
+    """Process-wide caregiver-alert store for in-memory mode (ADR-0047 B1) — shared by
+    the alert, account-deletion, and export flows so the feed, the erasure sweeps, and
+    the export all see the SAME alerts. It resolves caregiver-scoped deletes through the
+    SAME shared link store the caregiver service uses."""
+    return InMemoryCaregiverAlertRepository(links=_process_caregiver_link_repo())
+
+
+@lru_cache(maxsize=1)
+def _process_caregiver_alert_pref_repo() -> InMemoryCaregiverAlertPreferenceRepository:
+    """Process-wide caregiver-alert preference store for in-memory mode (ADR-0047 B1) —
+    shared so a patient's toggle write gates the caregiver's very next feed read."""
+    return InMemoryCaregiverAlertPreferenceRepository()
+
+
+@lru_cache(maxsize=1)
+def _process_push_sender() -> InMemoryPushSender:
+    """Process-wide in-memory push sender for in-memory mode (ADR-0047 B1) — captures
+    sends so tests can inspect the PHI-free push seam. The FcmPushSender stub is only
+    selected when caregiver_push_enabled is True (still a no-op in B1)."""
+    return InMemoryPushSender()
+
+
+def _push_sender() -> PushSender:
+    """The configured push sender: the in-memory capture store by default (B1), or the
+    no-op FcmPushSender stub when caregiver_push_enabled is flipped on (B2 seam)."""
+    if settings.caregiver_push_enabled:
+        return FcmPushSender()
+    return _process_push_sender()
+
+
+@lru_cache(maxsize=1)
+def _default_caregiver_alert_service() -> CaregiverAlertService:
+    """Process-wide CaregiverAlertService for in-memory mode (ADR-0047 B1). The caregiver
+    service (the SINGLE consent predicate), observations, clinical notes, and audit are
+    the SAME shared singletons every other feature uses, so the alert engine reads
+    exactly the data the patient's own endpoints wrote and every alert event lands in
+    the one shared trail. Push is captured in-memory unless the flag selects the stub."""
+    emr = _default_emr_service()
+    return CaregiverAlertService(
+        caregivers=_default_caregiver_service(),
+        alerts=_process_caregiver_alert_repo(),
+        preferences=_process_caregiver_alert_pref_repo(),
+        observations=emr.observations,
+        clinical_notes=emr.clinical_notes,
+        audit=emr.audit,
+        push=_push_sender(),
+    )
+
+
+def get_caregiver_alert_service(session: DbSessionDep = None) -> CaregiverAlertService:
+    if session is None:
+        return _default_caregiver_alert_service()
+    return CaregiverAlertService(
+        caregivers=get_caregiver_service(session),
+        alerts=PostgresCaregiverAlertRepository(session),
+        preferences=PostgresCaregiverAlertPreferenceRepository(session),
+        observations=PostgresObservationRepository(session),
+        clinical_notes=PostgresEmrClinicalNoteRepository(session),
+        audit=PostgresAuditEventRepository(session),
+        push=_push_sender(),
+    )
+
+
+CaregiverAlertServiceDep = Annotated[CaregiverAlertService, Depends(get_caregiver_alert_service)]
+
+
+@lru_cache(maxsize=1)
 def _default_capability_service() -> CapabilityService:
     """Process-wide CapabilityService for in-memory mode. Connections and audit are
     the SAME stores the clinic service uses (deps singletons), so toggle authority
@@ -520,6 +596,8 @@ def _default_account_deletion_service() -> AccountDeletionService:
         clinical_notes=emr.clinical_notes,
         caregiver_invites=_process_caregiver_invite_repo(),
         caregiver_links=_process_caregiver_link_repo(),
+        caregiver_alerts=_process_caregiver_alert_repo(),
+        caregiver_alert_preferences=_process_caregiver_alert_pref_repo(),
         audit=emr.audit,
     )
 
@@ -541,6 +619,8 @@ def get_account_deletion_service(session: DbSessionDep = None) -> AccountDeletio
         clinical_notes=PostgresEmrClinicalNoteRepository(session),
         caregiver_invites=PostgresCaregiverInviteRepository(session),
         caregiver_links=PostgresCaregiverLinkRepository(session),
+        caregiver_alerts=PostgresCaregiverAlertRepository(session),
+        caregiver_alert_preferences=PostgresCaregiverAlertPreferenceRepository(session),
         audit=PostgresAuditEventRepository(session),
     )
 
@@ -603,6 +683,8 @@ def _default_patient_data_export_service() -> PatientDataExportService:
         emr_connections=emr.connections,
         clinical_notes=emr.clinical_notes,
         caregiver_links=_process_caregiver_link_repo(),
+        caregiver_alerts=_process_caregiver_alert_repo(),
+        caregiver_alert_preferences=_process_caregiver_alert_pref_repo(),
         clinic=_default_clinic_service(),
         capabilities=_default_capability_service(),
         audit=emr.audit,
@@ -618,6 +700,8 @@ def get_patient_data_export_service(session: DbSessionDep = None) -> PatientData
         emr_connections=PostgresEmrConnectionRepository(session),
         clinical_notes=PostgresEmrClinicalNoteRepository(session),
         caregiver_links=PostgresCaregiverLinkRepository(session),
+        caregiver_alerts=PostgresCaregiverAlertRepository(session),
+        caregiver_alert_preferences=PostgresCaregiverAlertPreferenceRepository(session),
         # Compose the clinic/capability services on the SAME session so their reads
         # (clinic names, effective toggle states) join the request transaction.
         clinic=get_clinic_service(session),

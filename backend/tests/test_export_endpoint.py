@@ -281,7 +281,7 @@ def test_export_returns_every_data_class_with_correct_values(
     body = resp.json()
 
     # Envelope.
-    assert body["schema_version"] == "1.1"
+    assert body["schema_version"] == "1.2"
     assert body["subject_id"] == patient_id
     assert "exported_at" in body
 
@@ -408,6 +408,8 @@ def test_export_writes_one_phi_free_audit_event(world: World, client: TestClient
         "clinic_connections": 1,
         "capabilities": 11,  # + ADR-0045 P2 ingest_medications, ingest_events, ingest_notes
         "caregiver_links": 1,  # the accepted caregiver share (ADR-0047)
+        "caregiver_alerts": 0,
+        "caregiver_alert_preferences": 0,
     }
     assert "Synthetic" not in json.dumps(event.detail)
 

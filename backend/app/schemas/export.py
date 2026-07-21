@@ -30,7 +30,9 @@ from app.schemas.trajectory import Trajectory
 # Bump on any breaking shape change so a downloaded file stays interpretable by later
 # tooling (forward-compat, ADR-0031). The envelope always carries this string.
 # 1.1: added caregiver_links (ADR-0047 — caregiver-sharing metadata).
-EXPORT_SCHEMA_VERSION = "1.1"
+# 1.2: added caregiver_alerts + caregiver_alert_preferences (ADR-0047 B1 — alert
+#      metadata + the per-type opt-in state).
+EXPORT_SCHEMA_VERSION = "1.2"
 
 
 class ExportAccountProfile(BaseModel):
@@ -117,6 +119,28 @@ class ExportCaregiverLink(BaseModel):
     created_at: datetime | None
 
 
+class ExportCaregiverAlert(BaseModel):
+    """One caregiver alert (ADR-0047 B1) — METADATA ONLY.
+
+    Which caregiver, which alert type, when it was raised, and whether it was
+    acknowledged. No value, code label, or note text exists here to leak — the alert is
+    a reference to a computed event, never the underlying reading (structural absence,
+    like the body-free clinical note)."""
+
+    id: uuid.UUID
+    caregiver_display_name: str
+    alert_type: str
+    created_at: datetime | None
+    acknowledged_at: datetime | None
+
+
+class ExportCaregiverAlertPreference(BaseModel):
+    """One per-type caregiver-alert opt-in flag (ADR-0047 B1) — the patient's own setting."""
+
+    alert_type: str
+    enabled: bool
+
+
 class ExportOut(BaseModel):
     """The current-record export envelope for one patient (ADR-0031)."""
 
@@ -139,3 +163,7 @@ class ExportOut(BaseModel):
     # Caregiver-sharing metadata (ADR-0047): who the patient shares with, scope, and
     # lifecycle timestamps — never codes. Defaulted for the same reason as above.
     caregiver_links: list[ExportCaregiverLink] = Field(default_factory=list)
+    # Caregiver alerts + the patient's per-type opt-in state (ADR-0047 B1) — metadata
+    # only, defaulted so older constructions stay valid.
+    caregiver_alerts: list[ExportCaregiverAlert] = Field(default_factory=list)
+    caregiver_alert_preferences: list[ExportCaregiverAlertPreference] = Field(default_factory=list)

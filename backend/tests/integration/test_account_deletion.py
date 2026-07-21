@@ -30,17 +30,31 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.core.config import settings
 from app.main import create_app
+from app.models.caregiver import (
+    CaregiverAlert,
+    CaregiverAlertType,
+    CaregiverLink,
+    CaregiverLinkStatus,
+    CaregiverScope,
+)
+from app.models.connection import Initiator
 from app.models.emr_clinical_note import EmrClinicalNote
 from app.models.emr_connection import EmrConnectionStatus
 from app.models.observation import DataOrigin, Observation, ObservationStatus, SourceType
+from app.models.user import UserRole
 from app.repositories.emr_connection import ConnectionRecord
 from app.repositories.pending_auth import PendingAuth
 from app.repositories.postgres import (
+    PostgresCaregiverAlertPreferenceRepository,
+    PostgresCaregiverAlertRepository,
+    PostgresCaregiverLinkRepository,
     PostgresEmrClinicalNoteRepository,
     PostgresEmrConnectionRepository,
     PostgresPendingAuthStore,
     PostgresSecretStore,
+    PostgresUserRepository,
 )
+from app.repositories.user import UserRecord
 from tests.integration.test_app_db_wiring import (
     SYNTHETIC_PASSWORD,
     _auth_header,
@@ -70,6 +84,12 @@ _PATIENT_SCOPED_COUNTS = {
     ),
     "observation": "SELECT count(*) FROM observation WHERE patient_id = :patient_id",
     "emr_clinical_note": ("SELECT count(*) FROM emr_clinical_note WHERE patient_id = :patient_id"),
+    # Caregiver alerts + per-type preferences (ADR-0047 B1) — alerts FK caregiver_link,
+    # so they must die before the links; both must be zero-residual after deletion.
+    "caregiver_alert": "SELECT count(*) FROM caregiver_alert WHERE patient_id = :patient_id",
+    "caregiver_alert_preference": (
+        "SELECT count(*) FROM caregiver_alert_preference WHERE patient_id = :patient_id"
+    ),
 }
 
 
@@ -211,6 +231,44 @@ async def _seed_all_tables(url: str, patient_id: uuid.UUID) -> tuple[uuid.UUID, 
                     quality={"human_confirmed": True},
                     payload={},
                 )
+            )
+
+            # A caregiver account + an accepted link + one alert + one preference
+            # (ADR-0047 B1): the alert FKs the link, so the deletion must sweep it BEFORE
+            # the link; the preference FKs the patient row. Both are zero-residual after.
+            caregiver_id = uuid.uuid4()
+            await PostgresUserRepository(session).add(
+                UserRecord(
+                    id=caregiver_id,
+                    email=f"care-{uuid.uuid4().hex[:12]}@example.com",
+                    password_hash="argon2-hash-placeholder",
+                    display_name="Synthetic Caregiver",
+                    role=UserRole.caregiver,
+                    patient_id=None,
+                )
+            )
+            link = await PostgresCaregiverLinkRepository(session).add(
+                CaregiverLink(
+                    patient_id=patient_id,
+                    caregiver_user_id=caregiver_id,
+                    scope=CaregiverScope.full,
+                    status=CaregiverLinkStatus.active,
+                    initiated_by=Initiator.patient,
+                    accepted_at=now,
+                )
+            )
+            await PostgresCaregiverAlertRepository(session).add_if_absent(
+                CaregiverAlert(
+                    patient_id=patient_id,
+                    caregiver_link_id=link.id,
+                    alert_type=CaregiverAlertType.missed_checkin,
+                    dedupe_key=now.date().isoformat(),
+                )
+            )
+            await PostgresCaregiverAlertPreferenceRepository(session).upsert(
+                patient_id=patient_id,
+                alert_type=CaregiverAlertType.missed_checkin,
+                enabled=True,
             )
         return clinic_id, secret_ref
     finally:

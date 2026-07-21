@@ -658,6 +658,23 @@ export interface ExportCaregiverLink {
   created_at: string | null;
 }
 
+/** ExportCaregiverAlert — one caregiver alert (ADR-0047 B1), METADATA ONLY: which
+ *  caregiver, which type, when raised, and whether acknowledged. No value, code label,
+ *  or note text exists here to leak (structural absence, like the body-free note). */
+export interface ExportCaregiverAlert {
+  id: string;
+  caregiver_display_name: string;
+  alert_type: string;
+  created_at: string | null;
+  acknowledged_at: string | null;
+}
+
+/** ExportCaregiverAlertPreference — one per-type opt-in flag, the patient's own setting. */
+export interface ExportCaregiverAlertPreference {
+  alert_type: string;
+  enabled: boolean;
+}
+
 /** ExportOut — the complete "Download my data" envelope. NEVER carries tokens,
  *  secrets, or the password hash (the shapes above have no field for them). */
 export interface ExportOut {
@@ -673,6 +690,10 @@ export interface ExportOut {
   emr_connections: EmrConnectionOut[];
   /** Caregiver-sharing metadata (ADR-0047, export schema 1.1) — never codes. */
   caregiver_links: ExportCaregiverLink[];
+  /** Caregiver alerts + the patient's per-type opt-in state (ADR-0047 B1, export schema
+   *  1.2) — metadata only. Defaulted server-side, so an older envelope may omit them. */
+  caregiver_alerts?: ExportCaregiverAlert[];
+  caregiver_alert_preferences?: ExportCaregiverAlertPreference[];
 }
 
 // ---- caregiver.py (ADR-0047 — Caregiver Companion Phase A) ----
@@ -741,6 +762,50 @@ export interface CaregiverPatientOut {
 export interface CaregiverPatientsOut {
   patients: CaregiverPatientOut[];
   emergency_notice: string;
+}
+
+// ---- caregiver_alert.py (ADR-0047 Phase B1 — compute-on-read alerts + feed) ----
+
+/** CaregiverAlertType — the closed set of alert kinds. `missed_checkin`/`trend_shift`
+ *  are visible at either scope; `med_change`/`new_chart_note` are FULL-scope only. */
+export type CaregiverAlertType = 'missed_checkin' | 'med_change' | 'trend_shift' | 'new_chart_note';
+
+/** CaregiverAlertOut — one alert as the CAREGIVER sees it: fixed template copy + refs +
+ *  the patient's display name (already on the Phase A list). NEVER a value, code label,
+ *  or note text — PHI-minimal by construction. `title`/`body` are non-diagnostic template
+ *  constants; the 911 framing rides `body` and the feed envelope. */
+export interface CaregiverAlertOut {
+  id: string;
+  alert_type: CaregiverAlertType;
+  patient_id: string;
+  patient_display_name: string;
+  title: string;
+  body: string;
+  created_at: string;
+  acknowledged_at: string | null;
+}
+
+/** CaregiverAlertsOut — the caregiver's in-app alert feed. The non-urgent framing rides
+ *  WITH the data (`emergency_notice`), co-located, exactly as Phase A does. */
+export interface CaregiverAlertsOut {
+  alerts: CaregiverAlertOut[];
+  emergency_notice: string;
+}
+
+/** AlertPreferenceOut — one per-type opt-in flag as the PATIENT sees it (DEFAULT OFF). */
+export interface AlertPreferenceOut {
+  alert_type: CaregiverAlertType;
+  enabled: boolean;
+}
+
+/** AlertPreferencesOut — every type is listed; a never-touched type reads DEFAULT OFF. */
+export interface AlertPreferencesOut {
+  preferences: AlertPreferenceOut[];
+}
+
+/** AlertPreferenceIn — turn a caregiver-alert type on or off (the type rides in the path). */
+export interface AlertPreferenceIn {
+  enabled: boolean;
 }
 
 // ---- clinic.py ----

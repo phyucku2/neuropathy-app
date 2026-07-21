@@ -34,6 +34,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.deps import (
     AuthDep,
+    CaregiverAlertServiceDep,
     CaregiverServiceDep,
     CaregiverUserDep,
     CurrentUser,
@@ -42,7 +43,7 @@ from app.api.deps import (
 from app.api.routes.me import _validate_window
 from app.core.config import settings
 from app.models.audit import AuditEvent
-from app.models.caregiver import CaregiverLink, CaregiverScope
+from app.models.caregiver import CaregiverAlertType, CaregiverLink, CaregiverScope
 from app.schemas.auth import TokenOut
 from app.schemas.caregiver import (
     CaregiverPatientOut,
@@ -55,6 +56,13 @@ from app.schemas.caregiver import (
     PatientLinkOut,
     ScopeIn,
 )
+from app.schemas.caregiver_alert import (
+    AlertPreferenceIn,
+    AlertPreferenceOut,
+    AlertPreferencesOut,
+    CaregiverAlertOut,
+    CaregiverAlertsOut,
+)
 from app.schemas.trajectory import Trajectory
 from app.schemas.visit_summary import DEFAULT_WINDOW_DAYS, VisitSummary
 from app.services.auth import AuthApiError, LoginDenied
@@ -64,6 +72,7 @@ from app.services.caregiver import (
     CaregiverService,
     ClaimDenied,
 )
+from app.services.caregiver_alert_copy import ALERT_TEMPLATES
 from app.services.rate_limit import RateLimitExceededError
 from app.services.trajectory import compute_patient_trajectory
 from app.services.visit_summary import build_visit_summary
@@ -264,6 +273,52 @@ async def caregiver_patient_visit_summary(
     return summary
 
 
+# ---------------------------------------------------------------- caregiver alerts (B1)
+
+
+@router.get("/caregiver/alerts", response_model=CaregiverAlertsOut)
+async def caregiver_alerts(
+    current: CaregiverUserDep, service: CaregiverAlertServiceDep, response: Response
+) -> CaregiverAlertsOut:
+    """The caregiver's in-app alert feed (ADR-0047 B1): runs the compute-on-read
+    evaluators for every accepted patient, persists new candidates idempotently, and
+    returns the scope+preference-gated list — a trends-only caregiver never sees a
+    ``med_change`` / ``new_chart_note`` alert. PHI-minimal (template copy + name only);
+    the single feed audit is written in the service. Bodies are PHI — ``no-store``."""
+    response.headers["Cache-Control"] = "no-store"
+    now = datetime.now(UTC)
+    feed = await service.feed_for_caregiver(current.user_id, now=now)
+    alerts = [
+        CaregiverAlertOut(
+            id=alert.id,
+            alert_type=alert.alert_type.value,
+            patient_id=alert.patient_id,
+            patient_display_name=display_name,
+            title=ALERT_TEMPLATES[alert.alert_type].title,
+            body=ALERT_TEMPLATES[alert.alert_type].body,
+            created_at=alert.created_at,
+            acknowledged_at=alert.acknowledged_at,
+        )
+        for alert, display_name in feed
+    ]
+    return CaregiverAlertsOut(alerts=alerts)
+
+
+@router.post("/caregiver/alerts/{alert_id}/ack", status_code=204)
+async def acknowledge_caregiver_alert(
+    alert_id: uuid.UUID, current: CaregiverUserDep, service: CaregiverAlertServiceDep
+) -> None:
+    """Acknowledge an alert — idempotent (a double-ack is a quiet 204, no second audit).
+    404-over-403 for anything not readable: an unknown alert, another caregiver's alert,
+    or one hidden by scope/preference is indistinguishable from nonexistent."""
+    now = datetime.now(UTC)
+    changed = await service.acknowledge(
+        caregiver_user_id=current.user_id, alert_id=alert_id, now=now
+    )
+    if changed is None:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+
 # ---------------------------------------------------------------- patient lifecycle
 
 
@@ -400,3 +455,44 @@ async def revoke_caregiver(
     )
     if link is None:
         raise HTTPException(status_code=404, detail="Caregiver not found")
+
+
+# ---------------------------------------------------------------- patient: alert prefs
+
+
+@router.get("/me/caregiver-alert-preferences", response_model=AlertPreferencesOut)
+async def list_caregiver_alert_preferences(
+    current: PatientUserDep, service: CaregiverAlertServiceDep
+) -> AlertPreferencesOut:
+    """The patient's per-type caregiver-alert opt-in flags (ADR-0047 B1). Every type is
+    listed; a type the patient has never touched reads DEFAULT OFF."""
+    assert current.patient_id is not None  # guaranteed by require_patient
+    prefs = await service.list_preferences(current.patient_id)
+    return AlertPreferencesOut(
+        preferences=[
+            AlertPreferenceOut(alert_type=alert_type.value, enabled=enabled)
+            for alert_type, enabled in prefs
+        ]
+    )
+
+
+@router.put("/me/caregiver-alert-preferences/{alert_type}", response_model=AlertPreferenceOut)
+async def set_caregiver_alert_preference(
+    alert_type: CaregiverAlertType,
+    body: AlertPreferenceIn,
+    current: PatientUserDep,
+    service: CaregiverAlertServiceDep,
+) -> AlertPreferenceOut:
+    """Turn a caregiver-alert type on or off (ADR-0047 B1 — DEFAULT OFF). A no-change
+    write is a quiet success (no audit event); an unknown ``alert_type`` in the path is
+    a 422 via enum coercion."""
+    assert current.patient_id is not None  # guaranteed by require_patient
+    now = datetime.now(UTC)
+    enabled = await service.set_preference(
+        patient_id=current.patient_id,
+        actor_id=current.user_id,
+        alert_type=alert_type,
+        enabled=body.enabled,
+        now=now,
+    )
+    return AlertPreferenceOut(alert_type=alert_type.value, enabled=enabled)

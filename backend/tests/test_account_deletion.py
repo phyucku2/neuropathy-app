@@ -290,6 +290,8 @@ def test_happy_path_deletes_every_store_and_retains_anonymous_audit(
         "patient_capabilities": 1,
         "caregiver_invites": 1,
         "caregiver_links": 1,
+        "caregiver_alerts": 0,
+        "caregiver_alert_preferences": 0,
     }
     # EVERY retained event for this patient is anonymous now — none still points at
     # the deleted record — and the log itself was never truncated.
@@ -731,7 +733,7 @@ def test_caregiver_deletes_own_account_and_links_only(world: World, client: Test
     assert len(deletions) == 1
     assert deletions[0].actor_role == "caregiver"
     assert deletions[0].patient_id is None
-    assert deletions[0].detail == {"caregiver_links": 1}
+    assert deletions[0].detail == {"caregiver_links": 1, "caregiver_alerts": 0}
 
 
 def test_caregiver_wrong_password_is_403_and_deletes_nothing(

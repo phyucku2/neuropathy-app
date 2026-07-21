@@ -23,7 +23,13 @@ from sqlalchemy.orm import aliased
 
 from app.models.audit import AuditEvent
 from app.models.capability import Actor, Capability, PatientCapability
-from app.models.caregiver import CaregiverInvite, CaregiverLink
+from app.models.caregiver import (
+    CaregiverAlert,
+    CaregiverAlertPreference,
+    CaregiverAlertType,
+    CaregiverInvite,
+    CaregiverLink,
+)
 from app.models.clinic import Clinic
 from app.models.connection import ClinicConnection, ConnectionStatus
 from app.models.emr_clinical_note import EmrClinicalNote
@@ -404,6 +410,150 @@ class PostgresCaregiverLinkRepository:
     async def delete_for_caregiver(self, caregiver_user_id: uuid.UUID) -> None:
         await self._session.execute(
             delete(CaregiverLink).where(CaregiverLink.caregiver_user_id == caregiver_user_id)
+        )
+        await self._session.flush()
+
+
+class PostgresCaregiverAlertRepository:
+    """CaregiverAlertRepository over the caregiver_alert table (ADR-0047 B1, append-only)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add_if_absent(self, alert: CaregiverAlert) -> bool:
+        # A savepoint scopes the flush: when uq_caregiver_alert_link_type_dedupe fires (a
+        # concurrent evaluator already persisted this logical event), only THIS insert
+        # rolls back and the caller's transaction stays usable — the feed run returns a
+        # clean skip instead of a 500. Any other IntegrityError re-raises (mirrors
+        # PostgresEmrClinicalNoteRepository.add_if_absent).
+        try:
+            async with self._session.begin_nested():
+                self._session.add(alert)
+                await self._session.flush()
+        except IntegrityError as exc:
+            if "uq_caregiver_alert_link_type_dedupe" in str(exc.orig):
+                return False
+            raise
+        return True
+
+    async def get(self, alert_id: uuid.UUID) -> CaregiverAlert | None:
+        return await self._session.get(CaregiverAlert, alert_id)
+
+    async def list_for_link(
+        self, caregiver_link_id: uuid.UUID, *, newest_first: bool = True
+    ) -> list[CaregiverAlert]:
+        order = CaregiverAlert.created_at.desc() if newest_first else CaregiverAlert.created_at
+        stmt = (
+            select(CaregiverAlert)
+            .where(CaregiverAlert.caregiver_link_id == caregiver_link_id)
+            .order_by(order)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def list_for_links(self, link_ids: list[uuid.UUID]) -> list[CaregiverAlert]:
+        if not link_ids:
+            return []
+        stmt = (
+            select(CaregiverAlert)
+            .where(CaregiverAlert.caregiver_link_id.in_(link_ids))
+            .order_by(CaregiverAlert.created_at.desc())
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def acknowledge(
+        self, alert_id: uuid.UUID, caregiver_link_id: uuid.UUID, *, at: datetime
+    ) -> bool:
+        # One conditional UPDATE ... RETURNING: two racing acks serialize on the row lock
+        # and the second matches nothing (acknowledged_at already set) — quiet double-ack,
+        # never check-then-write (docs/lessons.md). The link_id term also enforces
+        # ownership, so a foreign link can never ack another's alert.
+        row = (
+            await self._session.execute(
+                update(CaregiverAlert)
+                .where(
+                    CaregiverAlert.id == alert_id,
+                    CaregiverAlert.caregiver_link_id == caregiver_link_id,
+                    CaregiverAlert.acknowledged_at.is_(None),
+                )
+                .values(acknowledged_at=at)
+                .returning(CaregiverAlert.id)
+            )
+        ).one_or_none()
+        await self._session.flush()
+        return row is not None
+
+    async def delete_for_patient(self, patient_id: uuid.UUID) -> None:
+        await self._session.execute(
+            delete(CaregiverAlert).where(CaregiverAlert.patient_id == patient_id)
+        )
+        await self._session.flush()
+
+    async def delete_for_caregiver(self, caregiver_user_id: uuid.UUID) -> None:
+        # DELETE the alerts whose link belongs to this caregiver, BEFORE the link rows
+        # die (alerts FK caregiver_link) — the subquery is the SQL twin of the in-memory
+        # link resolution.
+        link_ids = select(CaregiverLink.id).where(
+            CaregiverLink.caregiver_user_id == caregiver_user_id
+        )
+        await self._session.execute(
+            delete(CaregiverAlert).where(CaregiverAlert.caregiver_link_id.in_(link_ids))
+        )
+        await self._session.flush()
+
+
+class PostgresCaregiverAlertPreferenceRepository:
+    """CaregiverAlertPreferenceRepository over the caregiver_alert_preference table (B1)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get(
+        self, patient_id: uuid.UUID, alert_type: CaregiverAlertType
+    ) -> CaregiverAlertPreference | None:
+        stmt = select(CaregiverAlertPreference).where(
+            CaregiverAlertPreference.patient_id == patient_id,
+            CaregiverAlertPreference.alert_type == alert_type,
+        )
+        return (await self._session.scalars(stmt)).first()
+
+    async def list_for_patient(self, patient_id: uuid.UUID) -> list[CaregiverAlertPreference]:
+        stmt = (
+            select(CaregiverAlertPreference)
+            .where(CaregiverAlertPreference.patient_id == patient_id)
+            .order_by(CaregiverAlertPreference.created_at)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def upsert(
+        self, *, patient_id: uuid.UUID, alert_type: CaregiverAlertType, enabled: bool
+    ) -> CaregiverAlertPreference:
+        # Insert-first, mirroring PostgresPatientCapabilityRepository.upsert: the savepoint
+        # absorbs uq_caregiver_alert_preference_patient_type (row pre-existed or a
+        # concurrent upsert won the race) and the update path takes over, so exactly one
+        # row per pair survives and the caller's transaction stays usable.
+        row = CaregiverAlertPreference(
+            patient_id=patient_id, alert_type=alert_type, enabled=enabled
+        )
+        try:
+            async with self._session.begin_nested():
+                self._session.add(row)
+                await self._session.flush()
+        except IntegrityError as exc:
+            if "uq_caregiver_alert_preference_patient_type" not in str(exc.orig):
+                raise
+            existing = await self.get(patient_id, alert_type)
+            assert existing is not None  # the fired constraint guarantees the row
+            existing.enabled = enabled
+            await self._session.flush()
+            return existing
+        await self._session.refresh(row)
+        return row
+
+    async def delete_for_patient(self, patient_id: uuid.UUID) -> None:
+        await self._session.execute(
+            delete(CaregiverAlertPreference).where(
+                CaregiverAlertPreference.patient_id == patient_id
+            )
         )
         await self._session.flush()
 
