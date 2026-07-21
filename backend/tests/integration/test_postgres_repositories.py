@@ -20,6 +20,12 @@ from app.db.base import Base
 from app.ingestion.labs import lab_result_to_observation
 from app.models.audit import AuditEvent
 from app.models.capability import Actor, Capability
+from app.models.caregiver import (
+    CaregiverInvite,
+    CaregiverLink,
+    CaregiverLinkStatus,
+    CaregiverScope,
+)
 from app.models.clinic import Clinic
 from app.models.connection import ClinicConnection, ConnectionStatus, Initiator
 from app.models.emr_connection import EmrConnectionStatus
@@ -27,11 +33,14 @@ from app.models.observation import DataOrigin
 from app.models.patient import Patient
 from app.models.user import UserRole
 from app.repositories.capability import DuplicateCapabilityKeyError
+from app.repositories.caregiver import DuplicateLiveCaregiverLinkError
 from app.repositories.clinic_connection import DuplicateLiveConnectionError
 from app.repositories.emr_connection import ConnectionRecord
 from app.repositories.postgres import (
     PostgresAuditEventRepository,
     PostgresCapabilityRepository,
+    PostgresCaregiverInviteRepository,
+    PostgresCaregiverLinkRepository,
     PostgresClinicConnectionRepository,
     PostgresClinicRepository,
     PostgresEmrClinicalNoteRepository,
@@ -728,6 +737,106 @@ async def test_mfa_factor_repository_round_trip(
         assert replaced.secret_ref == "secret::second"
         assert replaced.confirmed_at is None  # back to pending
         assert await repo.get_for_user(uuid.uuid4()) is None
+
+
+async def test_caregiver_repositories_round_trip_and_live_link_index(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Caregiver invite/link round-trips (ADR-0047): the DB-enforced single-use
+    consume, the uq_caregiver_link_live partial unique index (savepoint-absorbed,
+    revocation frees the pair), and the deletion sweeps."""
+    now = datetime.now(UTC)
+    caregiver = UserRecord(
+        id=uuid.uuid4(),
+        email=f"care-{uuid.uuid4().hex[:12]}@example.com",
+        password_hash="argon2-hash-placeholder",
+        display_name="Synthetic Caregiver",
+        role=UserRole.caregiver,
+        patient_id=None,
+    )
+    code_hash = f"synthetic-hash-{uuid.uuid4().hex}"[:64]
+
+    async with session_factory() as session:
+        patient_id = await _new_patient(session)
+        await PostgresUserRepository(session).add(caregiver)
+        invites = PostgresCaregiverInviteRepository(session)
+        invite = await invites.add(
+            CaregiverInvite(
+                patient_id=patient_id, code_hash=code_hash, expires_at=now + timedelta(days=7)
+            )
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        invites = PostgresCaregiverInviteRepository(session)
+        loaded = await invites.get_by_code_hash(code_hash)
+        assert loaded is not None and loaded.id == invite.id
+        assert await invites.get_by_code_hash("no-such-hash") is None
+        assert (await invites.list_for_patient(patient_id))[0].id == invite.id
+        # Single-use is ONE conditional UPDATE: the second consume matches nothing.
+        assert await invites.consume(invite.id, now=now) is True
+        assert await invites.consume(invite.id, now=now) is False
+        await session.commit()
+
+    async with session_factory() as session:
+        links = PostgresCaregiverLinkRepository(session)
+        link = await links.add(
+            CaregiverLink(
+                patient_id=patient_id,
+                caregiver_user_id=caregiver.id,
+                status=CaregiverLinkStatus.pending,
+                initiated_by=Initiator.patient,
+            )
+        )
+        # The partial unique index refuses a second live link for the pair — and the
+        # savepoint keeps the transaction usable afterwards.
+        with pytest.raises(DuplicateLiveCaregiverLinkError):
+            await links.add(
+                CaregiverLink(
+                    patient_id=patient_id,
+                    caregiver_user_id=caregiver.id,
+                    status=CaregiverLinkStatus.pending,
+                    initiated_by=Initiator.patient,
+                )
+            )
+        link.status = CaregiverLinkStatus.active
+        link.accepted_at = now
+        link.scope = CaregiverScope.full
+        await links.update(link)
+        await session.commit()
+
+    async with session_factory() as session:
+        links = PostgresCaregiverLinkRepository(session)
+        reloaded = await links.get(link.id)
+        assert reloaded is not None
+        assert reloaded.status is CaregiverLinkStatus.active
+        assert reloaded.scope is CaregiverScope.full
+        assert reloaded.accepted_at is not None
+        assert [row.id for row in await links.list_for_caregiver(caregiver.id)] == [link.id]
+        assert [row.id for row in await links.list_for_patient(patient_id)] == [link.id]
+        # Revocation frees the pair: a fresh link inserts cleanly under the index.
+        reloaded.status = CaregiverLinkStatus.revoked
+        reloaded.revoked_at = now
+        await links.update(reloaded)
+        await links.add(
+            CaregiverLink(
+                patient_id=patient_id,
+                caregiver_user_id=caregiver.id,
+                status=CaregiverLinkStatus.pending,
+                initiated_by=Initiator.patient,
+            )
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        # Deletion sweeps (ADR-0027/0047): by caregiver, then by patient.
+        links = PostgresCaregiverLinkRepository(session)
+        invites = PostgresCaregiverInviteRepository(session)
+        await links.delete_for_caregiver(caregiver.id)
+        assert await links.list_for_patient(patient_id) == []
+        await invites.delete_for_patient(patient_id)
+        assert await invites.list_for_patient(patient_id) == []
+        await session.commit()
 
 
 def _autogenerate_diff(connection: Connection) -> list[object]:

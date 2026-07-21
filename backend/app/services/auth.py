@@ -240,6 +240,32 @@ class AuthService:
             ) from exc
         return user
 
+    async def create_caregiver(self, *, email: str, password: str, display_name: str) -> UserRecord:
+        """Create a caregiver principal (ADR-0047): role=caregiver, carrying NEITHER
+        a Patient record NOR a clinic — the ops account shape with a different role.
+        Mirrors create_ops — Argon2id hash, repository-owned email uniqueness — so
+        the whole login/JWT stack is reused; a caregiver JWT simply carries
+        role=caregiver. NOT self-service on its own: the route only calls this with
+        a validated invite code in hand (self-registration ONLY with a valid code),
+        or never — caregivers cannot exist outside the invite-claim flow."""
+        normalized = email.strip().lower()
+        user = UserRecord(
+            id=uuid.uuid4(),
+            email=normalized,
+            password_hash=hash_password(password),
+            display_name=display_name,
+            role=UserRole.caregiver,
+            patient_id=None,
+            clinic_id=None,
+        )
+        try:
+            await self.users.add(user)
+        except DuplicateEmailError as exc:
+            raise AuthApiError(
+                "An account with this email already exists", status_code=409
+            ) from exc
+        return user
+
     async def create_first_ops(self, *, email: str, password: str, display_name: str) -> UserRecord:
         """Provision the FIRST ops operator on the bootstrap path (ADR-0019).
 

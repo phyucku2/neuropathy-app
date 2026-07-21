@@ -164,6 +164,16 @@ class Settings(BaseSettings):
     export_rate_limit_max: int = 10
     export_rate_limit_window_seconds: int = 3600
 
+    # Caregiver invite-claim throttle (ADR-0047, the ADR-0017 sliding-window
+    # pattern): claim attempts — the authenticated caregiver claim AND the
+    # code-gated self-registration — are capped per actor (user id, or a per-email
+    # sentinel for registration) by counting 'caregiver_claim' audit events. Over the
+    # budget the answer is 429 BEFORE the code is hashed or looked up, so a refusal
+    # reveals nothing about the probed code and a guessing campaign is slowed to the
+    # window budget.
+    caregiver_claim_rate_limit_max: int = 10
+    caregiver_claim_rate_limit_window_seconds: int = 3600
+
     # Bootstrap-denial audit cap (ADR-0017): failed attempts on the UNAUTHENTICATED
     # provisioning gate are audited, but at most bootstrap_denied_audit_max rows per
     # sliding window — beyond the cap the 403 is unchanged and only the audit write is

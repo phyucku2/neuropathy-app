@@ -169,6 +169,15 @@ class UserRepository(Protocol):
         """
         ...
 
+    async def delete_user(self, user_id: uuid.UUID) -> None:
+        """Destroy a PATIENT-LESS auth identity (a caregiver account, ADR-0047).
+
+        Callers own the FK order: every table referencing the user row (caregiver
+        links) must already be empty. Patient accounts go through
+        `delete_with_patient` instead — this never touches a Patient record.
+        """
+        ...
+
 
 class InMemoryUserRepository:
     """Dict-backed store for unit tests and DB-less development."""
@@ -255,3 +264,8 @@ class InMemoryUserRepository:
         if user is not None:
             self._by_email.pop(user.email, None)
         self.patients.pop(patient_id, None)
+
+    async def delete_user(self, user_id: uuid.UUID) -> None:
+        user = self._by_id.pop(user_id, None)
+        if user is not None:
+            self._by_email.pop(user.email, None)

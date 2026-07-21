@@ -21,6 +21,9 @@ class UserRole(enum.StrEnum):
     patient = "patient"
     clinician = "clinician"
     ops = "ops"
+    # Patient-invited loved one (ADR-0047): read-only in Phase A, never a clinician.
+    # Like ops it carries neither patient_id nor clinic_id.
+    caregiver = "caregiver"
 
 
 class User(UUIDPrimaryKey, Timestamps, Base):

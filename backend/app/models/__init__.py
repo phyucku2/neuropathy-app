@@ -2,6 +2,12 @@
 
 from app.models.audit import AuditEvent
 from app.models.capability import Actor, Capability, PatientCapability
+from app.models.caregiver import (
+    CaregiverInvite,
+    CaregiverLink,
+    CaregiverLinkStatus,
+    CaregiverScope,
+)
 from app.models.clinic import Clinic
 from app.models.connection import ClinicConnection, ConnectionStatus, Initiator
 from app.models.emr_clinical_note import EmrClinicalNote
@@ -18,6 +24,10 @@ __all__ = [
     "Actor",
     "Capability",
     "PatientCapability",
+    "CaregiverInvite",
+    "CaregiverLink",
+    "CaregiverLinkStatus",
+    "CaregiverScope",
     "Clinic",
     "ClinicConnection",
     "ConnectionStatus",

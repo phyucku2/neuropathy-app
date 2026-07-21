@@ -35,6 +35,12 @@ from app.emr.service import InMemorySecretStore, SecretStore
 from app.models.audit import AuditEvent
 from app.models.user import UserRole
 from app.repositories.audit import AuditEventRepository, InMemoryAuditEventRepository
+from app.repositories.caregiver import (
+    CaregiverInviteRepository,
+    CaregiverLinkRepository,
+    InMemoryCaregiverInviteRepository,
+    InMemoryCaregiverLinkRepository,
+)
 from app.repositories.clinic_connection import (
     ClinicConnectionRepository,
     InMemoryClinicConnectionRepository,
@@ -143,6 +149,15 @@ class AccountDeletionService:
     clinical_notes: EmrClinicalNoteRepository = field(
         default_factory=InMemoryEmrClinicalNoteRepository
     )
+    # Caregiver invites/links (ADR-0047): a patient deletion purges both (invites FK
+    # the patient row; links FK it too), and a caregiver-account deletion removes the
+    # links referencing the user row — no dangling consent rows either way.
+    caregiver_invites: CaregiverInviteRepository = field(
+        default_factory=InMemoryCaregiverInviteRepository
+    )
+    caregiver_links: CaregiverLinkRepository = field(
+        default_factory=InMemoryCaregiverLinkRepository
+    )
     audit: AuditEventRepository = field(default_factory=InMemoryAuditEventRepository)
 
     async def delete_patient_account(
@@ -196,6 +211,8 @@ class AccountDeletionService:
         clinic_rows = await self.clinic_connections.list_for_patient(patient_id)
         capability_rows = await self.patient_capabilities.list_for_patient(patient_id)
         note_rows = await self.clinical_notes.list_for_patient(patient_id)
+        invite_rows = await self.caregiver_invites.list_for_patient(patient_id)
+        caregiver_link_rows = await self.caregiver_links.list_for_patient(patient_id)
         # Vault refs are collected BEFORE the emr_connection rows die below; the
         # purge itself runs LAST (see the ordering note there).
         token_refs = [c.token_ref for c in emr if c.token_ref is not None]
@@ -216,6 +233,8 @@ class AccountDeletionService:
                     "vault_secrets": len(token_refs),
                     "clinic_connections": len(clinic_rows),
                     "patient_capabilities": len(capability_rows),
+                    "caregiver_invites": len(invite_rows),
+                    "caregiver_links": len(caregiver_link_rows),
                 },
             )
         )
@@ -229,6 +248,11 @@ class AccountDeletionService:
         await self.clinic_connections.delete_for_patient(patient_id)
         await self.patient_capabilities.delete_for_patient(patient_id)
         await self.observations.delete_for_patient(patient_id)
+        # Caregiver invites + links FK the patient row (ADR-0047): both die before
+        # it. Deleting the links also ends any live caregiver consent — with no link
+        # left, _may_caregiver_read can never pass for this patient again.
+        await self.caregiver_invites.delete_for_patient(patient_id)
+        await self.caregiver_links.delete_for_patient(patient_id)
         await self.users.delete_with_patient(user_id=user.id, patient_id=patient_id)
         # Postgres: the FK already detached the retained audit rows with the patient
         # delete above; this is the in-memory mirror (and a Postgres no-op backstop).
@@ -251,4 +275,60 @@ class AccountDeletionService:
         # narration scheduled before this request can still finish after it — the
         # accepted seconds-wide residual recorded in ADR-0027.
         clear_narrative_cache()
+        return None
+
+    async def delete_caregiver_account(
+        self, *, user_id: uuid.UUID, password: str
+    ) -> DeletionDenied | None:
+        """Delete a CAREGIVER account (ADR-0047): the same fresh password re-auth and
+        failed-attempt throttle as patient deletion, but a far smaller footprint — a
+        caregiver holds no patient data, so only its links (which FK the user row)
+        and the user row itself are destroyed. The patients' records are untouched;
+        their audit history keeps the PHI-free lifecycle events.
+
+        Returns None on success, or a `DeletionDenied` (403) for a wrong password —
+        returned, not raised (docs/lessons.md). Raises AccountDeletionError on the
+        nothing-written paths: 401 gone, 403 non-caregiver, 429 over budget.
+        """
+        user = await self.users.get_by_id(user_id)
+        if user is None:
+            raise AccountDeletionError("Account no longer exists", status_code=401)
+        if user.role is not UserRole.caregiver:
+            # Defense in depth behind the route's role dispatch.
+            raise AccountDeletionError("Caregiver account required", status_code=403)
+        # The SAME throttle + denial-audit budget the patient flow uses (ADR-0017
+        # pattern): one limiter, one action, no second knob to drift.
+        now = datetime.now(UTC)
+        if not await deletion_denial_rate_limiter(self.audit).allow(user.id, now=now):
+            raise AccountDeletionError(RATE_LIMITED_DETAIL, status_code=429)
+        if not verify_password(user.password_hash, password):
+            await self.audit.add(
+                AuditEvent(
+                    actor_id=user.id,
+                    actor_role=UserRole.caregiver.value,
+                    action="account_delete_denied",
+                    patient_id=None,
+                    detail={
+                        "limit": settings.delete_account_rate_limit_max,
+                        "window_seconds": settings.delete_account_rate_limit_window_seconds,
+                    },
+                )
+            )
+            return DeletionDenied(WRONG_PASSWORD_DETAIL, status_code=403)
+
+        links = await self.caregiver_links.list_for_caregiver(user.id)
+        # ONE audit event BEFORE the destructive statements (ADR-0027) — counts only.
+        # No patient subject: the event records the caregiver identity's erasure.
+        await self.audit.add(
+            AuditEvent(
+                actor_id=user.id,
+                actor_role=UserRole.caregiver.value,
+                action="delete_account",
+                patient_id=None,
+                detail={"caregiver_links": len(links)},
+            )
+        )
+        # FK-safe order: links reference the user row, so they die first.
+        await self.caregiver_links.delete_for_caregiver(user.id)
+        await self.users.delete_user(user.id)
         return None

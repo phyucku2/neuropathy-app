@@ -18,10 +18,10 @@ from app.api.deps import (
     AuthDep,
     CurrentUserDep,
     MfaDep,
-    PatientUserDep,
     PrivilegedUserDep,
 )
 from app.core.security import AuthError
+from app.models.user import UserRole
 from app.schemas.auth import (
     AccessTokenOut,
     DeleteAccountIn,
@@ -168,28 +168,33 @@ async def mfa_verify(body: MfaVerifyIn, mfa: MfaDep) -> TokenOut | JSONResponse:
 
 @router.delete("/me", status_code=204)
 async def delete_me(
-    body: DeleteAccountIn, current: PatientUserDep, service: AccountDeletionDep
+    body: DeleteAccountIn, current: CurrentUserDep, service: AccountDeletionDep
 ) -> Response:
-    """Delete the authenticated PATIENT account and all its data (ADR-0027).
+    """Delete the authenticated PATIENT account and all its data (ADR-0027) — or the
+    authenticated CAREGIVER account and its links (ADR-0047).
 
-    Patient role only — require_patient answers 403 for clinician/ops principals.
-    The body's password is fresh re-authentication (a stolen bearer token alone must
-    not destroy an account); a mismatch is 403 and deletes nothing, and failed
-    attempts are throttled — over the per-actor budget the answer is 429 before the
-    password is even verified. Deliberately NO require_capability gate: like
-    revocation (ADR-0013), deletion must never be blockable by a toggle or kill
-    switch. Transactional: one PHI-free audit event + every delete commit together,
-    or the whole request rolls back.
+    Patient or caregiver only; clinician/ops principals are refused with 403 (their
+    accounts are provisioned and deprovisioned by ops). The body's password is fresh
+    re-authentication (a stolen bearer token alone must not destroy an account); a
+    mismatch is 403 and deletes nothing, and failed attempts are throttled — over
+    the per-actor budget the answer is 429 before the password is even verified.
+    Deliberately NO require_capability gate: like revocation (ADR-0013), deletion
+    must never be blockable by a toggle or kill switch. Transactional: one PHI-free
+    audit event + every delete commit together, or the whole request rolls back.
 
     The wrong-password refusal is RETURNED by the service and rendered here rather
     than raised: its bounded 'account_delete_denied' audit event must commit with
     the request transaction, and a raised HTTPException would roll it back
     (docs/lessons.md "return don't raise") — the throttle would then never trip.
     """
+    if current.role is UserRole.patient:
+        deleter = service.delete_patient_account
+    elif current.role is UserRole.caregiver:
+        deleter = service.delete_caregiver_account
+    else:
+        raise HTTPException(status_code=403, detail="Patient or caregiver account required")
     try:
-        denied = await service.delete_patient_account(
-            user_id=current.user_id, password=body.password
-        )
+        denied = await deleter(user_id=current.user_id, password=body.password)
     except AccountDeletionError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.reason) from exc
     if denied is not None:

@@ -5,6 +5,15 @@ import { setupServer } from 'msw/node';
 import type { AdlCheckInIn, CapabilitySetIn, ClinicianCapabilitySetIn } from '../api/types';
 import {
   CAPABILITIES,
+  CAREGIVER_CLAIM_ACCEPTED_DETAIL,
+  CAREGIVER_CODE_INVALID_DETAIL,
+  CAREGIVER_INVITE_CREATE,
+  CAREGIVER_INVITES,
+  CAREGIVER_LINK_ACTIVE,
+  CAREGIVER_LINK_PENDING,
+  CAREGIVER_LINKS,
+  CAREGIVER_ME,
+  CAREGIVER_PATIENTS,
   CLINIC_CAPABILITIES,
   CLINICIAN_ME,
   CONNECTION_ACTIVE,
@@ -28,6 +37,7 @@ import {
   PANEL,
   PANEL_PATIENT_ID,
   TEST_ACCESS_TOKEN,
+  TEST_CAREGIVER_CODE,
   TEST_EMAIL,
   TEST_MFA_CODE,
   TEST_MFA_PENDING_TOKEN,
@@ -384,6 +394,110 @@ export const handlers = [
     isAuthorized(request) ? HttpResponse.json(EMR_CONNECTION_REVOKED) : unauthorized(),
   ),
 
+  // ---- caregiver companion (ADR-0047; mirrors backend/app/api/routes/caregiver.py) ----
+
+  // Registration with a code: a dead code is 404 with ONE fixed message (unknown /
+  // expired / consumed / cancelled indistinguishable); a valid code mints tokens.
+  http.post('/caregiver/register', async ({ request }) => {
+    const body = (await request.json()) as { code: string };
+    if (body.code !== TEST_CAREGIVER_CODE) {
+      return HttpResponse.json({ detail: CAREGIVER_CODE_INVALID_DETAIL }, { status: 404 });
+    }
+    return HttpResponse.json(
+      {
+        access_token: TEST_ACCESS_TOKEN,
+        refresh_token: TEST_REFRESH_TOKEN,
+        token_type: 'bearer',
+      },
+      { status: 201 },
+    );
+  }),
+
+  // Authenticated claim: byte-identical 202 whether or not the code matched.
+  http.post('/caregiver/claims', ({ request }) =>
+    isAuthorized(request)
+      ? HttpResponse.json({ detail: CAREGIVER_CLAIM_ACCEPTED_DETAIL }, { status: 202 })
+      : unauthorized(),
+  ),
+
+  http.get('/caregiver/patients', ({ request }) =>
+    isAuthorized(request)
+      ? HttpResponse.json(CAREGIVER_PATIENTS, { headers: { 'Cache-Control': 'no-store' } })
+      : unauthorized(),
+  ),
+
+  http.get('/caregiver/patients/:patientId/trajectory', ({ request, params }) => {
+    if (!isAuthorized(request)) {
+      return unauthorized();
+    }
+    return params['patientId'] === PANEL_PATIENT_ID
+      ? HttpResponse.json(TRAJECTORY_IMPROVING, { headers: { 'Cache-Control': 'no-store' } })
+      : patientNotFound();
+  }),
+
+  // FULL scope only — a trends-scope caller would get this same 404 (non-enumeration).
+  http.get('/caregiver/patients/:patientId/visit-summary', ({ request, params }) => {
+    if (!isAuthorized(request)) {
+      return unauthorized();
+    }
+    if (params['patientId'] !== PANEL_PATIENT_ID) {
+      return patientNotFound();
+    }
+    const window = Number(new URL(request.url).searchParams.get('window') ?? '60');
+    return HttpResponse.json(visitSummaryForWindow(window), {
+      headers: { 'Cache-Control': 'no-store' },
+    });
+  }),
+
+  // ---- patient-side caregiver lifecycle ----
+
+  http.post('/me/caregiver-invites', ({ request }) =>
+    isAuthorized(request)
+      ? HttpResponse.json(CAREGIVER_INVITE_CREATE, {
+          status: 201,
+          headers: { 'Cache-Control': 'no-store' },
+        })
+      : unauthorized(),
+  ),
+
+  http.get('/me/caregiver-invites', ({ request }) =>
+    isAuthorized(request) ? HttpResponse.json(CAREGIVER_INVITES) : unauthorized(),
+  ),
+
+  http.delete('/me/caregiver-invites/:inviteId', ({ request }) =>
+    isAuthorized(request) ? new HttpResponse(null, { status: 204 }) : unauthorized(),
+  ),
+
+  http.get('/me/caregivers', ({ request }) =>
+    isAuthorized(request) ? HttpResponse.json(CAREGIVER_LINKS) : unauthorized(),
+  ),
+
+  http.post('/me/caregivers/:linkId/accept', ({ request }) =>
+    isAuthorized(request)
+      ? HttpResponse.json({
+          ...CAREGIVER_LINK_PENDING,
+          status: 'active',
+          accepted_at: '2026-07-15T12:00:00Z',
+        })
+      : unauthorized(),
+  ),
+
+  http.post('/me/caregivers/:linkId/decline', ({ request }) =>
+    isAuthorized(request) ? new HttpResponse(null, { status: 204 }) : unauthorized(),
+  ),
+
+  http.patch('/me/caregivers/:linkId', async ({ request }) => {
+    if (!isAuthorized(request)) {
+      return unauthorized();
+    }
+    const body = (await request.json()) as { scope: string };
+    return HttpResponse.json({ ...CAREGIVER_LINK_ACTIVE, scope: body.scope });
+  }),
+
+  http.delete('/me/caregivers/:linkId', ({ request }) =>
+    isAuthorized(request) ? new HttpResponse(null, { status: 204 }) : unauthorized(),
+  ),
+
   // ---- clinician surface ----
 
   http.post('/clinic/invitations', ({ request }) =>
@@ -482,6 +596,15 @@ export function actAsClinician(): void {
   server.use(
     http.get('/auth/me', ({ request }) =>
       isAuthorized(request) ? HttpResponse.json(CLINICIAN_ME) : unauthorized(),
+    ),
+  );
+}
+
+/** Make GET /auth/me answer with the caregiver account for the current test (ADR-0047). */
+export function actAsCaregiver(): void {
+  server.use(
+    http.get('/auth/me', ({ request }) =>
+      isAuthorized(request) ? HttpResponse.json(CAREGIVER_ME) : unauthorized(),
     ),
   );
 }

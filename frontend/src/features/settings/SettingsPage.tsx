@@ -13,6 +13,7 @@ import type { CapabilityStateOut } from '../../api/types';
 import { ErrorNotice, Loading } from '../../components/StatusMessages';
 import { formatDayYear } from '../../lib/format';
 import { useApi } from '../../lib/useApi';
+import { CaregiverShareCard } from './CaregiverShareCard';
 import { ConnectionRow } from './ConnectionRow';
 import { DeleteAccountCard } from './DeleteAccountCard';
 import { DownloadDataCard } from './DownloadDataCard';
@@ -194,6 +195,9 @@ export function SettingsPage() {
           web renders the honest fallback. */}
       <ReminderCard />
       <ConnectionsCard />
+      {/* Caregiver sharing (ADR-0047) sits beside the clinic connection — the same
+          patient-held, revocable consent primitive with a different grantee. */}
+      <CaregiverShareCard />
       {/* EMR connect (ADR-0028) sits with the clinic connections — a data-source
           concern, deliberately outside the danger zone below. */}
       <EmrConnectCard />

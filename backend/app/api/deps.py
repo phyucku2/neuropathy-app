@@ -51,12 +51,18 @@ from app.emr.signals import InMemoryNewChartNoteSink
 from app.emr.transport import HttpxTransport
 from app.models.user import UserRole
 from app.repositories.capability import InMemoryCapabilityRepository
+from app.repositories.caregiver import (
+    InMemoryCaregiverInviteRepository,
+    InMemoryCaregiverLinkRepository,
+)
 from app.repositories.emr_clinical_note import InMemoryEmrClinicalNoteRepository
 from app.repositories.mfa import InMemoryMfaFactorRepository
 from app.repositories.patient_capability import InMemoryPatientCapabilityRepository
 from app.repositories.postgres import (
     PostgresAuditEventRepository,
     PostgresCapabilityRepository,
+    PostgresCaregiverInviteRepository,
+    PostgresCaregiverLinkRepository,
     PostgresClinicConnectionRepository,
     PostgresClinicRepository,
     PostgresEmrClinicalNoteRepository,
@@ -71,6 +77,7 @@ from app.repositories.postgres import (
 from app.services.account_deletion import AccountDeletionService
 from app.services.auth import AuthService
 from app.services.capability import CapabilityService
+from app.services.caregiver import CaregiverService
 from app.services.clinic import ClinicService
 from app.services.export import PatientDataExportService
 from app.services.mfa import MfaService
@@ -190,12 +197,26 @@ def require_clinician(current: CurrentUserDep) -> CurrentUser:
 ClinicianUserDep = Annotated[CurrentUser, Depends(require_clinician)]
 
 
+def require_caregiver(current: CurrentUserDep) -> CurrentUser:
+    """Caregiver-scoped endpoints (ADR-0047): the caller must be a caregiver user.
+
+    A caregiver carries neither patient_id nor clinic_id (the ops account shape) and
+    is NEVER a clinician — no clinical authority, read-only in Phase A."""
+    if current.role is not UserRole.caregiver:
+        raise HTTPException(status_code=403, detail="Caregiver account required")
+    return current
+
+
+CaregiverUserDep = Annotated[CurrentUser, Depends(require_caregiver)]
+
+
 def require_privileged(current: CurrentUserDep) -> CurrentUser:
     """Privileged (clinician/ops) endpoints — the MFA enrollment surface (§1B C6).
 
-    Patients are refused outright: they can never hold an MFA factor, so their auth
-    flow is structurally untouched by the whole feature."""
-    if current.role is UserRole.patient:
+    Explicitly clinician-or-ops, NOT merely "not a patient": patients can never hold
+    an MFA factor, and caregivers (ADR-0047 — no clinical authority) are refused
+    too, so both auth flows are structurally untouched by the whole feature."""
+    if current.role is not UserRole.clinician and current.role is not UserRole.ops:
         raise HTTPException(status_code=403, detail="Clinician or ops account required")
     return current
 
@@ -403,6 +424,55 @@ ClinicServiceDep = Annotated[ClinicService, Depends(get_clinic_service)]
 
 
 @lru_cache(maxsize=1)
+def _process_caregiver_invite_repo() -> InMemoryCaregiverInviteRepository:
+    """Process-wide caregiver-invite store for in-memory mode (ADR-0047) — shared by
+    the caregiver and account-deletion services so a deletion purges exactly the
+    invites the patient's own endpoints created."""
+    return InMemoryCaregiverInviteRepository()
+
+
+@lru_cache(maxsize=1)
+def _process_caregiver_link_repo() -> InMemoryCaregiverLinkRepository:
+    """Process-wide caregiver-link store for in-memory mode (ADR-0047) — shared by
+    the caregiver, account-deletion, and export services so revocation, deletion,
+    and the export all see the SAME links."""
+    return InMemoryCaregiverLinkRepository()
+
+
+@lru_cache(maxsize=1)
+def _default_caregiver_service() -> CaregiverService:
+    """Process-wide CaregiverService for in-memory mode (ADR-0047). Users,
+    observations, clinical notes, and audit are the SAME stores auth and EMR use
+    (deps singletons), so a caregiver reads exactly the data the patient's own
+    endpoints wrote and every claim/lifecycle event lands in the one shared trail."""
+    emr = _default_emr_service()
+    return CaregiverService(
+        invites=_process_caregiver_invite_repo(),
+        links=_process_caregiver_link_repo(),
+        users=_default_auth_service().users,
+        observations=emr.observations,
+        clinical_notes=emr.clinical_notes,
+        audit=emr.audit,
+    )
+
+
+def get_caregiver_service(session: DbSessionDep = None) -> CaregiverService:
+    if session is None:
+        return _default_caregiver_service()
+    return CaregiverService(
+        invites=PostgresCaregiverInviteRepository(session),
+        links=PostgresCaregiverLinkRepository(session),
+        users=PostgresUserRepository(session),
+        observations=PostgresObservationRepository(session),
+        clinical_notes=PostgresEmrClinicalNoteRepository(session),
+        audit=PostgresAuditEventRepository(session),
+    )
+
+
+CaregiverServiceDep = Annotated[CaregiverService, Depends(get_caregiver_service)]
+
+
+@lru_cache(maxsize=1)
 def _default_capability_service() -> CapabilityService:
     """Process-wide CapabilityService for in-memory mode. Connections and audit are
     the SAME stores the clinic service uses (deps singletons), so toggle authority
@@ -448,6 +518,8 @@ def _default_account_deletion_service() -> AccountDeletionService:
         patient_capabilities=_process_patient_capability_repo(),
         observations=emr.observations,
         clinical_notes=emr.clinical_notes,
+        caregiver_invites=_process_caregiver_invite_repo(),
+        caregiver_links=_process_caregiver_link_repo(),
         audit=emr.audit,
     )
 
@@ -467,6 +539,8 @@ def get_account_deletion_service(session: DbSessionDep = None) -> AccountDeletio
         patient_capabilities=PostgresPatientCapabilityRepository(session),
         observations=PostgresObservationRepository(session),
         clinical_notes=PostgresEmrClinicalNoteRepository(session),
+        caregiver_invites=PostgresCaregiverInviteRepository(session),
+        caregiver_links=PostgresCaregiverLinkRepository(session),
         audit=PostgresAuditEventRepository(session),
     )
 
@@ -528,6 +602,7 @@ def _default_patient_data_export_service() -> PatientDataExportService:
         observations=emr.observations,
         emr_connections=emr.connections,
         clinical_notes=emr.clinical_notes,
+        caregiver_links=_process_caregiver_link_repo(),
         clinic=_default_clinic_service(),
         capabilities=_default_capability_service(),
         audit=emr.audit,
@@ -542,6 +617,7 @@ def get_patient_data_export_service(session: DbSessionDep = None) -> PatientData
         observations=PostgresObservationRepository(session),
         emr_connections=PostgresEmrConnectionRepository(session),
         clinical_notes=PostgresEmrClinicalNoteRepository(session),
+        caregiver_links=PostgresCaregiverLinkRepository(session),
         # Compose the clinic/capability services on the SAME session so their reads
         # (clinic names, effective toggle states) join the request transaction.
         clinic=get_clinic_service(session),

@@ -1,15 +1,19 @@
 /**
- * The signed-in frame, in two variants:
+ * The signed-in frame, in three variants:
  * - patient (mockup patient-app.html): gradient status bar with our own
  *   wordmark (Poppins — never BioMech's logo, ADR-0002), scrolling body, and
  *   the four-tab bottom bar (Home / Trends / Add / Sources).
  * - clinician (mockup clinician-app.html): the same bar marked "· Clinician"
  *   with the signed-in clinician's name, a wider working area, and no patient
  *   tab bar — the panel is the clinician's home and detail screens link back.
+ * - caregiver (ADR-0047): the patient-width frame marked "· Caregiver", no tab
+ *   bar, and the PERSISTENT non-urgent/911 banner rendered by the shell itself
+ *   so every caregiver screen structurally carries it (never per-page opt-in).
  */
 
 import { Link, NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import { EmergencyBanner } from './EmergencyBanner';
 import { initials } from '../lib/format';
 
 // Entry point for the Learn surface (ADR-0037): a fifth bottom-nav tab, chosen over a
@@ -26,16 +30,23 @@ const TABS = [
   { to: '/settings', icon: '⚙', label: 'Sources' },
 ];
 
-export function AppShell({ variant = 'patient' }: { variant?: 'patient' | 'clinician' }) {
+export function AppShell({
+  variant = 'patient',
+}: {
+  variant?: 'patient' | 'clinician' | 'caregiver';
+}) {
   const { user, logout } = useAuth();
   const clinician = variant === 'clinician';
+  const caregiver = variant === 'caregiver';
 
   return (
     <div className={clinician ? 'app-frame clinician' : 'app-frame'}>
       <header className="status-bar">
-        <span className="mark">◍ Neuropathy{clinician ? ' · Clinician' : ''}</span>
+        <span className="mark">
+          ◍ Neuropathy{clinician ? ' · Clinician' : caregiver ? ' · Caregiver' : ''}
+        </span>
         <span className="status-right">
-          {clinician && <span className="who">{user?.display_name}</span>}
+          {(clinician || caregiver) && <span className="who">{user?.display_name}</span>}
           {/* Clinician account settings (§1B C6): the clinician frame has no tab bar, so
               the settings surface hangs off the header instead. Patient shell unchanged. */}
           {clinician && (
@@ -55,9 +66,12 @@ export function AppShell({ variant = 'patient' }: { variant?: 'patient' | 'clini
         </span>
       </header>
       <main className="app-body">
+        {/* Non-urgent framing is non-negotiable (ADR-0047): the shell renders the 911
+            banner for the caregiver area, so EVERY caregiver screen carries it. */}
+        {caregiver && <EmergencyBanner />}
         <Outlet />
       </main>
-      {!clinician && (
+      {variant === 'patient' && (
         <nav className="tabbar" aria-label="Main">
           {TABS.map((tab) => (
             <NavLink
