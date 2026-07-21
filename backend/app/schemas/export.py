@@ -76,6 +76,29 @@ class ExportObservation(BaseModel):
     payload: dict[str, Any]
 
 
+class ExportEmrClinicalNote(BaseModel):
+    """One pulled EMR clinical note — METADATA ONLY (ADR-0045 P2 #27).
+
+    NON-DIAGNOSTIC and body-free by construction: there is NO body/content field here, so
+    the note text can never be serialized into the export (the same structural absence as
+    the token-free ConnectionOut). `attachment_url` is the opaque Binary reference, not text.
+    """
+
+    id: uuid.UUID
+    connection_id: uuid.UUID
+    source_system: str | None
+    document_fhir_id: str | None
+    type_code: str | None
+    type_display: str | None
+    category: str
+    authored_at: datetime
+    author_display: str | None
+    encounter_fhir_id: str | None
+    content_type: str | None
+    attachment_url: str | None
+    has_inline_data: bool
+
+
 class ExportOut(BaseModel):
     """The current-record export envelope for one patient (ADR-0031)."""
 
@@ -92,3 +115,6 @@ class ExportOut(BaseModel):
     capabilities: list[CapabilityStateOut]
     clinic_connections: list[ClinicConnectionOut]
     emr_connections: list[EmrConnectionOut]
+    # Metadata-only projection of the SEPARATE clinical-note store (ADR-0045 P2 #27).
+    # Defaulted so older constructions stay valid; no body field exists to leak text.
+    emr_clinical_notes: list[ExportEmrClinicalNote] = Field(default_factory=list)

@@ -113,7 +113,8 @@ async def test_patient_visit_summary_defaults_to_window_60(
     assert resp.status_code == 200
     body = resp.json()
     assert body["window_days"] == 60
-    assert body["schema_version"] == "1.1"
+    assert body["schema_version"] == "1.2"
+    assert body["emr_notes"] == []  # no EMR notes pulled -> empty section (metadata only)
     assert body["subject_id"] == str(PATIENT.patient_id)
     assert body["lead_section"] == "what_changed"  # 60 is a short window
     assert body["disclaimer"]  # non-diagnostic note co-located

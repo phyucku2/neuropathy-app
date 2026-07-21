@@ -49,3 +49,9 @@ class EmrConnection(UUIDPrimaryKey, Timestamps, Base):
         DateTime(timezone=True), nullable=True
     )
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Watermark for the incremental clinical-note pull (ADR-0045 P2 #27): the next
+    # DocumentReference search asks for date=ge(this), so a re-pull only fetches notes
+    # authored since the last successful sync. NULL means "never pulled notes".
+    last_notes_pulled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )

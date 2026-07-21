@@ -69,11 +69,12 @@ describe('VisitSummaryView', () => {
     expect(screen.getByRole('heading', { name: 'Activity & glucose' })).toBeInTheDocument();
     expect(screen.getByText(/24 readings\. Average 6\.8 \(range 6\.1–7\.6\)/)).toBeInTheDocument();
 
-    // Placeholder rows (render-only) — medications & patient notes are now CAPTURED (P2), so
-    // only emr_notes + nutrition remain "Not yet tracked".
-    expect(screen.getAllByText('Not yet tracked')).toHaveLength(2);
-    expect(screen.getByText('EMR clinician notes')).toBeInTheDocument();
+    // Placeholder rows (render-only) — medications, patient notes, and EMR clinician notes
+    // are all CAPTURED now (P2 / #27), so ONLY nutrition remains "Not yet tracked".
+    expect(screen.getAllByText('Not yet tracked')).toHaveLength(1);
     expect(screen.getByText('Nutrition')).toBeInTheDocument();
+    // EMR clinician notes is a REAL data section now (heading), not a placeholder row.
+    expect(screen.getByRole('heading', { name: 'EMR clinician notes' })).toBeInTheDocument();
 
     // The disclosure honesty sheet label.
     expect(screen.getByText(new RegExp(VISIT_SUMMARY_SHEET_LABEL))).toBeInTheDocument();
@@ -105,6 +106,18 @@ describe('VisitSummaryView', () => {
       within(notes as HTMLElement).getByText(/Lost my balance stepping off the curb/),
     ).toBeInTheDocument();
     expect(within(notes as HTMLElement).getByText(/In their own words:/)).toBeInTheDocument();
+
+    // EMR clinician notes section: METADATA ONLY (type/author/date) — NO note body, and an
+    // "open it there" affordance pointing at the medical record (ADR-0045 P2 #27).
+    const emrNotes = screen
+      .getByRole('heading', { name: 'EMR clinician notes' })
+      .closest('section');
+    expect(emrNotes).not.toBeNull();
+    expect(within(emrNotes as HTMLElement).getByText('Progress note')).toBeInTheDocument();
+    expect(within(emrNotes as HTMLElement).getByText(/Dr\. Rivera/)).toBeInTheDocument();
+    expect(
+      within(emrNotes as HTMLElement).getByText(/open it there to read it/),
+    ).toBeInTheDocument();
 
     // What-changed medication delta (descriptive only): names what was recorded, no advice.
     const whatChanged = screen

@@ -34,6 +34,7 @@ from app.main import app
 from app.models.audit import AuditEvent
 from app.models.clinic import Clinic
 from app.models.connection import ClinicConnection, ConnectionStatus, Initiator
+from app.models.emr_clinical_note import EmrClinicalNote
 from app.models.observation import DataOrigin, Observation, ObservationStatus, SourceType
 from app.repositories.audit import InMemoryAuditEventRepository
 from app.repositories.patient_capability import InMemoryPatientCapabilityRepository
@@ -98,6 +99,7 @@ class World:
             users=self.auth.users,
             observations=self.emr.observations,
             emr_connections=self.emr.connections,
+            clinical_notes=self.emr.clinical_notes,
             clinic=self.clinic,
             capabilities=self.capability,
             audit=self.emr.audit,
@@ -214,6 +216,25 @@ async def _populate(world: World, patient_id_str: str) -> None:
         )
     )
 
+    # A pulled EMR clinical note (separate store) — exported as METADATA ONLY, no body.
+    emr_connections = await world.emr.connections.list_for_patient(patient_id)
+    await world.emr.clinical_notes.add_if_absent(
+        EmrClinicalNote(
+            patient_id=patient_id,
+            connection_id=emr_connections[0].id,
+            origin=DataOrigin.ehr_imported,
+            source_system="Synthetic Health",
+            document_fhir_id="DocRef/synthetic-1",
+            type_code="11506-3",
+            type_display="Progress note",
+            authored_at=datetime(2026, 7, 1, 12, tzinfo=UTC),
+            author_display="Dr Synthetic",
+            content_type="text/plain",
+            attachment_url="https://ehr.example/fhir/Binary/synthetic-1",
+            import_key="docref:DocRef/synthetic-1",
+        )
+    )
+
 
 def test_export_returns_every_data_class_with_correct_values(
     world: World, client: TestClient
@@ -289,6 +310,14 @@ def test_export_returns_every_data_class_with_correct_values(
     assert emr["status"] == "active"
     assert emr["patient_fhir_id"] == "fhir-patient-9"
 
+    # EMR clinical note — METADATA ONLY (ADR-0045 P2 #27), no body field at all.
+    assert len(body["emr_clinical_notes"]) == 1
+    note = body["emr_clinical_notes"][0]
+    assert note["type_display"] == "Progress note"
+    assert note["author_display"] == "Dr Synthetic"
+    assert note["document_fhir_id"] == "DocRef/synthetic-1"
+    assert "body" not in note and "text" not in note  # the note text is structurally absent
+
 
 def test_export_never_contains_a_token_secret_or_password_hash(
     world: World, client: TestClient
@@ -341,8 +370,9 @@ def test_export_writes_one_phi_free_audit_event(world: World, client: TestClient
     assert event.detail == {
         "observations": 3,
         "emr_connections": 1,
+        "emr_clinical_notes": 1,  # the pulled note (metadata-only export, ADR-0045 P2 #27)
         "clinic_connections": 1,
-        "capabilities": 10,  # + ADR-0045 P2 ingest_medications & ingest_events
+        "capabilities": 11,  # + ADR-0045 P2 ingest_medications, ingest_events, ingest_notes
     }
     assert "Synthetic" not in json.dumps(event.detail)
 

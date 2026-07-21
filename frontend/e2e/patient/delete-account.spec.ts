@@ -26,7 +26,9 @@ test.describe('Patient account deletion (danger zone)', () => {
     await expect(confirm).toBeDisabled();
     await page.getByLabel('Confirm your password').fill(SYNTHETIC_PASSWORD);
     await expect(confirm).toBeDisabled();
-    await page.getByRole('checkbox').check();
+    // Scoped by name: Settings now has other checkboxes (e.g. the EMR notes
+    // opt-in from #27), so a bare getByRole('checkbox') is ambiguous.
+    await page.getByRole('checkbox', { name: /permanently deleted/ }).check();
     await expect(confirm).toBeEnabled();
 
     // Two-tap confirm: the first tap only arms the button — nothing deleted yet.

@@ -375,9 +375,11 @@ def test_change_questions_skip_unchanged_symptoms() -> None:
 def test_placeholder_rows_present_and_not_yet_tracked() -> None:
     summary = _assemble([], window=60)
     keys = {row.key for row in summary.placeholders}
-    # Medications & patient_notes are CAPTURED now (ADR-0045 P2) — only emr_notes (Phase 2b
-    # FHIR DocumentReference) and nutrition (Phase 3) remain render-only placeholders.
-    assert keys == {"emr_notes", "nutrition"}
+    # Medications, patient_notes, and EMR clinician notes are CAPTURED now (ADR-0045 P2 /
+    # #27) — emr_notes is a real data section, GONE from placeholders; only nutrition
+    # (Phase 3) remains render-only.
+    assert keys == {"nutrition"}
+    assert "emr_notes" not in keys  # moved to the real emr_notes data section
     assert all(row.status == "not_yet_tracked" for row in summary.placeholders)
 
 
@@ -499,3 +501,69 @@ def test_stopped_med_still_appears_in_medications_section() -> None:
     summary = _assemble_meds([*meds], medication_rows=meds)
     assert len(summary.medications) == 1
     assert summary.medications[0].status == "stopped"
+
+
+# --- ADR-0045 P2 #27: EMR clinical-note metadata section -------------------------------
+
+
+def _note_row(doc_id: str, *, type_display: str, days_ago: float, author: str | None = "Dr X"):  # type: ignore[no-untyped-def]
+    from app.models.emr_clinical_note import EmrClinicalNote
+
+    return EmrClinicalNote(
+        id=uuid4(),
+        patient_id=SUBJECT,
+        connection_id=uuid4(),
+        origin=DataOrigin.ehr_imported,
+        source_system="Synthetic Health",
+        document_fhir_id=doc_id,
+        type_code="11506-3",
+        type_display=type_display,
+        category="clinical-note",
+        authored_at=NOW - timedelta(days=days_ago),
+        author_display=author,
+        import_key=f"docref:{doc_id}",
+    )
+
+
+def _assemble_notes(notes, *, window: int = 60):  # type: ignore[no-untyped-def]
+    return assemble_visit_summary(
+        [],
+        subject_id=SUBJECT,
+        window=window,
+        now=NOW,
+        include_change_questions=False,
+        clinical_notes=notes,
+    )
+
+
+def test_emr_notes_in_window_are_metadata_only_newest_first_and_prompt() -> None:
+    from app.schemas.visit_summary import NEW_NOTE_QUESTION
+
+    notes = [
+        _note_row("doc-old", type_display="Progress note", days_ago=30),
+        _note_row("doc-new", type_display="Consult note", days_ago=5),
+    ]
+    summary = _assemble_notes(notes)
+    assert [n.type_display for n in summary.emr_notes] == ["Consult note", "Progress note"]
+    assert all(n.provenance == "emr" for n in summary.emr_notes)
+    # Metadata only — the item has no body/text field to carry note contents.
+    assert "note" not in summary.emr_notes[0].model_dump()
+    assert "body" not in summary.emr_notes[0].model_dump()
+    # The clearly-safe existence prompt fires.
+    assert NEW_NOTE_QUESTION in summary.questions.data_completeness
+
+
+def test_emr_note_outside_window_is_excluded_and_no_prompt() -> None:
+    from app.schemas.visit_summary import NEW_NOTE_QUESTION
+
+    notes = [_note_row("doc-old", type_display="Progress note", days_ago=200)]
+    summary = _assemble_notes(notes, window=60)
+    assert summary.emr_notes == []
+    assert NEW_NOTE_QUESTION not in summary.questions.data_completeness
+
+
+def test_emr_notes_default_empty_when_not_provided() -> None:
+    summary = assemble_visit_summary(
+        [], subject_id=SUBJECT, window=60, now=NOW, include_change_questions=False
+    )
+    assert summary.emr_notes == []

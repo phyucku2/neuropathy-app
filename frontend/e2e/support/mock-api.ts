@@ -320,7 +320,7 @@ export const EMR_PULL: EmrPullOut = {
 // ---- Visit-Ready Summary (ADR-0045) — mirrors src/test/fixtures.ts + backend schema ----
 
 const VISIT_SUMMARY_PLACEHOLDERS: PlaceholderRow[] = [
-  { key: 'emr_notes', label: 'EMR clinician notes', status: 'not_yet_tracked', phase: 'Phase 2b' },
+  // emr_notes is CAPTURED now (ADR-0045 P2 #27) — a real data section, GONE from placeholders.
   { key: 'nutrition', label: 'Nutrition', status: 'not_yet_tracked', phase: 'Phase 3' },
 ];
 
@@ -414,7 +414,7 @@ export const EVENTS: EventList = {
 
 export const VISIT_SUMMARY: VisitSummary = {
   generated_at: '2026-07-15T10:00:00Z',
-  schema_version: '1.1',
+  schema_version: '1.2',
   subject_id: '22222222-2222-4222-8222-222222222222',
   window_days: 60,
   window_end: '2026-07-15T10:00:00Z',
@@ -596,6 +596,15 @@ export const VISIT_SUMMARY: VisitSummary = {
       note: 'Lost my balance stepping off the curb, no injury.',
       reviewed: false,
       provenance: 'patient-entered',
+    },
+  ],
+  emr_notes: [
+    {
+      type_display: 'Progress note',
+      author_display: 'Dr. Rivera',
+      authored_at: '2026-07-08T00:00:00Z',
+      encounter_fhir_id: 'enc-8891',
+      provenance: 'emr',
     },
   ],
   placeholders: VISIT_SUMMARY_PLACEHOLDERS,

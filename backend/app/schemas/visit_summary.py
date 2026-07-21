@@ -26,8 +26,9 @@ from app.schemas.trajectory import Direction, Trajectory
 # Bump on any breaking shape change so a printed/rendered Summary stays interpretable
 # by later tooling (forward-compat, mirrors ADR-0031's export envelope). 1.1 adds the
 # folded medications + patient_notes sections and the what-changed medication delta
-# (ADR-0045 P2), replacing the P1 placeholders for those two rows.
-VISIT_SUMMARY_SCHEMA_VERSION: str = "1.1"
+# (ADR-0045 P2), replacing the P1 placeholders for those two rows. 1.2 adds the EMR
+# clinical-note metadata section (ADR-0045 P2 #27), replacing its placeholder row.
+VISIT_SUMMARY_SCHEMA_VERSION: str = "1.2"
 
 # The window is validated against this fixed set in-handler (mirrors the ingestion
 # validation style); anything else is a 422. 60 is the default (owner, 2026-07-19).
@@ -76,6 +77,12 @@ MED_CHANGE_QUESTION = (
 )
 EVENT_RECORDED_QUESTION = (
     "Between-visit events or notes were recorded in this window — review them with the patient."
+)
+# EMR clinical-note completeness (ADR-0045 P2 #27, clearly safe): points ONLY at the
+# EXISTENCE of a newly pulled note and asks the clinician to open it — never summarizes,
+# scans, or interprets the note text (the hard non-diagnostic line).
+NEW_NOTE_QUESTION = (
+    "A new clinician note was pulled from the EMR in this window — open it to review."
 )
 # change_pointed (edges toward decision support — HELD FOR D2, feature-gated OFF via
 # settings.include_change_questions default False, ADR-0045 open question #2):
@@ -268,6 +275,22 @@ class PatientEventItem(BaseModel):
     provenance: str = "patient-entered"
 
 
+class EmrNoteItem(BaseModel):
+    """One EMR clinical note in the window — METADATA ONLY (ADR-0045 P2 #27).
+
+    NON-DIAGNOSTIC: the summary payload NEVER carries the note body. It surfaces the note's
+    EXISTENCE + metadata (type, author, date, encounter reference) with an `provenance`
+    marker so the surface can offer an "open" affordance to the verbatim text elsewhere —
+    it is never summarized, scanned, or fed to the narrator here.
+    """
+
+    type_display: str | None
+    author_display: str | None
+    authored_at: datetime
+    encounter_fhir_id: str | None = None
+    provenance: str = "emr"
+
+
 class PlaceholderRow(BaseModel):
     """A forward-stable layout row for a section not yet captured (render-only)."""
 
@@ -278,10 +301,9 @@ class PlaceholderRow(BaseModel):
 
 
 # The remaining placeholder sections (ADR-0045): render-only until their capture phases
-# land. Medications & patient notes are now CAPTURED (P2) and dropped from here; emr_notes
-# (Phase 2b FHIR DocumentReference) and nutrition (Phase 3) stay render-only.
+# land. Medications, patient notes, and EMR clinician notes are now CAPTURED (P2 / #27) and
+# dropped from here; only nutrition (Phase 3) stays render-only.
 PLACEHOLDER_ROWS: tuple[PlaceholderRow, ...] = (
-    PlaceholderRow(key="emr_notes", label="EMR clinician notes", phase="Phase 2b"),
     PlaceholderRow(key="nutrition", label="Nutrition", phase="Phase 3"),
 )
 
@@ -309,6 +331,8 @@ class VisitSummary(BaseModel):
     activity: list[ActivityStat] = Field(default_factory=list)
     medications: list[MedicationItem] = Field(default_factory=list)
     patient_notes: list[PatientEventItem] = Field(default_factory=list)
+    # EMR clinician notes pulled via DocumentReference — METADATA ONLY (ADR-0045 P2 #27).
+    emr_notes: list[EmrNoteItem] = Field(default_factory=list)
     placeholders: list[PlaceholderRow] = Field(default_factory=list)
     questions: QuestionsToAsk
     disclaimer: str = NON_DIAGNOSTIC_NOTE

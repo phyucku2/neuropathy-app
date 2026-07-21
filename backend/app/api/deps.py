@@ -47,15 +47,18 @@ from app.emr.service import (
     InMemorySecretStore,
     SecretStore,
 )
+from app.emr.signals import InMemoryNewChartNoteSink
 from app.emr.transport import HttpxTransport
 from app.models.user import UserRole
 from app.repositories.capability import InMemoryCapabilityRepository
+from app.repositories.emr_clinical_note import InMemoryEmrClinicalNoteRepository
 from app.repositories.patient_capability import InMemoryPatientCapabilityRepository
 from app.repositories.postgres import (
     PostgresAuditEventRepository,
     PostgresCapabilityRepository,
     PostgresClinicConnectionRepository,
     PostgresClinicRepository,
+    PostgresEmrClinicalNoteRepository,
     PostgresEmrConnectionRepository,
     PostgresObservationRepository,
     PostgresPatientCapabilityRepository,
@@ -207,6 +210,20 @@ def _process_secret_store() -> InMemorySecretStore:
 
 
 @lru_cache(maxsize=1)
+def _process_clinical_note_repo() -> InMemoryEmrClinicalNoteRepository:
+    """Process-wide clinical-note store for in-memory mode — shared by EMR/visit-summary/
+    export/deletion so every feature reads/writes the SAME notes (ADR-0045 P2 #27)."""
+    return InMemoryEmrClinicalNoteRepository()
+
+
+@lru_cache(maxsize=1)
+def _process_note_signal_sink() -> InMemoryNewChartNoteSink:
+    """Process-wide new-chart-note signal sink for in-memory mode. The caregiver consumer
+    (ADR-0047) is out of scope; this just records emitted signals so tests can inspect them."""
+    return InMemoryNewChartNoteSink()
+
+
+@lru_cache(maxsize=1)
 def _process_pending_auth() -> InMemoryPendingAuthStore:
     """Process-wide OAuth state->verifier store for in-memory mode: connect and
     callback are separate requests, so pending state must outlive each. DB mode uses
@@ -279,6 +296,8 @@ def _default_emr_service() -> EmrService:
         redirect_uri=redirect_uri,
         provider_client_ids=_smart_provider_client_ids(),
         secret_store=_process_secret_store(),
+        clinical_notes=_process_clinical_note_repo(),
+        note_signals=_process_note_signal_sink(),
         _pending=_process_pending_auth(),
     )
 
@@ -295,6 +314,7 @@ def get_emr_service(session: DbSessionDep = None) -> EmrService:
         secret_store=_secret_store_for(session),
         connections=PostgresEmrConnectionRepository(session),
         observations=PostgresObservationRepository(session),
+        clinical_notes=PostgresEmrClinicalNoteRepository(session),
         audit=PostgresAuditEventRepository(session),
         # Durable + single-use across processes/workers (ADR-0017): the connect and
         # callback requests may land anywhere, so pending state lives in the DB.
@@ -331,6 +351,7 @@ def _default_clinic_service() -> ClinicService:
     return ClinicService(
         users=_default_auth_service().users,
         observations=emr.observations,
+        clinical_notes=emr.clinical_notes,
         audit=emr.audit,
         capabilities=_process_capability_repo(),
         patient_capabilities=_process_patient_capability_repo(),
@@ -345,6 +366,7 @@ def get_clinic_service(session: DbSessionDep = None) -> ClinicService:
         connections=PostgresClinicConnectionRepository(session),
         users=PostgresUserRepository(session),
         observations=PostgresObservationRepository(session),
+        clinical_notes=PostgresEmrClinicalNoteRepository(session),
         audit=PostgresAuditEventRepository(session),
         # Same session-bound rows the capability service writes — the share_with_clinic
         # read gate and the toggle writes stay consistent within the request (ADR-0020).
@@ -401,6 +423,7 @@ def _default_account_deletion_service() -> AccountDeletionService:
         clinic_connections=_default_clinic_service().connections,
         patient_capabilities=_process_patient_capability_repo(),
         observations=emr.observations,
+        clinical_notes=emr.clinical_notes,
         audit=emr.audit,
     )
 
@@ -419,6 +442,7 @@ def get_account_deletion_service(session: DbSessionDep = None) -> AccountDeletio
         clinic_connections=PostgresClinicConnectionRepository(session),
         patient_capabilities=PostgresPatientCapabilityRepository(session),
         observations=PostgresObservationRepository(session),
+        clinical_notes=PostgresEmrClinicalNoteRepository(session),
         audit=PostgresAuditEventRepository(session),
     )
 
@@ -437,6 +461,7 @@ def _default_patient_data_export_service() -> PatientDataExportService:
         users=_default_auth_service().users,
         observations=emr.observations,
         emr_connections=emr.connections,
+        clinical_notes=emr.clinical_notes,
         clinic=_default_clinic_service(),
         capabilities=_default_capability_service(),
         audit=emr.audit,
@@ -450,6 +475,7 @@ def get_patient_data_export_service(session: DbSessionDep = None) -> PatientData
         users=PostgresUserRepository(session),
         observations=PostgresObservationRepository(session),
         emr_connections=PostgresEmrConnectionRepository(session),
+        clinical_notes=PostgresEmrClinicalNoteRepository(session),
         # Compose the clinic/capability services on the SAME session so their reads
         # (clinic names, effective toggle states) join the request transaction.
         clinic=get_clinic_service(session),

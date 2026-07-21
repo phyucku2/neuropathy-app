@@ -24,7 +24,9 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from app.ingestion.medications import FoldedMedication, fold_medications
+from app.models.emr_clinical_note import EmrClinicalNote
 from app.models.observation import Observation, SourceType
+from app.repositories.emr_clinical_note import EmrClinicalNoteRepository
 from app.repositories.observation import ObservationRepository
 from app.schemas.trajectory import Direction, Trajectory
 from app.schemas.visit_summary import (
@@ -35,11 +37,13 @@ from app.schemas.visit_summary import (
     EVENT_RECORDED_QUESTION,
     MED_CHANGE_QUESTION,
     NEW_LAB_QUESTION,
+    NEW_NOTE_QUESTION,
     PLACEHOLDER_ROWS,
     SHORT_WINDOWS,
     SYMPTOM_DIRECTION_CHANGE_QUESTION,
     ActivityStat,
     AdherenceGap,
+    EmrNoteItem,
     LabDelta,
     LeadSection,
     MedicationChangeDelta,
@@ -332,6 +336,28 @@ def _patient_notes(windowed: list[_Row]) -> list[PatientEventItem]:
     return notes
 
 
+def _emr_notes(
+    notes: list[EmrClinicalNote], *, lower: datetime, upper: datetime
+) -> list[EmrNoteItem]:
+    """The EMR clinical notes whose authored_at is in the current window, newest-first
+    (ADR-0045 P2 #27). METADATA ONLY — the note body is never read here."""
+    items: list[EmrNoteItem] = []
+    for note in notes:
+        authored_at = _aware(note.authored_at)
+        if authored_at < lower or authored_at > upper:
+            continue
+        items.append(
+            EmrNoteItem(
+                type_display=note.type_display,
+                author_display=note.author_display,
+                authored_at=authored_at,
+                encounter_fhir_id=note.encounter_fhir_id,
+            )
+        )
+    items.sort(key=lambda n: n.authored_at, reverse=True)
+    return items
+
+
 def assemble_visit_summary(
     rows: list[Observation],
     *,
@@ -340,6 +366,7 @@ def assemble_visit_summary(
     now: datetime,
     include_change_questions: bool,
     medication_rows: list[Observation] | None = None,
+    clinical_notes: list[EmrClinicalNote] | None = None,
 ) -> VisitSummary:
     """Build the windowed VisitSummary over one patient's rows (pure, deterministic).
 
@@ -352,6 +379,7 @@ def assemble_visit_summary(
     section is empty.
     """
     medication_rows = medication_rows or []
+    clinical_notes = clinical_notes or []
     window_end = now
     current_window_start = now - timedelta(days=window)
     prior_window_start = now - timedelta(days=2 * window)
@@ -434,6 +462,8 @@ def assemble_visit_summary(
     medication_changes = _medication_changes_in_window(
         medication_rows, lower=current_window_start, upper=window_end
     )
+    # EMR clinical notes pulled in the current window (metadata only, newest-first).
+    emr_notes = _emr_notes(clinical_notes, lower=current_window_start, upper=window_end)
 
     what_changed = WhatChanged(
         new_labs=labs,
@@ -453,6 +483,7 @@ def assemble_visit_summary(
         include_change_questions=include_change_questions,
         has_medication_changes=bool(medication_changes),
         has_events=bool(patient_notes),
+        has_new_notes=bool(emr_notes),
     )
 
     return VisitSummary(
@@ -474,6 +505,7 @@ def assemble_visit_summary(
         activity=activity,
         medications=medications,
         patient_notes=patient_notes,
+        emr_notes=emr_notes,
         placeholders=list(PLACEHOLDER_ROWS),
         questions=questions,
     )
@@ -493,6 +525,7 @@ def _build_questions(
     include_change_questions: bool,
     has_medication_changes: bool,
     has_events: bool,
+    has_new_notes: bool,
 ) -> QuestionsToAsk:
     """Assemble the change-surfacing prompts from the template constants only.
 
@@ -528,6 +561,10 @@ def _build_questions(
         data_completeness.append(MED_CHANGE_QUESTION)
     if has_events:
         data_completeness.append(EVENT_RECORDED_QUESTION)
+    # A newly pulled EMR clinical note is itself the recorded data — points only at its
+    # EXISTENCE (ADR-0045 P2 #27), never at the note text.
+    if has_new_notes:
+        data_completeness.append(NEW_NOTE_QUESTION)
 
     if include_change_questions:
         for change in symptom_trend:
@@ -556,17 +593,28 @@ async def build_visit_summary(
     window: int,
     now: datetime,
     include_change_questions: bool,
+    clinical_notes: EmrClinicalNoteRepository | None = None,
 ) -> tuple[VisitSummary, int]:
     """Read a 2×window lookback and assemble the VisitSummary (partition in Python).
 
     Returns the summary plus the observation count it was computed from (callers audit
     the read with counts only, never values — CLAUDE.md §5).
+
+    `clinical_notes` is the SEPARATE append-only note store (NOT observations, ADR-0045 P2
+    #27); when provided, its metadata is read for the current window and rendered as the
+    emr_notes section. When omitted (older callers/tests), that section is empty.
     """
     rows = await observations.list_for_patient(subject_id, since=now - timedelta(days=2 * window))
     # The current-medications fold needs a med's `added` row even when it predates the
     # window, so read the FULL medication history (source-scoped, unbounded) — meds are
     # low-volume and the (patient_id, source, effective_at) index keeps it in budget.
     medication_rows = await observations.list_for_patient(subject_id, source=SourceType.medication)
+    # Clinical notes come from a DIFFERENT store; read the current window by authored_at.
+    note_rows: list[EmrClinicalNote] = []
+    if clinical_notes is not None:
+        note_rows = await clinical_notes.list_for_patient(
+            subject_id, since=now - timedelta(days=window)
+        )
     summary = assemble_visit_summary(
         rows,
         subject_id=subject_id,
@@ -574,5 +622,6 @@ async def build_visit_summary(
         now=now,
         include_change_questions=include_change_questions,
         medication_rows=medication_rows,
+        clinical_notes=note_rows,
     )
     return summary, len(rows) + len(medication_rows)

@@ -39,6 +39,10 @@ from app.repositories.clinic_connection import (
     ClinicConnectionRepository,
     InMemoryClinicConnectionRepository,
 )
+from app.repositories.emr_clinical_note import (
+    EmrClinicalNoteRepository,
+    InMemoryEmrClinicalNoteRepository,
+)
 from app.repositories.emr_connection import (
     EmrConnectionRepository,
     InMemoryEmrConnectionRepository,
@@ -134,6 +138,11 @@ class AccountDeletionService:
         default_factory=InMemoryPatientCapabilityRepository
     )
     observations: ObservationRepository = field(default_factory=InMemoryObservationRepository)
+    # EMR clinical notes are a SEPARATE store that FKs emr_connection, so they must be
+    # deleted BEFORE the connections (ADR-0045 P2 #27, FK-safe order below).
+    clinical_notes: EmrClinicalNoteRepository = field(
+        default_factory=InMemoryEmrClinicalNoteRepository
+    )
     audit: AuditEventRepository = field(default_factory=InMemoryAuditEventRepository)
 
     async def delete_patient_account(
@@ -186,6 +195,7 @@ class AccountDeletionService:
         emr = await self.emr_connections.list_for_patient(patient_id)
         clinic_rows = await self.clinic_connections.list_for_patient(patient_id)
         capability_rows = await self.patient_capabilities.list_for_patient(patient_id)
+        note_rows = await self.clinical_notes.list_for_patient(patient_id)
         # Vault refs are collected BEFORE the emr_connection rows die below; the
         # purge itself runs LAST (see the ordering note there).
         token_refs = [c.token_ref for c in emr if c.token_ref is not None]
@@ -202,6 +212,7 @@ class AccountDeletionService:
                 patient_id=patient_id,
                 detail={
                     "emr_connections": len(emr),
+                    "emr_clinical_notes": len(note_rows),
                     "vault_secrets": len(token_refs),
                     "clinic_connections": len(clinic_rows),
                     "patient_capabilities": len(capability_rows),
@@ -212,6 +223,8 @@ class AccountDeletionService:
         # FK-safe destruction order. Each step only removes rows that nothing
         # remaining references; the patient row goes last.
         await self.pending_auth.delete_for_connections([c.id for c in emr])
+        # Notes FK emr_connection, so they die BEFORE the connections (ADR-0045 P2 #27).
+        await self.clinical_notes.delete_for_patient(patient_id)
         await self.emr_connections.delete_for_patient(patient_id)
         await self.clinic_connections.delete_for_patient(patient_id)
         await self.patient_capabilities.delete_for_patient(patient_id)

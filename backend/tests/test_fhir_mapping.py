@@ -166,3 +166,76 @@ def test_import_without_effective_time_raises() -> None:
     }
     with pytest.raises(ValueError, match="effectiveDateTime"):
         from_fhir(Observation.model_validate(payload))
+
+
+# --- Clinical-note DocumentReference parser (ADR-0045 P2 #27) --------------------------
+
+
+def _doc_ref(**overrides: object) -> dict:
+    base = {
+        "resourceType": "DocumentReference",
+        "id": "doc-1",
+        "type": {
+            "coding": [
+                {"system": "http://loinc.org", "code": "11506-3", "display": "Progress note"}
+            ]
+        },
+        "date": "2026-06-15T08:30:00Z",
+        "author": [{"display": "Dr Synthetic"}],
+        "context": {"encounter": [{"reference": "Encounter/enc-1"}]},
+        "content": [{"attachment": {"contentType": "text/plain", "url": "https://ehr/Binary/b1"}}],
+    }
+    base.update(overrides)
+    return base
+
+
+def test_clinical_notes_parser_maps_metadata_only() -> None:
+    from app.fhir.mapping import clinical_notes_from_bundle_payload
+
+    payload = {"resourceType": "Bundle", "entry": [{"resource": _doc_ref()}]}
+    notes, skipped = clinical_notes_from_bundle_payload(payload)
+    assert skipped == 0 and len(notes) == 1
+    note = notes[0]
+    assert note.document_fhir_id == "doc-1"
+    assert note.type_code == "11506-3"
+    assert note.type_display == "Progress note"
+    assert note.author_display == "Dr Synthetic"
+    assert note.encounter_fhir_id == "enc-1"  # trailing id of the reference
+    assert note.authored_at == datetime(2026, 6, 15, 8, 30, tzinfo=UTC)  # Z -> UTC
+    assert note.attachment_url == "https://ehr/Binary/b1"
+
+
+def test_clinical_notes_parser_skips_unmappable_and_counts() -> None:
+    from app.fhir.mapping import clinical_notes_from_bundle_payload
+
+    payload = {
+        "resourceType": "Bundle",
+        "entry": [
+            {"resource": _doc_ref(id="ok")},  # good
+            {"resource": _doc_ref(id="no-type", type={})},  # missing type
+            {"resource": _doc_ref(id="no-date", date=None)},  # missing date
+            {"resource": _doc_ref(id="no-attach", content=[])},  # missing attachment
+            {"resource": {"resourceType": "OperationOutcome", "issue": []}},  # not a DocRef
+        ],
+    }
+    notes, skipped = clinical_notes_from_bundle_payload(payload)
+    assert [n.document_fhir_id for n in notes] == ["ok"]
+    assert skipped == 4  # one bad entry never aborts the batch
+
+
+def test_clinical_notes_parser_accepts_type_text_only_and_inline_data() -> None:
+    from app.fhir.mapping import clinical_notes_from_bundle_payload
+
+    resource = _doc_ref(
+        id="text-only",
+        type={"text": "Consult note"},  # no coding, only text
+        content=[{"attachment": {"contentType": "text/plain", "data": "aGVsbG8="}}],  # inline
+    )
+    notes, skipped = clinical_notes_from_bundle_payload(
+        {"resourceType": "Bundle", "entry": [{"resource": resource}]}
+    )
+    assert skipped == 0 and len(notes) == 1
+    assert notes[0].type_display == "Consult note"
+    assert notes[0].type_code is None
+    assert notes[0].has_inline_data is True
+    assert notes[0].attachment_url is None

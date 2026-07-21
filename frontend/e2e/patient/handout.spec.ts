@@ -58,4 +58,21 @@ test.describe('Visit-Ready Summary handout (patient)', () => {
     await expect(page).toHaveURL(/\/handout$/);
     await expect(page.getByRole('heading', { level: 1, name: 'Visit summary' })).toBeVisible();
   });
+
+  test('renders the EMR clinician notes section as metadata only (ADR-0045 P2 #27)', async ({
+    page,
+  }) => {
+    await signedInApp(page);
+    await page.goto('/handout');
+
+    // The notes section renders its metadata (type + author) with an "open it in your
+    // medical record" affordance — and NEVER a note body (the summary carries none).
+    const section = page
+      .locator('section.handout-section')
+      .filter({ has: page.getByRole('heading', { name: 'EMR clinician notes' }) });
+    await expect(section).toBeVisible();
+    await expect(section.getByText('Progress note')).toBeVisible();
+    await expect(section.getByText(/Dr\. Rivera/)).toBeVisible();
+    await expect(section.getByText(/open it there to read it/)).toBeVisible();
+  });
 });

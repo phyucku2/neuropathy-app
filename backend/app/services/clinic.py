@@ -42,6 +42,10 @@ from app.repositories.clinic_connection import (
     DuplicateLiveConnectionError,
     InMemoryClinicConnectionRepository,
 )
+from app.repositories.emr_clinical_note import (
+    EmrClinicalNoteRepository,
+    InMemoryEmrClinicalNoteRepository,
+)
 from app.repositories.observation import InMemoryObservationRepository, ObservationRepository
 from app.repositories.patient_capability import (
     InMemoryPatientCapabilityRepository,
@@ -108,6 +112,11 @@ class ClinicService:
     )
     users: UserRepository = field(default_factory=InMemoryUserRepository)
     observations: ObservationRepository = field(default_factory=InMemoryObservationRepository)
+    # The consented clinician visit-summary renders the patient's EMR clinical-note
+    # metadata section too (ADR-0045 P2 #27), so the note store is available here.
+    clinical_notes: EmrClinicalNoteRepository = field(
+        default_factory=InMemoryEmrClinicalNoteRepository
+    )
     audit: AuditEventRepository = field(default_factory=InMemoryAuditEventRepository)
     # The patient-held share_with_clinic consent gate reads these (ADR-0020). Shared
     # with the CapabilityService in both storage modes (deps), so a patient turning

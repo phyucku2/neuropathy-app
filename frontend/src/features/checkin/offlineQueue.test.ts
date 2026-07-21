@@ -209,7 +209,7 @@ describe('offlineQueue', () => {
     renderApp('/settings');
     await user.click(await screen.findByRole('button', { name: 'Delete my account' }));
     await user.type(screen.getByLabelText('Confirm your password'), TEST_PASSWORD);
-    await user.click(screen.getByRole('checkbox'));
+    await user.click(screen.getByRole('checkbox', { name: /I understand/ }));
     // Two-tap confirm.
     await user.click(screen.getByRole('button', { name: 'Delete my account and data' }));
     await user.click(screen.getByRole('button', { name: 'Tap again to permanently delete' }));

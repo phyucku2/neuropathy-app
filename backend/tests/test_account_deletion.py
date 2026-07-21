@@ -33,6 +33,7 @@ from app.models.audit import AuditEvent
 from app.models.capability import Actor
 from app.models.clinic import Clinic
 from app.models.connection import ClinicConnection, ConnectionStatus, Initiator
+from app.models.emr_clinical_note import EmrClinicalNote
 from app.models.observation import DataOrigin, Observation, ObservationStatus, SourceType
 from app.repositories.audit import InMemoryAuditEventRepository
 from app.repositories.emr_connection import ConnectionRecord
@@ -99,6 +100,7 @@ class World:
             clinic_connections=self.clinic.connections,
             patient_capabilities=self.patient_capabilities,
             observations=self.emr.observations,
+            clinical_notes=self.emr.clinical_notes,
             audit=self.emr.audit,
         )
 
@@ -197,6 +199,22 @@ async def _populate(world: World, patient_id_str: str) -> None:
     original = await world.emr.observations.add(_observation(patient_id))
     await world.emr.observations.add(_observation(patient_id, revises_id=original.id))
 
+    # A pulled EMR clinical note (separate store, FKs the connection) — must be erased too.
+    emr_connections = await world.emr.connections.list_for_patient(patient_id)
+    await world.emr.clinical_notes.add_if_absent(
+        EmrClinicalNote(
+            patient_id=patient_id,
+            connection_id=emr_connections[0].id,
+            origin=DataOrigin.ehr_imported,
+            source_system="Synthetic Health",
+            document_fhir_id="DocRef/synthetic-1",
+            type_code="11506-3",
+            type_display="Progress note",
+            authored_at=datetime(2026, 7, 1, 12, tzinfo=UTC),
+            import_key="docref:DocRef/synthetic-1",
+        )
+    )
+
 
 async def _assert_everything_gone(world: World, patient_id_str: str) -> None:
     patient_id = uuid.UUID(patient_id_str)
@@ -211,6 +229,7 @@ async def _assert_everything_gone(world: World, patient_id_str: str) -> None:
     assert await world.emr.observations.list_for_patient(patient_id) == []
     observations = world.emr.observations
     assert observations._observations == []  # type: ignore[attr-defined]  # superseded rows gone too
+    assert await world.emr.clinical_notes.list_for_patient(patient_id) == []  # notes erased
     assert await world.auth.users.get_by_patient_id(patient_id) is None
     users = world.auth.users
     assert patient_id not in users.patients  # type: ignore[attr-defined]  # the Patient record itself
@@ -237,6 +256,7 @@ def test_happy_path_deletes_every_store_and_retains_anonymous_audit(
     assert event.actor_role == "patient"
     assert event.detail == {
         "emr_connections": 2,
+        "emr_clinical_notes": 1,
         "vault_secrets": 1,
         "clinic_connections": 1,
         "patient_capabilities": 1,

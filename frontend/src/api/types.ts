@@ -223,6 +223,18 @@ export interface PatientEventItem {
   provenance: string;
 }
 
+/** EmrNoteItem — one EMR clinician note in the window, METADATA ONLY (ADR-0045 P2 #27).
+ *  NON-DIAGNOSTIC: the payload NEVER carries the note body — only type/author/date + an
+ *  encounter reference. Surfaces the note's existence with an "open" affordance to the
+ *  verbatim text elsewhere; it is never summarized or interpreted here. */
+export interface EmrNoteItem {
+  type_display: string | null;
+  author_display: string | null;
+  authored_at: string;
+  encounter_fhir_id: string | null;
+  provenance: string;
+}
+
 /** QuestionsToAsk — change-surfacing prompts about the patient's own data, templates never
  *  advice. `change_pointed` is EMPTY unless the backend feature flag is on (FDA D2 gate). */
 export interface QuestionsToAsk {
@@ -259,6 +271,7 @@ export interface VisitSummary {
   activity: ActivityStat[];
   medications: MedicationItem[];
   patient_notes: PatientEventItem[];
+  emr_notes: EmrNoteItem[];
   placeholders: PlaceholderRow[];
   questions: QuestionsToAsk;
   disclaimer: string;
@@ -505,6 +518,9 @@ export interface EmrProviderOut {
 export interface EmrConnectStartIn {
   provider_key?: string | null;
   fhir_base?: string | null;
+  /** Also request clinical-note (DocumentReference) read on the EHR consent screen
+   *  (ADR-0045 P2 #27). Off by default — a labs-only connect never asks for it. */
+  connect_notes?: boolean;
 }
 
 /** ConnectStartOut */
@@ -549,6 +565,14 @@ export interface EmrLabResult {
 export interface EmrPullOut {
   imported: number;
   results: EmrLabResult[];
+}
+
+/** PullNotesOut — the clinical-note pull result, COUNTS ONLY (ADR-0045 P2 #27).
+ *  No note text ever leaves the backend; the handout renders metadata + an "open" affordance. */
+export interface EmrPullNotesOut {
+  imported: number;
+  skipped: number;
+  fetched: number;
 }
 
 // ---- export.py (ADR-0031 — "Download my data") ----

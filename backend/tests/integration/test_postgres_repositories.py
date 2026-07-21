@@ -34,6 +34,7 @@ from app.repositories.postgres import (
     PostgresCapabilityRepository,
     PostgresClinicConnectionRepository,
     PostgresClinicRepository,
+    PostgresEmrClinicalNoteRepository,
     PostgresEmrConnectionRepository,
     PostgresObservationRepository,
     PostgresPatientCapabilityRepository,
@@ -576,6 +577,97 @@ async def test_medication_and_event_source_scoped_reads_and_append_only(
     async with session_factory() as session:
         repo = PostgresObservationRepository(session)
         assert len(await repo.list_for_patient(patient_id, source=SourceType.medication)) == 2
+
+
+async def test_emr_clinical_note_repository_round_trip_and_idempotency(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """The SEPARATE clinical-note store (ADR-0045 P2 #27): metadata round-trips, the
+    partial-unique index (uq_emr_note_patient_import_key) makes a re-pull of the same
+    DocumentReference a graceful skip (add_if_absent -> False) across transactions, the
+    same key for a DIFFERENT patient still inserts, and list/delete are patient-scoped."""
+    from app.models.emr_clinical_note import EmrClinicalNote
+
+    def _note(key: str | None, *, pid: uuid.UUID, connection_id: uuid.UUID) -> EmrClinicalNote:
+        return EmrClinicalNote(
+            patient_id=pid,
+            connection_id=connection_id,
+            origin=DataOrigin.ehr_imported,
+            source_system="Synthetic Health",
+            document_fhir_id="DocRef/1",
+            type_code="11506-3",
+            type_display="Progress note",
+            category="clinical-note",
+            authored_at=datetime(2026, 6, 15, 8, 30, tzinfo=UTC),
+            author_display="Dr Synthetic",
+            has_inline_data=False,
+            import_key=key,
+        )
+
+    async with session_factory() as session:
+        patient_id = await _new_patient(session)
+        other_patient_id = await _new_patient(session)
+        connection_id, other_connection_id = uuid.uuid4(), uuid.uuid4()
+        connections = PostgresEmrConnectionRepository(session)
+        await connections.add(
+            ConnectionRecord(
+                id=connection_id,
+                patient_id=patient_id,
+                fhir_base="https://ehr.example/fhir",
+                provider_name="Synthetic Health",
+            )
+        )
+        await connections.add(
+            ConnectionRecord(
+                id=other_connection_id,
+                patient_id=other_patient_id,
+                fhir_base="https://ehr.example/fhir",
+                provider_name="Synthetic Health",
+            )
+        )
+        await session.commit()
+
+    # First pull imports the note.
+    async with session_factory() as session:
+        repo = PostgresEmrClinicalNoteRepository(session)
+        assert (
+            await repo.add_if_absent(_note("docref:1", pid=patient_id, connection_id=connection_id))
+            is True
+        )
+        await session.commit()
+
+    # A second pull that already probed "absent" now hits the unique index and skips;
+    # the SAME key for a DIFFERENT patient still inserts (uniqueness is per-patient), and
+    # the session stays usable after the absorbed conflict.
+    async with session_factory() as session:
+        repo = PostgresEmrClinicalNoteRepository(session)
+        assert (
+            await repo.add_if_absent(_note("docref:1", pid=patient_id, connection_id=connection_id))
+            is False
+        )
+        assert (
+            await repo.add_if_absent(
+                _note("docref:1", pid=other_patient_id, connection_id=other_connection_id)
+            )
+            is True
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        repo = PostgresEmrClinicalNoteRepository(session)
+        notes = await repo.list_for_patient(patient_id)
+        assert [n.type_display for n in notes] == ["Progress note"]  # exactly one, metadata intact
+        assert notes[0].author_display == "Dr Synthetic"
+        probe = await repo.existing_import_keys(patient_id, ["docref:1", "docref:absent"])
+        assert probe == {"docref:1"}
+
+        await repo.delete_for_patient(patient_id)
+        await session.commit()
+
+    async with session_factory() as session:
+        repo = PostgresEmrClinicalNoteRepository(session)
+        assert await repo.list_for_patient(patient_id) == []  # erased
+        assert len(await repo.list_for_patient(other_patient_id)) == 1  # other patient untouched
 
 
 def _autogenerate_diff(connection: Connection) -> list[object]:
