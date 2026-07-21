@@ -17,10 +17,11 @@ Output: `dist/neuropathy-demo.html` (~1.8 MB, gitignored — large + regenerable
   fetch. It seeds a restored session (refresh token in `sessionStorage`) so the
   app boots signed-in via the REAL restore flow (`/auth/me` 401 → `/auth/refresh`
   → `/auth/me` 200); login still works if you sign out.
-- `demoBar.ts` — a small fixed "Demo" role switcher (Patient / Clinician) mounted
-  outside the React root. It sets a role in `localStorage` and reloads; the mock
-  then returns the patient `ME` or `CLINICIAN_ME` identity, so the clinician panel
-  is reachable.
+- `demoBar.ts` — a small fixed "Demo" role switcher (Patient / Clinician / Caregiver)
+  mounted outside the React root. It sets a role in `localStorage` and reloads; the mock
+  then returns the patient `ME`, `CLINICIAN_ME`, or `CAREGIVER_ME` identity, so the
+  clinician panel and the caregiver companion area (ADR-0047) are each reachable — the
+  latter serving one shared patient over the scoped caregiver read endpoints.
 - `main-demo.tsx` — installs the mock + seeds the session, then renders the REAL
   `<App/>` with the same providers/styles/fonts as `src/main.tsx`. Uses
   **HashRouter** so the single hosted file survives refreshes at any path.

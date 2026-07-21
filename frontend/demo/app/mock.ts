@@ -20,6 +20,11 @@ import type { AdlCheckInIn, CapabilitySetIn, ClinicianCapabilitySetIn } from '..
 import { REFRESH_TOKEN_KEY } from '../../src/auth/refreshTokenBackend';
 import {
   CAPABILITIES,
+  CAREGIVER_CLAIM_ACCEPTED_DETAIL,
+  CAREGIVER_INVITE_CREATE,
+  CAREGIVER_LINKS,
+  CAREGIVER_ME,
+  CAREGIVER_PATIENTS,
   CLINIC_CAPABILITIES,
   CLINICIAN_ME,
   CONNECTION_ACTIVE,
@@ -43,18 +48,19 @@ import {
   TEST_REFRESH_TOKEN,
   TEST_REFRESHED_ACCESS_TOKEN,
   TRAJECTORY_IMPROVING,
+  VISIT_SUMMARY,
 } from '../../src/test/fixtures';
 
-// ---- demo role (patient vs clinician) ---------------------------------------
+// ---- demo role (patient / clinician / caregiver) ----------------------------
 
-export type DemoRole = 'patient' | 'clinician';
+export type DemoRole = 'patient' | 'clinician' | 'caregiver';
 
 const ROLE_KEY = 'neuropathy-demo.role';
 
 export function currentRole(): DemoRole {
-  return typeof localStorage !== 'undefined' && localStorage.getItem(ROLE_KEY) === 'clinician'
-    ? 'clinician'
-    : 'patient';
+  const stored = typeof localStorage !== 'undefined' ? localStorage.getItem(ROLE_KEY) : null;
+  if (stored === 'clinician' || stored === 'caregiver') return stored;
+  return 'patient';
 }
 
 export function setRole(role: DemoRole): void {
@@ -128,13 +134,14 @@ const tokenBody = () => ({
  * path space is intercepted. Everything else falls through to the original fetch.
  */
 const API_PREFIX =
-  /^\/(auth|me|observations|adl|biomech|trajectory|capabilities|connections|clinic|emr)(\/|$|\?)/;
+  /^\/(auth|me|observations|adl|biomech|trajectory|capabilities|connections|clinic|caregiver|emr)(\/|$|\?)/;
 
 function handle(method: string, url: URL, init: RequestInit | undefined): Response | null {
   const path = url.pathname;
   if (!API_PREFIX.test(path)) return null;
 
-  const me = currentRole() === 'clinician' ? CLINICIAN_ME : ME;
+  const role = currentRole();
+  const me = role === 'clinician' ? CLINICIAN_ME : role === 'caregiver' ? CAREGIVER_ME : ME;
 
   // ---- auth (anonymous endpoints) ----
   if (method === 'POST' && path === '/auth/login') {
@@ -145,6 +152,11 @@ function handle(method: string, url: URL, init: RequestInit | undefined): Respon
     return json(401, { detail: 'Invalid email or password' });
   }
   if (method === 'POST' && path === '/auth/register') {
+    return json(201, tokenBody());
+  }
+  // Caregiver self-registration (ADR-0047) is anonymous — a valid code creates the
+  // account; the demo accepts any code and boots the new caregiver signed-in.
+  if (method === 'POST' && path === '/caregiver/register') {
     return json(201, tokenBody());
   }
   if (method === 'POST' && path === '/auth/refresh') {
@@ -284,6 +296,49 @@ function handle(method: string, url: URL, init: RequestInit | undefined): Respon
     const existing = CLINIC_CAPABILITIES.find((row) => row.key === key);
     if (existing === undefined) return json(404, { detail: 'Unknown capability' });
     return json(200, { ...existing, active: body.active, expires_at: body.expires_at ?? null });
+  }
+
+  // ---- caregiver companion (ADR-0047 Phase A) ----
+
+  // Patient side — the "Share with a loved one" card (patient Settings/Sources).
+  if (method === 'GET' && path === '/me/caregiver-invites') return json(200, []);
+  if (method === 'POST' && path === '/me/caregiver-invites')
+    return json(201, CAREGIVER_INVITE_CREATE);
+  if (method === 'DELETE' && /^\/me\/caregiver-invites\/[^/]+$/.test(path)) return json(204, null);
+
+  if (method === 'GET' && path === '/me/caregivers') return json(200, CAREGIVER_LINKS);
+  if (method === 'POST' && /^\/me\/caregivers\/[^/]+\/accept$/.test(path)) {
+    const id = decodeURIComponent(path.split('/')[3] ?? '');
+    const link = CAREGIVER_LINKS.find((l) => l.id === id);
+    if (link === undefined) return patientNotFound();
+    return json(200, { ...link, status: 'active', accepted_at: '2026-07-21T10:00:00Z' });
+  }
+  if (method === 'POST' && /^\/me\/caregivers\/[^/]+\/decline$/.test(path)) return json(204, null);
+  if (method === 'PATCH' && /^\/me\/caregivers\/[^/]+$/.test(path)) {
+    const id = decodeURIComponent(path.split('/')[3] ?? '');
+    const link = CAREGIVER_LINKS.find((l) => l.id === id);
+    if (link === undefined) return patientNotFound();
+    const body = bodyJson<{ scope?: string }>(init);
+    return json(200, { ...link, scope: body.scope ?? link.scope });
+  }
+  if (method === 'DELETE' && /^\/me\/caregivers\/[^/]+$/.test(path)) return json(204, null);
+
+  // Caregiver side — claim a code + read the shared patient's trend/summary.
+  if (method === 'POST' && path === '/caregiver/claims') {
+    return json(202, { detail: CAREGIVER_CLAIM_ACCEPTED_DETAIL });
+  }
+  if (method === 'GET' && path === '/caregiver/patients') return json(200, CAREGIVER_PATIENTS);
+  const caregiverReadMatch = /^\/caregiver\/patients\/([^/]+)\/(trajectory|visit-summary)$/.exec(
+    path,
+  );
+  if (method === 'GET' && caregiverReadMatch) {
+    const id = decodeURIComponent(caregiverReadMatch[1] ?? '');
+    // Only the shared patient is readable; anyone else is 404 (never 403) — the
+    // server's non-enumeration posture, mirrored here.
+    if (id !== PANEL_PATIENT_ID) return patientNotFound();
+    return caregiverReadMatch[2] === 'trajectory'
+      ? json(200, TRAJECTORY_IMPROVING)
+      : json(200, VISIT_SUMMARY);
   }
 
   // Any unmatched API path is a demo bug — surface it rather than hang.
