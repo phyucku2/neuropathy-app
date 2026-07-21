@@ -92,7 +92,9 @@ test.describe('Share with a loved one (patient card)', () => {
     await signedInApp(page, { caregiverStore: store });
     await page.goto('/settings');
 
-    await expect(page.getByRole('heading', { name: 'Updates you send to loved ones' })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Updates you send to loved ones' }),
+    ).toBeVisible();
     const toggle = page.getByRole('switch', { name: 'Medication updates' });
     // Everything is off until the patient turns it on.
     await expect(toggle).toHaveAttribute('aria-checked', 'false');

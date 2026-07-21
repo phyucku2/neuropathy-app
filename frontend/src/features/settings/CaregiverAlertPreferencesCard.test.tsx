@@ -18,14 +18,13 @@ describe('CaregiverAlertPreferencesCard', () => {
       await screen.findByRole('heading', { name: 'Updates you send to loved ones' }),
     ).toBeInTheDocument();
     // Non-monitoring, non-emergency framing rides the card.
-    expect(
-      screen.getByText(/not live monitoring, and not for emergencies/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/not live monitoring, and not for emergencies/)).toBeInTheDocument();
 
     // All four types are present and OFF by default (nothing is sent until opted in).
-    expect(
-      await screen.findByRole('switch', { name: 'Missed daily check-ins' }),
-    ).toHaveAttribute('aria-checked', 'false');
+    expect(await screen.findByRole('switch', { name: 'Missed daily check-ins' })).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
     for (const label of [
       'Medication updates',
       'Wellness trend shifts',

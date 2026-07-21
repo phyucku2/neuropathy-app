@@ -114,8 +114,8 @@ export function CaregiverAlertsPage() {
       {/* The non-urgent framing rides WITH the data (ADR-0047), co-located beside the
           list in addition to the shell's persistent 911 banner. */}
       <p className="disclaimer" role="note">
-        These are occasional, non-urgent updates about the people you follow — not a
-        diagnosis, and not live monitoring. {data.emergency_notice}
+        These are occasional, non-urgent updates about the people you follow — not a diagnosis, and
+        not live monitoring. {data.emergency_notice}
       </p>
       {actionError !== null && actionError !== '' && <ErrorNotice>{actionError}</ErrorNotice>}
       {alerts.length === 0 ? (
@@ -125,8 +125,8 @@ export function CaregiverAlertsPage() {
           </div>
           <h2>No updates right now</h2>
           <p className="muted" style={{ marginTop: 0 }}>
-            When someone you follow chooses to share updates, they&apos;ll appear here. Each
-            person decides which updates to turn on, and can change that at any time.
+            When someone you follow chooses to share updates, they&apos;ll appear here. Each person
+            decides which updates to turn on, and can change that at any time.
           </p>
         </section>
       ) : (

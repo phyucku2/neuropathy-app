@@ -21,7 +21,9 @@ describe('caregiver alerts feed', () => {
 
     // The NEW (unacknowledged) alert renders its template title + body.
     expect(await screen.findByText('A check-in was missed')).toBeInTheDocument();
-    expect(screen.getByText(/It's been a little while since the last daily check-in/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/It's been a little while since the last daily check-in/),
+    ).toBeInTheDocument();
     // The already-acknowledged alert shows the "Seen" state and offers no button.
     expect(screen.getByText('A shift in the wellness trend')).toBeInTheDocument();
     expect(screen.getByText('Seen')).toBeInTheDocument();

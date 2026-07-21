@@ -95,9 +95,9 @@ export function CaregiverAlertPreferencesCard() {
       <h2>Updates you send to loved ones</h2>
       <div className="card">
         <p className="muted" style={{ marginTop: 0 }}>
-          Choose which occasional updates the people you share with can receive. Everything is
-          off until you turn it on. These are non-urgent nudges — not live monitoring, and not
-          for emergencies. You can change or stop any of them at any time.
+          Choose which occasional updates the people you share with can receive. Everything is off
+          until you turn it on. These are non-urgent nudges — not live monitoring, and not for
+          emergencies. You can change or stop any of them at any time.
         </p>
         {saveError !== null && <ErrorNotice>{saveError}</ErrorNotice>}
         {error !== null && <ErrorNotice>{error}</ErrorNotice>}

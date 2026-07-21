@@ -1566,7 +1566,10 @@ export async function installApiMocks(page: Page, scenario: Scenario = {}): Prom
       if (method === 'GET' && path === '/me/caregiver-alert-preferences') {
         return fulfillJson(route, 200, {
           preferences: (Object.keys(caregiverStore.preferences) as CaregiverAlertType[]).map(
-            (alertType) => ({ alert_type: alertType, enabled: caregiverStore.preferences[alertType] }),
+            (alertType) => ({
+              alert_type: alertType,
+              enabled: caregiverStore.preferences[alertType],
+            }),
           ),
         });
       }
