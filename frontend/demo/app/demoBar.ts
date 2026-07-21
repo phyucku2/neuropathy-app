@@ -2,9 +2,9 @@
  * A small, unobtrusive floating "Demo" role switcher.
  *
  * Rendered with plain DOM into its OWN node (outside the React #root) so it never
- * touches the real app tree. Two buttons — Patient / Clinician — write the role to
- * localStorage and reload; the fetch mock then returns the matching identity for
- * GET /auth/me, so the clinician panel is reachable without a login step.
+ * touches the real app tree. Three buttons — Patient / Clinician / Caregiver — write
+ * the role to localStorage and reload; the fetch mock then returns the matching
+ * identity for GET /auth/me, so each area is reachable without a login step.
  */
 
 import { currentRole, seedSession, setRole, type DemoRole } from './mock';
@@ -48,10 +48,15 @@ export function mountDemoBar(): void {
   bar.appendChild(tag);
 
   const role = currentRole();
-  (['patient', 'clinician'] as DemoRole[]).forEach((r) => {
+  const LABELS: Record<DemoRole, string> = {
+    patient: 'Patient',
+    clinician: 'Clinician',
+    caregiver: 'Caregiver',
+  };
+  (['patient', 'clinician', 'caregiver'] as DemoRole[]).forEach((r) => {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.textContent = r === 'patient' ? 'Patient' : 'Clinician';
+    btn.textContent = LABELS[r];
     if (r === role) btn.classList.add('on');
     btn.addEventListener('click', () => {
       if (currentRole() === r) return;
