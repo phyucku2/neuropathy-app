@@ -27,7 +27,6 @@ from app.repositories.caregiver_alert import InMemoryCaregiverAlertRepository
 from app.services.auth import AuthService
 from app.services.caregiver import CaregiverService
 from app.services.caregiver_alert import CaregiverAlertService
-from app.services.push import InMemoryPushSender
 
 NOW = datetime.now(UTC)
 SYNTHETIC_PASSWORD = "a-strong-password"
@@ -39,14 +38,7 @@ def caregiver_service() -> CaregiverService:
 
 
 @pytest.fixture()
-def push() -> InMemoryPushSender:
-    return InMemoryPushSender()
-
-
-@pytest.fixture()
-def alert_service(
-    caregiver_service: CaregiverService, push: InMemoryPushSender
-) -> CaregiverAlertService:
+def alert_service(caregiver_service: CaregiverService) -> CaregiverAlertService:
     # Share the caregiver service (consent), users, observations, notes, audit — exactly
     # like the deps wiring shares the process singletons.
     return CaregiverAlertService(
@@ -55,7 +47,6 @@ def alert_service(
         observations=caregiver_service.observations,
         clinical_notes=caregiver_service.clinical_notes,
         audit=caregiver_service.audit,
-        push=push,
     )
 
 
@@ -299,14 +290,26 @@ def test_feed_requires_caregiver_role(client: TestClient) -> None:
 
 
 async def test_one_feed_audit_per_read_and_push_on_new_alert(
-    client: TestClient, caregiver_service: CaregiverService, push: InMemoryPushSender
+    client: TestClient,
+    caregiver_service: CaregiverService,
+    alert_service: CaregiverAlertService,
 ) -> None:
     patient, patient_id, caregiver, _ = _linked_caregiver(client)
     _set_pref(client, patient, "med_change", True)
     await _seed_med(caregiver_service, patient_id)
 
     client.get("/caregiver/alerts", headers=caregiver)
+    # The push seam accrued exactly one message — only the newly-inserted alert (the
+    # route schedules the post-commit fan-out from these; PHI-free body).
+    assert len(alert_service.pending_pushes) == 1
+    message = alert_service.pending_pushes[0]
+    assert message.alert_type == "med_change"
+    assert "911" in message.body
+
+    # Second read: the alert is a duplicate (add_if_absent False) — nothing accrues.
     client.get("/caregiver/alerts", headers=caregiver)
+    assert alert_service.pending_pushes == []
+
     feed_events = [
         e
         for e in caregiver_service.audit._events  # type: ignore[attr-defined]
@@ -314,11 +317,6 @@ async def test_one_feed_audit_per_read_and_push_on_new_alert(
     ]
     assert len(feed_events) == 2  # one per read
     assert all("patients" in e.detail and "alerts" in e.detail for e in feed_events)
-    # The push seam fired exactly once — only on the newly-inserted alert (PHI-free).
-    assert len(push.sent) == 1
-    message = push.sent[0]
-    assert message.alert_type == "med_change"
-    assert "911" in message.body
 
 
 def test_one_pref_audit_per_change(client: TestClient, caregiver_service: CaregiverService) -> None:

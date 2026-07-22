@@ -29,6 +29,7 @@ from app.models.caregiver import (
     CaregiverAlertType,
     CaregiverInvite,
     CaregiverLink,
+    CaregiverPushToken,
 )
 from app.models.clinic import Clinic
 from app.models.connection import ClinicConnection, ConnectionStatus
@@ -553,6 +554,73 @@ class PostgresCaregiverAlertPreferenceRepository:
         await self._session.execute(
             delete(CaregiverAlertPreference).where(
                 CaregiverAlertPreference.patient_id == patient_id
+            )
+        )
+        await self._session.flush()
+
+
+class PostgresCaregiverPushTokenRepository:
+    """CaregiverPushTokenRepository over the caregiver_push_token table (ADR-0047 B2)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def upsert(
+        self, *, caregiver_user_id: uuid.UUID, token: str, platform: str, now: datetime
+    ) -> CaregiverPushToken:
+        # Insert-first, mirroring PostgresCaregiverAlertPreferenceRepository.upsert: the
+        # savepoint absorbs uq_caregiver_push_token_token (the device re-registered, its
+        # token refreshed, or it moved to another caregiver account) and the update path
+        # takes over, so exactly one row per token survives and the caller's transaction
+        # stays usable.
+        row = CaregiverPushToken(
+            caregiver_user_id=caregiver_user_id,
+            token=token,
+            platform=platform,
+            last_seen_at=now,
+        )
+        try:
+            async with self._session.begin_nested():
+                self._session.add(row)
+                await self._session.flush()
+        except IntegrityError as exc:
+            if "uq_caregiver_push_token_token" not in str(exc.orig):
+                raise
+            existing = await self._get_by_token(token)
+            assert existing is not None  # the fired constraint guarantees the row
+            existing.caregiver_user_id = caregiver_user_id
+            existing.platform = platform
+            existing.last_seen_at = now
+            await self._session.flush()
+            return existing
+        await self._session.refresh(row)
+        return row
+
+    async def _get_by_token(self, token: str) -> CaregiverPushToken | None:
+        return (
+            await self._session.scalars(
+                select(CaregiverPushToken).where(CaregiverPushToken.token == token)
+            )
+        ).first()
+
+    async def list_for_caregiver(self, caregiver_user_id: uuid.UUID) -> list[CaregiverPushToken]:
+        stmt = (
+            select(CaregiverPushToken)
+            .where(CaregiverPushToken.caregiver_user_id == caregiver_user_id)
+            .order_by(CaregiverPushToken.created_at)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def delete_by_token(self, token: str) -> None:
+        await self._session.execute(
+            delete(CaregiverPushToken).where(CaregiverPushToken.token == token)
+        )
+        await self._session.flush()
+
+    async def delete_for_caregiver(self, caregiver_user_id: uuid.UUID) -> None:
+        await self._session.execute(
+            delete(CaregiverPushToken).where(
+                CaregiverPushToken.caregiver_user_id == caregiver_user_id
             )
         )
         await self._session.flush()

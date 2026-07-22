@@ -50,7 +50,7 @@ from app.repositories.emr_clinical_note import (
 from app.repositories.observation import InMemoryObservationRepository, ObservationRepository
 from app.services.caregiver import CaregiverService
 from app.services.caregiver_alert_copy import ALERT_TEMPLATES
-from app.services.push import InMemoryPushSender, PushMessage, PushSender
+from app.services.push import PushMessage
 from app.services.trajectory import compute_patient_trajectory
 
 __all__ = [
@@ -103,7 +103,19 @@ class CaregiverAlertService:
         default_factory=InMemoryEmrClinicalNoteRepository
     )
     audit: AuditEventRepository = field(default_factory=InMemoryAuditEventRepository)
-    push: PushSender = field(default_factory=InMemoryPushSender)
+    # The PHI-free push messages for alerts newly inserted on the LAST feed read
+    # (ADR-0047 B2). The route reads these right after ``feed_for_caregiver`` returns and
+    # schedules the post-commit fan-out (services/caregiver_push_dispatch.py) — so the
+    # real FCM send runs AFTER the request transaction commits, never inside it, and a
+    # rolled-back feed read pushes nothing. Reset at the start of every feed read.
+    _pending_pushes: list[PushMessage] = field(default_factory=list, repr=False)
+
+    @property
+    def pending_pushes(self) -> list[PushMessage]:
+        """The push messages accrued on the most recent ``feed_for_caregiver`` — one per
+        newly-inserted alert, never a duplicate (``add_if_absent`` False accrues nothing).
+        Read by the route to schedule the post-commit fan-out."""
+        return self._pending_pushes
 
     # ---------------------------------------------------------------- evaluators
 
@@ -189,10 +201,14 @@ class CaregiverAlertService:
         *,
         caregiver_user_id: uuid.UUID,
         now: datetime,
+        pending: list[PushMessage],
     ) -> None:
         """Idempotently persist each candidate for a (link, type). Gated by scope AND
-        preference (defense in depth — callers gate too). A newly-inserted alert fires
-        the PHI-free push seam; a re-read (add_if_absent -> False) does not."""
+        preference (defense in depth — callers gate too). A newly-inserted alert accrues a
+        PHI-free push message onto ``pending`` (the route schedules the post-commit
+        fan-out); a re-read (add_if_absent -> False) accrues nothing, so a push fires
+        exactly once per new alert and never on a duplicate."""
+        del now  # kept for signature parity with the other persist-time helpers
         if not type_allowed_for_scope(alert_type, link.scope):
             return
         if not await self._preference_on(link.patient_id, alert_type):
@@ -207,7 +223,7 @@ class CaregiverAlertService:
             )
             inserted = await self.alerts.add_if_absent(alert)
             if inserted:
-                await self.push.send(
+                pending.append(
                     PushMessage(
                         caregiver_user_id=caregiver_user_id,
                         alert_type=alert_type.value,
@@ -229,6 +245,11 @@ class CaregiverAlertService:
         entries = await self.caregivers.patients_for_caregiver(caregiver_user_id)
         link_by_id: dict[uuid.UUID, tuple[CaregiverLink, str]] = {}
         since = now - _EVENT_LOOKBACK
+        # Accrue this read's new-alert pushes into a LOCAL list, published to
+        # ``_pending_pushes`` only at the very end (no await between publish and return),
+        # so a concurrent feed read on the shared in-memory singleton can never mix its
+        # pushes into this one in the cooperative event loop.
+        pending: list[PushMessage] = []
         for link, user in entries:
             link_by_id[link.id] = (link, user.display_name)
             for alert_type in CaregiverAlertType:
@@ -238,7 +259,12 @@ class CaregiverAlertService:
                     continue
                 keys = await self._eval_for_type(alert_type, link.patient_id, now=now, since=since)
                 await self._persist(
-                    link, alert_type, keys, caregiver_user_id=caregiver_user_id, now=now
+                    link,
+                    alert_type,
+                    keys,
+                    caregiver_user_id=caregiver_user_id,
+                    now=now,
+                    pending=pending,
                 )
 
         visible: list[tuple[CaregiverAlert, str]] = []
@@ -264,6 +290,9 @@ class CaregiverAlertService:
                 detail={"patients": len(link_by_id), "alerts": len(visible)},
             )
         )
+        # Publish atomically (no await between here and return): the route reads
+        # ``pending_pushes`` immediately after this call.
+        self._pending_pushes = pending
         return visible
 
     async def acknowledge(

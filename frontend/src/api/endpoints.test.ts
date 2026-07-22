@@ -10,11 +10,13 @@ import { storeSession } from '../auth/tokenStore';
 import { TEST_ACCESS_TOKEN, TEST_REFRESH_TOKEN } from '../test/fixtures';
 import { server } from '../test/server';
 import {
+  deregisterCaregiverPushToken,
   getEvents,
   getMedications,
   postEvent,
   postMedication,
   postMedicationChange,
+  registerCaregiverPushToken,
 } from './endpoints';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -120,5 +122,45 @@ describe('medication & event endpoints', () => {
     expect(meds.items.length).toBeGreaterThan(0);
     const events = await getEvents();
     expect(events.items.length).toBeGreaterThan(0);
+  });
+});
+
+describe('caregiver push-token endpoints (ADR-0047 B2)', () => {
+  it('registerCaregiverPushToken POSTs /caregiver/push-tokens with {token, platform}', async () => {
+    signIn();
+    let captured: Record<string, unknown> | null = null;
+    server.use(
+      http.post('/caregiver/push-tokens', async ({ request }) => {
+        captured = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json(
+          {
+            id: '11111111-1111-4111-8111-111111111111',
+            platform: 'android',
+            last_seen_at: '2026-07-22T00:00:00Z',
+            created_at: '2026-07-22T00:00:00Z',
+          },
+          { status: 201 },
+        );
+      }),
+    );
+    const out = await registerCaregiverPushToken('fcm-token-xyz', 'android');
+    expect(out.platform).toBe('android');
+    expect(captured).toEqual({ token: 'fcm-token-xyz', platform: 'android' });
+  });
+
+  it('deregisterCaregiverPushToken DELETEs /caregiver/push-tokens with {token} (204)', async () => {
+    signIn();
+    let capturedMethod: string | null = null;
+    let captured: Record<string, unknown> | null = null;
+    server.use(
+      http.delete('/caregiver/push-tokens', async ({ request }) => {
+        capturedMethod = request.method;
+        captured = (await request.json()) as Record<string, unknown>;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    await expect(deregisterCaregiverPushToken('fcm-token-xyz')).resolves.toBeUndefined();
+    expect(capturedMethod).toBe('DELETE');
+    expect(captured).toEqual({ token: 'fcm-token-xyz' });
   });
 });

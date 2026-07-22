@@ -6,6 +6,14 @@
 *.pem
 *.key
 
+# Firebase / Google service-account credentials — NEVER commit (ADR-0047 B2; the real
+# key is injected at runtime as a secret env var / mounted file, outside the repo).
+*service-account*.json
+*serviceAccount*.json
+*firebase-adminsdk*.json
+firebase-admin*.json
+google-services.json
+
 # PHI guard — no real patient data or clinical report images in the repo (CLAUDE.md §5).
 # De-identified transcriptions live in markdown; raw report images do not.
 **/phi/

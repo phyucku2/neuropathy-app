@@ -9,6 +9,7 @@ from app.models.caregiver import (
     CaregiverInvite,
     CaregiverLink,
     CaregiverLinkStatus,
+    CaregiverPushToken,
     CaregiverScope,
 )
 from app.models.clinic import Clinic
@@ -33,6 +34,7 @@ __all__ = [
     "CaregiverInvite",
     "CaregiverLink",
     "CaregiverLinkStatus",
+    "CaregiverPushToken",
     "CaregiverScope",
     "Clinic",
     "ClinicConnection",

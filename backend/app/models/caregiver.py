@@ -108,6 +108,42 @@ class CaregiverLink(UUIDPrimaryKey, Timestamps, Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class CaregiverPushToken(UUIDPrimaryKey, Timestamps, Base):
+    """One caregiver device's FCM registration token (ADR-0047 Phase B2).
+
+    A caregiver may hold several devices, so this is one row per (caregiver, device
+    token). ``token`` is globally unique — the same registration token can only ever name
+    one row, which powers the insert-first upsert (a device re-registering, or moving to
+    another caregiver account, updates in place) and the ``UNREGISTERED`` cleanup
+    (delete-by-token) the FCM fan-out runs. Tokens FK the caregiver's ``app_user`` row, so
+    a caregiver-account deletion purges them BEFORE the user row (FK-safe).
+
+    No PHI: a device registration token is an opaque routing identifier, never health
+    data — it rides alongside the caregiver identity exactly like a session would."""
+
+    __tablename__ = "caregiver_push_token"
+
+    __table_args__ = (
+        Index(
+            "uq_caregiver_push_token_token",
+            "token",
+            unique=True,
+        ),
+    )
+
+    caregiver_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("app_user.id"), nullable=False, index=True
+    )
+    # The device's FCM registration token — opaque, long, and globally unique. 4096 is
+    # comfortably above the current token length with headroom for FCM format changes.
+    token: Mapped[str] = mapped_column(String(4096), nullable=False)
+    # The device platform ("android" today; the column leaves room for more).
+    platform: Mapped[str] = mapped_column(String(16), nullable=False)
+    # Refreshed on every (re-)registration so a stale device can later be reaped; the
+    # ``Timestamps`` mixin supplies created_at/updated_at.
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class CaregiverAlertType(enum.StrEnum):
     """The four caregiver alert kinds (ADR-0047 Phase B1). Scope-gated: a trends-only
     caregiver may see only missed_checkin + trend_shift (type_allowed_for_scope)."""

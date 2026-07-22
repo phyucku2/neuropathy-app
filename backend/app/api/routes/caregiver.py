@@ -29,12 +29,14 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Response
 from fastapi.responses import JSONResponse
 
 from app.api.deps import (
     AuthDep,
     CaregiverAlertServiceDep,
+    CaregiverPushDispatcherDep,
+    CaregiverPushTokenRepoDep,
     CaregiverServiceDep,
     CaregiverUserDep,
     CurrentUser,
@@ -62,6 +64,11 @@ from app.schemas.caregiver_alert import (
     AlertPreferencesOut,
     CaregiverAlertOut,
     CaregiverAlertsOut,
+)
+from app.schemas.caregiver_push import (
+    CaregiverPushTokenDeleteIn,
+    CaregiverPushTokenIn,
+    CaregiverPushTokenOut,
 )
 from app.schemas.trajectory import Trajectory
 from app.schemas.visit_summary import DEFAULT_WINDOW_DAYS, VisitSummary
@@ -278,13 +285,23 @@ async def caregiver_patient_visit_summary(
 
 @router.get("/caregiver/alerts", response_model=CaregiverAlertsOut)
 async def caregiver_alerts(
-    current: CaregiverUserDep, service: CaregiverAlertServiceDep, response: Response
+    current: CaregiverUserDep,
+    service: CaregiverAlertServiceDep,
+    dispatcher: CaregiverPushDispatcherDep,
+    background: BackgroundTasks,
+    response: Response,
 ) -> CaregiverAlertsOut:
-    """The caregiver's in-app alert feed (ADR-0047 B1): runs the compute-on-read
-    evaluators for every accepted patient, persists new candidates idempotently, and
-    returns the scope+preference-gated list — a trends-only caregiver never sees a
-    ``med_change`` / ``new_chart_note`` alert. PHI-minimal (template copy + name only);
-    the single feed audit is written in the service. Bodies are PHI — ``no-store``."""
+    """The caregiver's in-app alert feed (ADR-0047): runs the compute-on-read evaluators
+    for every accepted patient, persists new candidates idempotently, and returns the
+    scope+preference-gated list — a trends-only caregiver never sees a ``med_change`` /
+    ``new_chart_note`` alert. PHI-minimal (template copy + name only); the single feed
+    audit is written in the service. Bodies are PHI — ``no-store``.
+
+    B2: after the response is built, any push messages accrued for NEWLY-inserted alerts
+    are fanned out to the caregiver's devices as a post-response BackgroundTask — which
+    runs AFTER this request's transaction commits (app/db/session.py), so a rolled-back
+    feed read pushes nothing and the FCM network call never sits inside the request
+    transaction. When push is disabled / unconfigured the schedule is a no-op."""
     response.headers["Cache-Control"] = "no-store"
     now = datetime.now(UTC)
     feed = await service.feed_for_caregiver(current.user_id, now=now)
@@ -301,7 +318,66 @@ async def caregiver_alerts(
         )
         for alert, display_name in feed
     ]
+    # Emit-on-commit: schedule the fan-out for the pushes this read accrued (exactly one
+    # per new alert, never on a duplicate). Runs after the response + commit.
+    dispatcher.schedule(background, service.pending_pushes)
     return CaregiverAlertsOut(alerts=alerts)
+
+
+# ---------------------------------------------------------------- caregiver push tokens (B2)
+
+
+@router.post("/caregiver/push-tokens", response_model=CaregiverPushTokenOut, status_code=201)
+async def register_caregiver_push_token(
+    body: CaregiverPushTokenIn,
+    current: CaregiverUserDep,
+    tokens: CaregiverPushTokenRepoDep,
+    service: CaregiverServiceDep,
+) -> CaregiverPushTokenOut:
+    """Register (or refresh) this caregiver device's FCM token (ADR-0047 B2). Idempotent
+    upsert keyed on the unique token: re-registering, or a token refresh, updates the one
+    row's owner/platform/last_seen_at in place — no duplicate. Audited PHI-free (platform
+    only; the token is never logged)."""
+    now = datetime.now(UTC)
+    row = await tokens.upsert(
+        caregiver_user_id=current.user_id, token=body.token, platform=body.platform, now=now
+    )
+    await service.audit.add(
+        AuditEvent(
+            actor_id=current.user_id,
+            actor_role=current.role.value,
+            action="caregiver_push_token_register",
+            patient_id=None,
+            detail={"platform": body.platform},
+        )
+    )
+    return CaregiverPushTokenOut(
+        id=row.id,
+        platform=row.platform,
+        last_seen_at=row.last_seen_at,
+        created_at=row.created_at,
+    )
+
+
+@router.delete("/caregiver/push-tokens", status_code=204)
+async def deregister_caregiver_push_token(
+    body: CaregiverPushTokenDeleteIn,
+    current: CaregiverUserDep,
+    tokens: CaregiverPushTokenRepoDep,
+    service: CaregiverServiceDep,
+) -> None:
+    """Deregister this caregiver device's token on logout / permission-off (ADR-0047 B2).
+    Idempotent — deleting an unknown token answers 204 all the same. Audited PHI-free."""
+    await tokens.delete_by_token(body.token)
+    await service.audit.add(
+        AuditEvent(
+            actor_id=current.user_id,
+            actor_role=current.role.value,
+            action="caregiver_push_token_deregister",
+            patient_id=None,
+            detail={},
+        )
+    )
 
 
 @router.post("/caregiver/alerts/{alert_id}/ack", status_code=204)

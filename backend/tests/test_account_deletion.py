@@ -733,7 +733,11 @@ def test_caregiver_deletes_own_account_and_links_only(world: World, client: Test
     assert len(deletions) == 1
     assert deletions[0].actor_role == "caregiver"
     assert deletions[0].patient_id is None
-    assert deletions[0].detail == {"caregiver_links": 1, "caregiver_alerts": 0}
+    assert deletions[0].detail == {
+        "caregiver_links": 1,
+        "caregiver_alerts": 0,
+        "caregiver_push_tokens": 0,
+    }
 
 
 def test_caregiver_wrong_password_is_403_and_deletes_nothing(

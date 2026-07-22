@@ -1,0 +1,29 @@
+# Backend-local ignores (belt-and-suspenders alongside the repo-root .gitignore).
+
+# Firebase / Google service-account credentials — NEVER commit (ADR-0047 B2). The real
+# FCM service-account JSON is injected at runtime as a secret env var
+# (FCM_CREDENTIALS_JSON) or a mounted file (GOOGLE_APPLICATION_CREDENTIALS), always
+# OUTSIDE the repo. Tests use a SYNTHETIC throwaway keypair generated in-memory.
+*service-account*.json
+*serviceAccount*.json
+*firebase-adminsdk*.json
+firebase-admin*.json
+google-services.json
+
+# Local env / secrets
+.env
+.env.*
+!.env.example
+
+# Tooling caches / build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml

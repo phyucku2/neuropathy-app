@@ -47,6 +47,10 @@ from app.repositories.caregiver_alert import (
     InMemoryCaregiverAlertPreferenceRepository,
     InMemoryCaregiverAlertRepository,
 )
+from app.repositories.caregiver_push_token import (
+    CaregiverPushTokenRepository,
+    InMemoryCaregiverPushTokenRepository,
+)
 from app.repositories.clinic_connection import (
     ClinicConnectionRepository,
     InMemoryClinicConnectionRepository,
@@ -173,6 +177,13 @@ class AccountDeletionService:
     )
     caregiver_alert_preferences: CaregiverAlertPreferenceRepository = field(
         default_factory=InMemoryCaregiverAlertPreferenceRepository
+    )
+    # Caregiver device push tokens (ADR-0047 B2): they FK the caregiver's user row, so a
+    # caregiver-account deletion purges them BEFORE the user row. A patient owns no push
+    # tokens (they belong to the caregiver identity), so patient deletion never touches
+    # this store.
+    caregiver_push_tokens: CaregiverPushTokenRepository = field(
+        default_factory=InMemoryCaregiverPushTokenRepository
     )
     audit: AuditEventRepository = field(default_factory=InMemoryAuditEventRepository)
 
@@ -348,6 +359,7 @@ class AccountDeletionService:
         alert_rows = [
             alert for link in links for alert in await self.caregiver_alerts.list_for_link(link.id)
         ]
+        push_token_rows = await self.caregiver_push_tokens.list_for_caregiver(user.id)
         # ONE audit event BEFORE the destructive statements (ADR-0027) — counts only.
         # No patient subject: the event records the caregiver identity's erasure.
         await self.audit.add(
@@ -356,12 +368,17 @@ class AccountDeletionService:
                 actor_role=UserRole.caregiver.value,
                 action="delete_account",
                 patient_id=None,
-                detail={"caregiver_links": len(links), "caregiver_alerts": len(alert_rows)},
+                detail={
+                    "caregiver_links": len(links),
+                    "caregiver_alerts": len(alert_rows),
+                    "caregiver_push_tokens": len(push_token_rows),
+                },
             )
         )
-        # FK-safe order: alerts FK the caregiver_link, so they die BEFORE the links, which
-        # in turn reference the user row and die before it.
+        # FK-safe order: alerts FK the caregiver_link, so they die BEFORE the links; the
+        # push tokens FK the user row, so they die before it too. Both go before the user.
         await self.caregiver_alerts.delete_for_caregiver(user.id)
         await self.caregiver_links.delete_for_caregiver(user.id)
+        await self.caregiver_push_tokens.delete_for_caregiver(user.id)
         await self.users.delete_user(user.id)
         return None

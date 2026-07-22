@@ -20,19 +20,21 @@ Two storage modes, selected per request by `get_db_session` (app/db/session.py):
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import secrets as pysecrets
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import lru_cache
-from typing import Annotated
+from typing import Annotated, Any
 
 from cryptography.fernet import Fernet
-from fastapi import Depends, HTTPException
+from fastapi import BackgroundTasks, Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.ai.narrative import AnthropicNarrator, AzureOpenAINarrator, Narrator
 from app.core.config import settings
@@ -59,6 +61,10 @@ from app.repositories.caregiver_alert import (
     InMemoryCaregiverAlertPreferenceRepository,
     InMemoryCaregiverAlertRepository,
 )
+from app.repositories.caregiver_push_token import (
+    CaregiverPushTokenRepository,
+    InMemoryCaregiverPushTokenRepository,
+)
 from app.repositories.emr_clinical_note import InMemoryEmrClinicalNoteRepository
 from app.repositories.mfa import InMemoryMfaFactorRepository
 from app.repositories.patient_capability import InMemoryPatientCapabilityRepository
@@ -69,6 +75,7 @@ from app.repositories.postgres import (
     PostgresCaregiverAlertRepository,
     PostgresCaregiverInviteRepository,
     PostgresCaregiverLinkRepository,
+    PostgresCaregiverPushTokenRepository,
     PostgresClinicConnectionRepository,
     PostgresClinicRepository,
     PostgresEmrClinicalNoteRepository,
@@ -85,10 +92,16 @@ from app.services.auth import AuthService
 from app.services.capability import CapabilityService
 from app.services.caregiver import CaregiverService
 from app.services.caregiver_alert import CaregiverAlertService
+from app.services.caregiver_push_dispatch import fan_out_caregiver_push
 from app.services.clinic import ClinicService
 from app.services.export import PatientDataExportService
 from app.services.mfa import MfaService
-from app.services.push import FcmPushSender, InMemoryPushSender, PushSender
+from app.services.push import (
+    FcmCredentialsError,
+    FcmPushSender,
+    HttpxPushTransport,
+    PushMessage,
+)
 
 _bearer = HTTPBearer(auto_error=False)
 _log = logging.getLogger(__name__)
@@ -497,19 +510,129 @@ def _process_caregiver_alert_pref_repo() -> InMemoryCaregiverAlertPreferenceRepo
 
 
 @lru_cache(maxsize=1)
-def _process_push_sender() -> InMemoryPushSender:
-    """Process-wide in-memory push sender for in-memory mode (ADR-0047 B1) — captures
-    sends so tests can inspect the PHI-free push seam. The FcmPushSender stub is only
-    selected when caregiver_push_enabled is True (still a no-op in B1)."""
-    return InMemoryPushSender()
+def _process_caregiver_push_token_repo() -> InMemoryCaregiverPushTokenRepository:
+    """Process-wide caregiver push-token store for in-memory mode (ADR-0047 B2) — shared
+    by the register/deregister endpoints, the account-deletion sweep, and the post-commit
+    FCM fan-out, so a token registered on one request is the one the fan-out delivers to
+    (and the deletion purges)."""
+    return InMemoryCaregiverPushTokenRepository()
 
 
-def _push_sender() -> PushSender:
-    """The configured push sender: the in-memory capture store by default (B1), or the
-    no-op FcmPushSender stub when caregiver_push_enabled is flipped on (B2 seam)."""
-    if settings.caregiver_push_enabled:
-        return FcmPushSender()
-    return _process_push_sender()
+def get_caregiver_push_token_repo(session: DbSessionDep = None) -> CaregiverPushTokenRepository:
+    if session is None:
+        return _process_caregiver_push_token_repo()
+    return PostgresCaregiverPushTokenRepository(session)
+
+
+CaregiverPushTokenRepoDep = Annotated[
+    CaregiverPushTokenRepository, Depends(get_caregiver_push_token_repo)
+]
+
+
+@lru_cache(maxsize=1)
+def _process_fcm_transport() -> HttpxPushTransport:
+    """One pooled HTTP client per process for FCM calls (mirrors _process_transport)."""
+    return HttpxPushTransport()
+
+
+def _load_fcm_credentials() -> dict[str, Any] | None:
+    """The Firebase service-account JSON, from settings.fcm_credentials_json (the raw
+    JSON, injected as a secret) or the GOOGLE_APPLICATION_CREDENTIALS file (a path).
+    NEVER a committed key. Fail SAFE: any parse/read error returns None (PHI-free warning,
+    no crash), so deps selects the no-op path rather than booting a broken sender."""
+    raw = settings.fcm_credentials_json
+    if raw:
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            _log.warning(
+                "FCM_CREDENTIALS_JSON is set but is not valid JSON; caregiver push stays "
+                "a no-op (fail-safe)."
+            )
+            return None
+        return parsed if isinstance(parsed, dict) else None
+    path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if path:
+        try:
+            with open(path, encoding="utf-8") as handle:
+                parsed = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            _log.warning(
+                "GOOGLE_APPLICATION_CREDENTIALS is set but could not be read as JSON; "
+                "caregiver push stays a no-op (fail-safe)."
+            )
+            return None
+        return parsed if isinstance(parsed, dict) else None
+    return None
+
+
+@lru_cache(maxsize=1)
+def _process_fcm_sender() -> FcmPushSender | None:
+    """The REAL FCM sender, built ONCE per process (its cached OAuth token is reused
+    across sends), or None when push is disabled / no credential is present / the
+    credential is malformed — every one of those cases fails SAFE to the no-op path
+    (ADR-0047 B2). Cached, so the credential is parsed and the JWT signer built once."""
+    if not settings.caregiver_push_enabled:
+        return None
+    credentials = _load_fcm_credentials()
+    if credentials is None:
+        _log.warning(
+            "CAREGIVER_PUSH_ENABLED is true but no FCM service-account credential is "
+            "configured; caregiver push stays a no-op (fail-safe)."
+        )
+        return None
+    try:
+        return FcmPushSender(transport=_process_fcm_transport(), service_account_info=credentials)
+    except FcmCredentialsError:
+        _log.warning(
+            "The configured FCM service-account credential could not be loaded; "
+            "caregiver push stays a no-op (fail-safe)."
+        )
+        return None
+
+
+@dataclass
+class CaregiverPushDispatcher:
+    """Schedules the post-commit caregiver-push fan-out (ADR-0047 B2).
+
+    The route calls ``schedule`` after building the feed response; the fan-out runs as a
+    Starlette BackgroundTask AFTER the response is sent — i.e. after the request
+    transaction commits — and opens its OWN short-lived session (the request's is closed)
+    to read tokens and prune dead ones. A None ``sender`` (push disabled / no credential)
+    makes ``schedule`` a no-op, so the whole feature fails safe."""
+
+    sender: FcmPushSender | None
+    sessionmaker: async_sessionmaker[AsyncSession] | None
+
+    def schedule(self, background: BackgroundTasks, messages: list[PushMessage]) -> None:
+        if self.sender is None or not messages:
+            return
+        background.add_task(self._run, list(messages))
+
+    async def _run(self, messages: list[PushMessage]) -> None:
+        assert self.sender is not None  # guarded by schedule
+        if self.sessionmaker is not None:
+            async with self.sessionmaker() as session, session.begin():
+                tokens: CaregiverPushTokenRepository = PostgresCaregiverPushTokenRepository(session)
+                await fan_out_caregiver_push(messages=messages, tokens=tokens, sender=self.sender)
+        else:
+            await fan_out_caregiver_push(
+                messages=messages,
+                tokens=_process_caregiver_push_token_repo(),
+                sender=self.sender,
+            )
+
+
+def get_caregiver_push_dispatcher(request: Request) -> CaregiverPushDispatcher:
+    maker: async_sessionmaker[AsyncSession] | None = getattr(
+        request.app.state, "db_sessionmaker", None
+    )
+    return CaregiverPushDispatcher(sender=_process_fcm_sender(), sessionmaker=maker)
+
+
+CaregiverPushDispatcherDep = Annotated[
+    CaregiverPushDispatcher, Depends(get_caregiver_push_dispatcher)
+]
 
 
 @lru_cache(maxsize=1)
@@ -518,7 +641,8 @@ def _default_caregiver_alert_service() -> CaregiverAlertService:
     service (the SINGLE consent predicate), observations, clinical notes, and audit are
     the SAME shared singletons every other feature uses, so the alert engine reads
     exactly the data the patient's own endpoints wrote and every alert event lands in
-    the one shared trail. Push is captured in-memory unless the flag selects the stub."""
+    the one shared trail. New-alert pushes accrue on the service and are fanned out
+    post-commit by the route (ADR-0047 B2)."""
     emr = _default_emr_service()
     return CaregiverAlertService(
         caregivers=_default_caregiver_service(),
@@ -527,7 +651,6 @@ def _default_caregiver_alert_service() -> CaregiverAlertService:
         observations=emr.observations,
         clinical_notes=emr.clinical_notes,
         audit=emr.audit,
-        push=_push_sender(),
     )
 
 
@@ -541,7 +664,6 @@ def get_caregiver_alert_service(session: DbSessionDep = None) -> CaregiverAlertS
         observations=PostgresObservationRepository(session),
         clinical_notes=PostgresEmrClinicalNoteRepository(session),
         audit=PostgresAuditEventRepository(session),
-        push=_push_sender(),
     )
 
 
@@ -598,6 +720,7 @@ def _default_account_deletion_service() -> AccountDeletionService:
         caregiver_links=_process_caregiver_link_repo(),
         caregiver_alerts=_process_caregiver_alert_repo(),
         caregiver_alert_preferences=_process_caregiver_alert_pref_repo(),
+        caregiver_push_tokens=_process_caregiver_push_token_repo(),
         audit=emr.audit,
     )
 
@@ -621,6 +744,7 @@ def get_account_deletion_service(session: DbSessionDep = None) -> AccountDeletio
         caregiver_links=PostgresCaregiverLinkRepository(session),
         caregiver_alerts=PostgresCaregiverAlertRepository(session),
         caregiver_alert_preferences=PostgresCaregiverAlertPreferenceRepository(session),
+        caregiver_push_tokens=PostgresCaregiverPushTokenRepository(session),
         audit=PostgresAuditEventRepository(session),
     )
 

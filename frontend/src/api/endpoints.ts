@@ -19,6 +19,8 @@ import type {
   CaregiverInviteCreateOut,
   CaregiverInviteOut,
   CaregiverPatientsOut,
+  CaregiverPushPlatform,
+  CaregiverPushTokenOut,
   CaregiverRegisterIn,
   CaregiverScope,
   ClinicianCapabilitySetIn,
@@ -347,6 +349,29 @@ export async function acknowledgeCaregiverAlert(alertId: string): Promise<void> 
   await request<unknown>(`/caregiver/alerts/${encodeURIComponent(alertId)}/ack`, {
     method: 'POST',
   });
+}
+
+/**
+ * Register (or refresh) this caregiver device's push token (ADR-0047 B2). Native-only
+ * caller (src/native/caregiverPush.ts) — the web app never invokes this. Idempotent
+ * upsert keyed on the unique token server-side: re-registering, or a Firebase token
+ * refresh, updates the one row in place (no duplicate). The token is an opaque routing
+ * identifier — NO PHI — and is never logged.
+ */
+export function registerCaregiverPushToken(
+  token: string,
+  platform: CaregiverPushPlatform,
+): Promise<CaregiverPushTokenOut> {
+  return request<CaregiverPushTokenOut>('/caregiver/push-tokens', {
+    method: 'POST',
+    body: { token, platform },
+  });
+}
+
+/** Deregister this caregiver device's push token on logout / permission-off (ADR-0047
+ *  B2). Idempotent — deleting an unknown token answers 204 all the same. */
+export async function deregisterCaregiverPushToken(token: string): Promise<void> {
+  await request<unknown>('/caregiver/push-tokens', { method: 'DELETE', body: { token } });
 }
 
 /** The shared patient's DETERMINISTIC trajectory (trends scope suffices). A patient this

@@ -1,9 +1,9 @@
-"""The caregiver push seam (ADR-0047 Phase B1) — capture, PHI-free shape, OFF-by-default.
+"""The caregiver push seam (ADR-0047) — capture + the PHI-free ``PushMessage`` shape.
 
-B1 ships the seam only: an ``InMemoryPushSender`` that captures sends (tests inspect it)
-and a NO-OP ``FcmPushSender`` stub wired behind ``caregiver_push_enabled`` (default
-False). The ``PushMessage`` shape is PHI-free by construction — there is no field for a
-patient name, value, or note text — which this file locks down.
+The in-app seam pieces that survive into B2: an ``InMemoryPushSender`` that captures
+sends and the ``PushMessage`` shape, which is PHI-free by construction — there is no
+field for a patient name, value, or note text. (The real FCM sender + fan-out are
+covered in tests/test_caregiver_push.py.)
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from __future__ import annotations
 import dataclasses
 import uuid
 
-from app.services.push import FcmPushSender, InMemoryPushSender, PushMessage
+from app.services.push import InMemoryPushSender, PushMessage
 
 
 def _message() -> PushMessage:
@@ -30,11 +30,6 @@ async def test_in_memory_sender_captures_every_send() -> None:
     message = _message()
     await sender.send(message)
     assert sender.sent == [message]
-
-
-async def test_fcm_stub_is_a_noop_in_b1() -> None:
-    # The B2 seam: it accepts a message and does nothing (no network, no error).
-    assert await FcmPushSender().send(_message()) is None
 
 
 def test_push_message_is_phi_free_by_shape() -> None:
