@@ -45,6 +45,7 @@ from app.repositories.postgres import (
     PostgresCaregiverAlertRepository,
     PostgresCaregiverInviteRepository,
     PostgresCaregiverLinkRepository,
+    PostgresCaregiverPushTokenRepository,
     PostgresClinicConnectionRepository,
     PostgresClinicRepository,
     PostgresEmrClinicalNoteRepository,
@@ -936,6 +937,81 @@ async def test_caregiver_alert_repositories_round_trip(
         await alerts.delete_for_patient(patient_id)
         await prefs.delete_for_patient(patient_id)
         assert await prefs.list_for_patient(patient_id) == []
+        await session.commit()
+
+
+async def test_caregiver_push_token_repository_round_trip(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Caregiver push-token repo (ADR-0047 B2): the unique-token upsert (register/refresh
+    in place, and a device moving between caregiver accounts), list_for_caregiver, the
+    delete-by-token cleanup, and the by-caregiver deletion sweep — zero residual."""
+    now = datetime.now(UTC)
+    caregiver = UserRecord(
+        id=uuid.uuid4(),
+        email=f"care-{uuid.uuid4().hex[:12]}@example.com",
+        password_hash="argon2-hash-placeholder",
+        display_name="Synthetic Caregiver",
+        role=UserRole.caregiver,
+        patient_id=None,
+    )
+    other = UserRecord(
+        id=uuid.uuid4(),
+        email=f"care-{uuid.uuid4().hex[:12]}@example.com",
+        password_hash="argon2-hash-placeholder",
+        display_name="Other Caregiver",
+        role=UserRole.caregiver,
+        patient_id=None,
+    )
+
+    async with session_factory() as session:
+        users = PostgresUserRepository(session)
+        await users.add(caregiver)
+        await users.add(other)
+        await session.commit()
+
+    async with session_factory() as session:
+        tokens = PostgresCaregiverPushTokenRepository(session)
+        first = await tokens.upsert(
+            caregiver_user_id=caregiver.id, token="dev-1", platform="android", now=now
+        )
+        await tokens.upsert(
+            caregiver_user_id=caregiver.id, token="dev-2", platform="android", now=now
+        )
+        await session.commit()
+        assert {r.token for r in await tokens.list_for_caregiver(caregiver.id)} == {
+            "dev-1",
+            "dev-2",
+        }
+
+    async with session_factory() as session:
+        tokens = PostgresCaregiverPushTokenRepository(session)
+        # Re-registering the SAME token updates in place (same row id), no duplicate.
+        refreshed = await tokens.upsert(
+            caregiver_user_id=caregiver.id,
+            token="dev-1",
+            platform="android",
+            now=now + timedelta(minutes=5),
+        )
+        assert refreshed.id == first.id
+        # The same device token registering under ANOTHER caregiver moves the one row.
+        moved = await tokens.upsert(
+            caregiver_user_id=other.id, token="dev-1", platform="android", now=now
+        )
+        assert moved.id == first.id
+        await session.commit()
+        assert {r.token for r in await tokens.list_for_caregiver(caregiver.id)} == {"dev-2"}
+        assert {r.token for r in await tokens.list_for_caregiver(other.id)} == {"dev-1"}
+
+    async with session_factory() as session:
+        tokens = PostgresCaregiverPushTokenRepository(session)
+        # UNREGISTERED / deregister cleanup: delete by token, idempotent.
+        await tokens.delete_by_token("dev-1")
+        await tokens.delete_by_token("dev-1")  # missing token is a no-op
+        assert await tokens.list_for_caregiver(other.id) == []
+        # By-caregiver deletion sweep leaves zero residual.
+        await tokens.delete_for_caregiver(caregiver.id)
+        assert await tokens.list_for_caregiver(caregiver.id) == []
         await session.commit()
 
 

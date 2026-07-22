@@ -13,6 +13,7 @@ import { isOnboardingComplete } from './features/onboarding/onboardingState';
 // round-trip for no payload benefit.
 import { OfflineCheckInSync } from './features/checkin/OfflineCheckInSync';
 import { useNativeShell } from './native/useNativeShell';
+import { useCaregiverPush } from './native/useCaregiverPush';
 
 // Route-level code-splitting (ADR-0032): each major screen is its own chunk, loaded on
 // demand behind the <Suspense> boundary below, so the initial download is the shell +
@@ -154,6 +155,10 @@ function ClinicianArea() {
 
 function CaregiverArea() {
   const { user } = useAuth();
+  // Native-only caregiver push registration (ADR-0047 B2): a signed-in caregiver on a
+  // native platform registers the device with FCM here; no-op on web and for non-caregivers.
+  // Called unconditionally (hook rules) — the gating lives inside the hook.
+  useCaregiverPush();
   if (user === null) {
     return <Loading label="Loading your account…" />;
   }

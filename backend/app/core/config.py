@@ -174,13 +174,19 @@ class Settings(BaseSettings):
     caregiver_claim_rate_limit_max: int = 10
     caregiver_claim_rate_limit_window_seconds: int = 3600
 
-    # Caregiver push notifications (ADR-0047 Phase B1). OFF by default: the B1 build
-    # ships the in-app alert feed + the push SEAM only. When True, deps selects the
-    # FcmPushSender stub — still a no-op in B1; the real FCM HTTP v1 client + Firebase
-    # service-account credential land in B2. Payloads are PHI-free by contract
-    # (services/push.py::PushMessage); B2 fcm_* placeholders land with the real sender,
-    # not here.
+    # Caregiver push notifications (ADR-0047). OFF by default. When True AND a Firebase
+    # service-account credential is present, deps selects the REAL FCM HTTP v1 sender
+    # (services/push.py); flag on but NO credential — or flag off — fails SAFE to the
+    # no-op path (a rolled-back or unconfigured push never reaches a device). Payloads are
+    # PHI-free by contract (services/push.py::PushMessage).
     caregiver_push_enabled: bool = False
+
+    # The Firebase service-account JSON (ADR-0047 B2), injected as a secret at runtime —
+    # NEVER committed. The raw JSON string; deps parses it and mints the FCM OAuth2 token
+    # from it (scope firebase.messaging). Empty/unset falls back to
+    # GOOGLE_APPLICATION_CREDENTIALS (a path), then to the no-op path. .env.example
+    # carries only a commented placeholder.
+    fcm_credentials_json: str | None = None
 
     # Bootstrap-denial audit cap (ADR-0017): failed attempts on the UNAUTHENTICATED
     # provisioning gate are audited, but at most bootstrap_denied_audit_max rows per
@@ -237,6 +243,7 @@ class Settings(BaseSettings):
         "ops_bootstrap_token",
         "secret_store_key",
         "error_reporting_dsn",
+        "fcm_credentials_json",
         mode="before",
     )
     @classmethod

@@ -28,6 +28,7 @@ import {
 } from '../api/endpoints';
 import type { MeOut, TokenOut } from '../api/types';
 import { purgeQueuedCheckInsForOtherOwners } from '../features/checkin/offlineQueue';
+import { deregisterCaregiverPush } from '../native/caregiverPush';
 import { resolveNativeRestore } from './nativeRestore';
 import { isNativePlatform } from './platform';
 import { clearSession, getRefreshToken, onSessionExpired, storeSession } from './tokenStore';
@@ -199,6 +200,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(() => {
+    // Native-only: deregister this device's caregiver push token BEFORE the session is
+    // cleared, so the DELETE captures a still-valid access token (ADR-0047 B2). The DELETE
+    // is issued synchronously inside deregisterCaregiverPush before any await, so it reads
+    // the auth header ahead of clearSession() below. On web this is a pure no-op — nothing
+    // was ever registered — so the web suites are unaffected.
+    void deregisterCaregiverPush();
     clearSession();
     setUser(null);
     setStatus('anonymous');

@@ -13,4 +13,12 @@ ext {
     androidxJunitVersion = '1.1.5'
     androidxEspressoCoreVersion = '3.5.1'
     cordovaAndroidVersion = '10.1.1'
+    // Firebase Cloud Messaging (ADR-0047 B2): pin the version @capacitor/push-notifications
+    // resolves for `com.google.firebase:firebase-messaging` (its build.gradle reads this ext,
+    // else falls back to its own default) so CI and release builds compile a fixed version
+    // rather than a floating one. firebase-messaging COMPILES without google-services.json —
+    // that file is only consumed at build time by the google-services plugin (applied
+    // conditionally in app/build.gradle) to generate the google_app_id resource — so the
+    // mobile CI `assembleDebug` job stays green with no google-services.json present.
+    firebaseMessagingVersion = '23.4.1'
 }

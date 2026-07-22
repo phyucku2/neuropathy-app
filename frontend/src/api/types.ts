@@ -808,6 +808,28 @@ export interface AlertPreferenceIn {
   enabled: boolean;
 }
 
+// ---- caregiver_push.py (ADR-0047 Phase B2 — native caregiver push registration) ----
+
+/** CaregiverPushPlatform — the device platforms that can register a push token. Android
+ *  only today (FCM); the backend `PlatformLiteral` is the closed source of truth. */
+export type CaregiverPushPlatform = 'android';
+
+/** CaregiverPushTokenIn — register/refresh a caregiver device's push token (ADR-0047 B2).
+ *  NO PHI: a device registration token is an opaque routing identifier, never health data. */
+export interface CaregiverPushTokenIn {
+  token: string;
+  platform: CaregiverPushPlatform;
+}
+
+/** CaregiverPushTokenOut — the registered device token as the caregiver's client sees it:
+ *  metadata only (never the token verbatim beyond what the client already holds). */
+export interface CaregiverPushTokenOut {
+  id: string;
+  platform: CaregiverPushPlatform;
+  last_seen_at: string;
+  created_at: string;
+}
+
 // ---- clinic.py ----
 
 /** ConnectionOut (patient-side clinic connection) */
