@@ -1,0 +1,172 @@
+name: Provision Azure infrastructure (one-time)
+
+# ONE-TIME stand-up of the whole stack, for when the Container Apps / Postgres / migration
+# job do NOT yet exist in the resource group (deploy.yml only ROLLS existing apps). It builds
+# the SHA-tagged images, provisions everything via infra/azure/main.bicep, runs the first DB
+# migration, and prints the live frontend URL. Idempotent (Bicep is declarative) but intended
+# to be run once; use "Deploy to Azure (Container Apps)" for routine code rollouts afterward.
+#
+# The app-critical secrets (JWT signing key, Postgres admin password, Fernet SECRET_STORE_KEY)
+# are generated INSIDE the deploy step and passed as @secure() Bicep params — they never leave
+# that shell, are never printed, and land only as Container Apps secrets. SECRET_STORE_KEY is
+# generated because the backend fails closed in prod without it (HIPAA gate C1).
+#
+# Auth is Azure OIDC. Same repo config as deploy.yml (docs/ops/deploy-azure.md §10):
+#   SECRETS:   ACR_LOGIN_SERVER, ACR_USERNAME, ACR_PASSWORD,
+#              AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID
+#   VARIABLES: AZURE_RESOURCE_GROUP; NAME_PREFIX (optional, default "neuropathy")
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to build & provision (blank = short commit SHA)"
+        required: false
+        default: ""
+
+concurrency:
+  group: deploy-azure # shares the deploy lock so a provision and a roll never overlap
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    name: Build, provision, migrate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # required for Azure OIDC login
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve image tag
+        id: meta
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          TAG="$INPUT_TAG"
+          [ -z "$TAG" ] && TAG="$(git rev-parse --short HEAD)"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Provisioning tag: $TAG"
+
+      # --- Build & push both images (same pattern as deploy.yml) ---
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to Azure Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.ACR_LOGIN_SERVER }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+      - name: Build & push backend
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          file: backend/Dockerfile
+          push: true
+          tags: ${{ secrets.ACR_LOGIN_SERVER }}/neuropathy-backend:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+      - name: Build & push frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          file: frontend/Dockerfile
+          push: true
+          tags: ${{ secrets.ACR_LOGIN_SERVER }}/neuropathy-frontend:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
+
+      # --- Provision ---
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy the Bicep stack
+        uses: azure/cli@v2
+        env:
+          RG: ${{ vars.AZURE_RESOURCE_GROUP }}
+          PREFIX: ${{ vars.NAME_PREFIX || 'neuropathy' }}
+          ACR: ${{ secrets.ACR_LOGIN_SERVER }}
+          ACR_USER: ${{ secrets.ACR_USERNAME }}
+          ACR_PASS: ${{ secrets.ACR_PASSWORD }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        with:
+          inlineScript: |
+            set -euo pipefail
+            az config set extension.use_dynamic_install=yes_without_prompt
+            LOC=$(az group show -n "$RG" --query location -o tsv)
+            echo "Resource group $RG is in $LOC"
+
+            # App-critical secrets — generated here, never printed, passed as @secure() params.
+            JWT=$(python3 -c "import secrets; print(secrets.token_urlsafe(48))")
+            PGP=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")
+            # A valid Fernet key is urlsafe-base64 of 32 random bytes (no extra deps needed).
+            SSK=$(python3 -c "import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())")
+
+            az deployment group create \
+              -g "$RG" -n neuropathy-azure \
+              -f infra/azure/main.bicep \
+              -p namePrefix="$PREFIX" \
+                 location="$LOC" \
+                 backendImage="$ACR/${PREFIX}-backend:$TAG" \
+                 frontendImage="$ACR/${PREFIX}-frontend:$TAG" \
+                 registryServer="$ACR" \
+                 registryUsername="$ACR_USER" \
+                 registryPassword="$ACR_PASS" \
+                 postgresAdminLogin=neuro \
+                 postgresAdminPassword="$PGP" \
+                 databaseName=neuropathy \
+                 jwtSecret="$JWT" \
+                 secretStoreKey="$SSK" \
+                 webConcurrency=2 \
+              -o none
+
+            FQDN=$(az deployment group show -g "$RG" -n neuropathy-azure \
+                     --query properties.outputs.frontendUrl.value -o tsv)
+            echo "FRONTEND_URL=$FQDN" >> "$GITHUB_ENV"
+            echo "Provisioned. Frontend URL: $FQDN"
+
+      - name: Run first DB migration (job)
+        uses: azure/cli@v2
+        env:
+          RG: ${{ vars.AZURE_RESOURCE_GROUP }}
+          PREFIX: ${{ vars.NAME_PREFIX || 'neuropathy' }}
+        with:
+          inlineScript: |
+            set -euo pipefail
+            az config set extension.use_dynamic_install=yes_without_prompt
+            JOB=$(az containerapp job list -g "$RG" --query "[?contains(name, 'migrat')].name | [0]" -o tsv)
+            if [ -z "$JOB" ]; then echo "::error::No migration job was provisioned"; exit 1; fi
+            echo "Migration job: $JOB"
+            EXEC=$(az containerapp job start -n "$JOB" -g "$RG" --query name -o tsv)
+            echo "Started migration execution: $EXEC"
+            for _ in $(seq 1 40); do
+              STATUS=$(az containerapp job execution show -n "$JOB" -g "$RG" \
+                --job-execution-name "$EXEC" --query "properties.status" -o tsv 2>/dev/null || echo "Unknown")
+              echo "  migration status: $STATUS"
+              case "$STATUS" in
+                Succeeded) echo "Migrations OK"; break ;;
+                Failed|Degraded) echo "::error::Migration job failed ($STATUS)"; exit 1 ;;
+              esac
+              sleep 15
+            done
+
+      - name: Summary
+        env:
+          RG: ${{ vars.AZURE_RESOURCE_GROUP }}
+          PREFIX: ${{ vars.NAME_PREFIX || 'neuropathy' }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          {
+            echo "### Provisioned Azure Container Apps"
+            echo ""
+            echo "- Frontend URL: ${FRONTEND_URL:-'(see deployment outputs)'}"
+            echo "- Tag: \`${TAG}\`"
+            echo "- Resource group: \`${RG}\`"
+            echo "- Stood up: \`${PREFIX}-backend\`, \`${PREFIX}-frontend\`, \`${PREFIX}-migrate\` job, Postgres (migration ran)"
+            echo ""
+            echo "Next: set the repo variable \`FRONTEND_FQDN\` to the URL's host so future"
+            echo "\`Deploy to Azure\` runs health-check it. Then use the Deploy workflow for routine rollouts."
+          } >> "$GITHUB_STEP_SUMMARY"
