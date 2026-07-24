@@ -70,11 +70,19 @@ jobs:
           VITE_API_BASE_URL: ${{ vars.MOBILE_API_BASE_URL || 'https://neuropathy-frontend.whitecliff-b61fc6f2.eastus2.azurecontainerapps.io' }}
         run: npm run build
 
-      - name: Generate the iOS project (cap add ios → pod install)
-        # `cap add ios` scaffolds ios/App and runs `pod install` (CocoaPods is preinstalled on
-        # the macOS runner). This is where a plugin without iOS support, or a broken Podspec,
-        # would fail — exactly what we want to catch before investing in enrollment.
-        run: npx cap add ios
+      - name: Generate the iOS project + pod install (raised deployment target)
+        # `cap add ios` scaffolds ios/App and *tries* pod install, but Capacitor's default
+        # Podfile pins `platform :ios, '13.0'`, and the @aparajita biometric-auth / secure-storage
+        # plugins require a higher minimum — so that first pod install fails. The scaffold + Podfile
+        # are written before it fails, so we raise the deployment target to 15.0 (satisfies the
+        # aparajita pods; every @capacitor/* 6 pod supports 13+, so higher is fine) and re-run
+        # pod install. When ios/ is eventually committed, this target lives in the Podfile
+        # permanently. (BSD sed needs the empty '' after -i.)
+        run: |
+          npx cap add ios || echo "cap add's pod install failed as expected (deployment target); patching Podfile and retrying"
+          sed -i '' -E "s/platform :ios, '[0-9.]+'/platform :ios, '15.0'/" ios/App/Podfile
+          echo "Podfile platform line:"; grep 'platform :ios' ios/App/Podfile
+          cd ios/App && pod install
 
       - name: Build for the iOS Simulator (unsigned)
         working-directory: frontend/ios/App
