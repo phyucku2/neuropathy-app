@@ -11,14 +11,25 @@ name: iOS build-check (macOS)
 # submit — those need the Apple Developer Program (bundle id, distribution cert, provisioning
 # profile, APNs key) which is the owner-side enrollment gate.
 #
-# manual-only (workflow_dispatch): macOS runner minutes bill at a premium, so this never runs
-# automatically — trigger it on demand when the iOS surface changes. The iOS project is
-# generated in-run and not committed; persisting ios/ with the review-required config
-# (Info.plist usage strings, PrivacyInfo.xcprivacy, push entitlement) is the follow-up, done
-# once the Apple account exists.
+# Triggers, both cost-aware (macOS runner minutes bill at a premium):
+#   - workflow_dispatch: run on demand (only works once this file is on the default branch —
+#     GitHub lists manual workflows from the default branch only).
+#   - pull_request (paths-scoped): runs ONLY when the iOS-affecting surface changes (this
+#     workflow, the Capacitor config, or the frontend dependency set), so it validates the
+#     iOS build in the PR that touches it and stays silent on every unrelated PR.
+# The iOS project is generated in-run and not committed; persisting ios/ with the
+# review-required config (Info.plist usage strings, PrivacyInfo.xcprivacy, push entitlement)
+# is the follow-up, done once the Apple account exists.
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/ios-build-check.yml"
+      - "frontend/capacitor.config.ts"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
+      - "frontend/ios/**"
 
 jobs:
   ios-build-check:
