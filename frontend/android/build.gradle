@@ -7,7 +7,9 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:8.2.1'
+        // AGP 8.7.x is the minimum that compiles against compileSdk 35 (see variables.gradle);
+        // it requires Gradle 8.9+ (bumped in gradle/wrapper/gradle-wrapper.properties).
+        classpath 'com.android.tools.build:gradle:8.7.2'
         classpath 'com.google.gms:google-services:4.4.0'
 
         // NOTE: Do not place your application dependencies here; they belong
