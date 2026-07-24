@@ -1,0 +1,92 @@
+name: iOS build-check (macOS)
+
+# Proves the Capacitor app COMPILES for iOS, without anyone needing a Mac and without an
+# Apple Developer account. It runs on a macOS runner (the only OS that can build iOS),
+# generates the iOS project fresh, and does an UNSIGNED iOS *Simulator* build — simulator
+# builds skip code-signing/provisioning, so no certificates or enrollment are required.
+#
+# What it validates: that the web bundle + Capacitor 6 core + every plugin in use
+# (push-notifications, biometric-auth, secure-storage, filesystem, share, …) resolve their
+# CocoaPods and compile for iOS. What it deliberately does NOT do: sign, archive, upload, or
+# submit — those need the Apple Developer Program (bundle id, distribution cert, provisioning
+# profile, APNs key) which is the owner-side enrollment gate.
+#
+# manual-only (workflow_dispatch): macOS runner minutes bill at a premium, so this never runs
+# automatically — trigger it on demand when the iOS surface changes. The iOS project is
+# generated in-run and not committed; persisting ios/ with the review-required config
+# (Info.plist usage strings, PrivacyInfo.xcprivacy, push entitlement) is the follow-up, done
+# once the Apple account exists.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  ios-build-check:
+    name: Build iOS (unsigned simulator)
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Show toolchain
+        run: |
+          echo "Xcode: $(xcodebuild -version | tr '\n' ' ')"
+          echo "CocoaPods: $(pod --version)"
+          node --version
+
+      - name: Install
+        run: npm ci
+
+      - name: Add the iOS platform package (not a committed dependency yet)
+        # Pinned to the same major as @capacitor/core (6.x) so the platform matches the CLI.
+        # --no-save keeps package.json/lockfile untouched — this is an ephemeral build-check.
+        run: npm install --no-save @capacitor/ios@^6.2.1
+
+      - name: Build web bundle
+        env:
+          # Same baked API base URL as the Android release build, for parity (the iOS shell
+          # would use it identically). Irrelevant to whether the app *compiles*, but keeps the
+          # generated project realistic.
+          VITE_API_BASE_URL: ${{ vars.MOBILE_API_BASE_URL || 'https://neuropathy-frontend.whitecliff-b61fc6f2.eastus2.azurecontainerapps.io' }}
+        run: npm run build
+
+      - name: Generate the iOS project (cap add ios → pod install)
+        # `cap add ios` scaffolds ios/App and runs `pod install` (CocoaPods is preinstalled on
+        # the macOS runner). This is where a plugin without iOS support, or a broken Podspec,
+        # would fail — exactly what we want to catch before investing in enrollment.
+        run: npx cap add ios
+
+      - name: Build for the iOS Simulator (unsigned)
+        working-directory: frontend/ios/App
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -workspace App.xcworkspace \
+            -scheme App \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Summary
+        if: success()
+        run: |
+          {
+            echo "### iOS build-check passed ✅"
+            echo ""
+            echo "The Capacitor app compiles for iOS (unsigned simulator build) — web bundle +"
+            echo "Capacitor 6 core + all plugins resolve their CocoaPods and build."
+            echo ""
+            echo "Not validated here (needs the Apple Developer Program): code signing, archive,"
+            echo "TestFlight/App Store upload, APNs push delivery."
+          } >> "$GITHUB_STEP_SUMMARY"
