@@ -39,6 +39,14 @@ jobs:
         run: npm ci
 
       - name: Build web bundle
+        env:
+          # The native app has NO runtime /config.js overwrite (that's a web-container
+          # concern) and NO same-origin nginx proxy, so the API base URL is baked in at
+          # build time via runtimeConfig.ts's build-time fallback (ADR-0018). It points at
+          # the PUBLIC frontend origin, whose nginx reverse-proxies the API to the internal
+          # backend — the only internet-reachable path to the API. Override with the repo
+          # variable MOBILE_API_BASE_URL when the app moves to a custom domain.
+          VITE_API_BASE_URL: ${{ vars.MOBILE_API_BASE_URL || 'https://neuropathy-frontend.whitecliff-b61fc6f2.eastus2.azurecontainerapps.io' }}
         run: npm run build
 
       - name: Sync the Android project

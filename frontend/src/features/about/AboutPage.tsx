@@ -13,9 +13,9 @@ import { InfoLayout } from './InfoLayout';
 // self-contained; the wording must not drift from NonDiagnosticNote.
 const NON_DIAGNOSTIC_TEXT = 'Trends support clinical judgment; they are not a diagnosis.';
 
-// Placeholder until the go-to-market support channel is confirmed (see
-// docs/mobile/play-listing-pack.md). Not a live address.
-const SUPPORT_CONTACT = 'support@[your-domain] (placeholder — set before store submission)';
+// Support contact surfaced in the auth-less About screen and used as the store-listing
+// support address (both stores require a working contact — see docs/mobile/play-listing-pack.md).
+const SUPPORT_CONTACT = 'advancedhwg@outlook.com';
 
 export function AboutPage() {
   return (
@@ -63,7 +63,10 @@ export function AboutPage() {
 
       <div className="card">
         <h2>Support</h2>
-        <p className="muted">Questions or a problem with the app? Contact {SUPPORT_CONTACT}.</p>
+        <p className="muted">
+          Questions or a problem with the app? Contact{' '}
+          <a href={`mailto:${SUPPORT_CONTACT}`}>{SUPPORT_CONTACT}</a>.
+        </p>
       </div>
 
       <p className="muted centered" style={{ marginTop: 8 }}>
