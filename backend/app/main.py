@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.deps import get_error_reporter
@@ -186,8 +187,10 @@ def create_app() -> FastAPI:
     #
     #   RequestLoggingMiddleware  (outermost — MUST stay index 0, ADR-0018 §4)
     #     └─ MetricsMiddleware      (counts every request incl. 5xx; PHI-free labels)
-    #         └─ ErrorReportingMiddleware  (forwards scrubbed unhandled-exception events)
-    #             └─ _reject_oversized_uploads  (inner upload guard, added first above)
+    #         └─ CORSMiddleware       (native-shell allow-list; wraps the error handler so
+    #             │                     even a 500 carries the Access-Control-* headers)
+    #             └─ ErrorReportingMiddleware  (forwards scrubbed unhandled-exception events)
+    #                 └─ _reject_oversized_uploads  (inner upload guard, added first above)
     #
     # ErrorReporting sits inside metrics/logging but OUTSIDE the router, so it catches an
     # unhandled exception, emits its ONE scrubbed event, and CONTAINS it (readiness plan
@@ -198,11 +201,29 @@ def create_app() -> FastAPI:
     # invariants hold unchanged). Logging stays outermost so even an upload-guard
     # short-circuit is logged with an X-Request-ID (ADR-0018 §4) — the `is-outermost`
     # test still holds.
+    #
+    # CORS is registered between Metrics and ErrorReporting: inside Metrics (so preflight
+    # counts stay honest and MetricsMiddleware keeps index 1 — the metrics test pins that)
+    # yet OUTSIDE ErrorReporting, so the scrubbed 500 body is still decorated with the
+    # allow-origin header the native WebView needs to read the error. It only admits the
+    # fixed Capacitor shell origins (settings.mobile_app_origins); the web app is
+    # same-origin and never triggers it. Skipped entirely when the allow-list is empty.
     application.add_middleware(
         ErrorReportingMiddleware,
         reporter_factory=get_error_reporter,
         env=settings.app_env,
     )
+    mobile_origins = [o.strip() for o in settings.mobile_app_origins.split(",") if o.strip()]
+    if mobile_origins:
+        application.add_middleware(
+            CORSMiddleware,
+            allow_origins=mobile_origins,
+            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+            allow_headers=["Authorization", "Content-Type"],
+            # Bearer tokens in the Authorization header, never cookies — so credentialed
+            # (cookie) CORS is deliberately off; the header allow-list is what the app needs.
+            allow_credentials=False,
+        )
     application.add_middleware(MetricsMiddleware)
     application.add_middleware(RequestLoggingMiddleware)
 

@@ -77,10 +77,17 @@ Cross-cutting answers:
 
 ## 4. Known gaps before PRODUCTION (not internal testing)
 
-1. **No deployed production backend** — the app must point at a live, TLS-terminated API
-   (deploy per `docs/ops/`, Wave 1 infra). The bundled `config.js` must carry the production
-   API base URL at build time for the store artifact. **[verify the built AAB's config]**
+1. ~~No deployed production backend / unset API base URL~~ **addressed** — the app is live on
+   Azure Container Apps, and the Android release build now bakes the public API base URL at
+   build time via `VITE_API_BASE_URL` in `release-android.yml` (default = the live frontend
+   origin, whose nginx reverse-proxies the API; override with the repo variable
+   `MOBILE_API_BASE_URL` for a custom domain). Cross-origin calls from the native shell are
+   admitted by a scoped backend CORS allow-list (`settings.mobile_app_origins`). Still worth a
+   final smoke of the built AAB against the live API before production.
 2. **HIPAA validation + BAAs** (`docs/compliance/`) before any real patient data.
 3. ~~Account/data deletion flow~~ **shipped** (ADR-0027, see §2) — only the Data Safety
    form linkage remains at submission.
-4. **Counsel-approved privacy policy** at a public URL.
+4. **Counsel-approved privacy policy** at a public URL (draft: `docs/legal/privacy-policy-draft.md`).
+5. ~~Support contact placeholder~~ **set** — `advancedhwg@outlook.com` (About screen + store listing).
+6. **Target API level** — bump `targetSdkVersion` to 35+ (Play's current floor for new apps;
+   36 required from 2026-08-31). Tracked as the follow-up toolchain change.

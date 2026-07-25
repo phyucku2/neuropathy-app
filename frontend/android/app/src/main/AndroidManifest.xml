@@ -53,4 +53,10 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Android 13+ (API 33) gates notification display behind a runtime permission.
+         Required for the caregiver push + local reminder notifications (ADR-0047 B2) to
+         appear; the app requests it at runtime via @capacitor/push-notifications. Without
+         it, FCM messages arrive but are silently dropped by the system on 13+. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 </manifest>

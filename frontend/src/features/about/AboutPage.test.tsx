@@ -28,8 +28,11 @@ describe('AboutPage', () => {
     expect(screen.getByRole('heading', { name: 'What Neuropathy does' })).toBeInTheDocument();
     // IP / licensee line (ADR-0001).
     expect(screen.getByText(/BioMech Health is a licensee/)).toBeInTheDocument();
-    // Support placeholder.
-    expect(screen.getByText(/placeholder — set before store submission/)).toBeInTheDocument();
+    // Support contact — a real mailto link (both stores require a working contact).
+    expect(screen.getByRole('link', { name: 'advancedhwg@outlook.com' })).toHaveAttribute(
+      'href',
+      'mailto:advancedhwg@outlook.com',
+    );
   });
 
   it('cross-links to the privacy summary', async () => {

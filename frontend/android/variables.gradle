@@ -1,7 +1,10 @@
 ext {
     minSdkVersion = 22
-    compileSdkVersion = 34
-    targetSdkVersion = 34
+    // Play requires new apps to target API 35 (Android 15) as of Aug 2025, rising to API 36
+    // on 2026-08-31. compileSdk tracks targetSdk. minSdk stays low for device reach. A move
+    // to API 36 (likely via a Capacitor 7 upgrade) is the follow-up before the Aug-2026 date.
+    compileSdkVersion = 35
+    targetSdkVersion = 35
     androidxActivityVersion = '1.8.0'
     androidxAppCompatVersion = '1.6.1'
     androidxCoordinatorLayoutVersion = '1.2.0'

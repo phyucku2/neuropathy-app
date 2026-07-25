@@ -45,6 +45,15 @@ class Settings(BaseSettings):
     app_env: str = "local"
     app_debug: bool = False
 
+    # Cross-origin allow-list for the NATIVE mobile shells only (ADR-0023). The web app is
+    # served same-origin (nginx reverse-proxies the API, so no CORS is needed or wanted).
+    # The Capacitor WebView, however, loads the bundled SPA from a fixed local origin —
+    # `https://localhost` on Android, `capacitor://localhost` on iOS — and calls the API
+    # cross-origin, so those two exact origins (and no wildcard) are allow-listed. A browser
+    # page cannot forge these origins, so only the real native app is admitted. Comma-separated;
+    # set empty to disable CORS entirely (e.g. a strictly web-only deployment).
+    mobile_app_origins: str = "https://localhost,capacitor://localhost"
+
     # Persistence is opt-in: set DATABASE_URL to run every request against
     # Postgres-backed repositories in a request-scoped transaction (app/db/session.py,
     # app/api/deps.py). Unset (the default) means the in-memory stores serve requests —
