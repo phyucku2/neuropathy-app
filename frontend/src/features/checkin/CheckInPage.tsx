@@ -429,7 +429,8 @@ export function CheckInPage() {
     <div>
       <h1>Today&apos;s check-in</h1>
       <p className="muted" style={{ marginTop: 0 }}>
-        Three quick questions about your day. 0 is the hardest, 4 is the easiest.
+        A few quick questions about your day. Tap the answer that fits best — each has its own
+        scale, shown under the buttons.
       </p>
       {notices}
       {queuedToday !== null && (
