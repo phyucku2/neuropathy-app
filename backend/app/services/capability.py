@@ -93,17 +93,23 @@ class CapabilitySpec:
 # shipped keys are wired: emr_connect gates the EMR connect flow, ai_narrative gates
 # narrator scheduling, share_with_clinic gates clinician reads. The `enforced` flag and
 # its read-only rendering stay in place for any FUTURE key introduced un-wired.
-# `ingest_symptoms` (ADR-0034 Phase 1) is the first OPT-IN key — default=False, so the
-# symptom check-in (pain + numbness) is off until the owner turns it on; enforced=True
-# because it is genuinely wired (the /adl route only persists symptom rows when it is on).
+# `ingest_symptoms` (pain + numbness) is the CORE of the daily neuropathy instrument and
+# defaults ON (ADR-0049 — amends ADR-0034's Phase-1 opt-in); a patient can still turn it
+# off to keep a function-only check-in. enforced=True — the /adl route only persists
+# symptom rows when it is on.
 CAPABILITIES: tuple[CapabilitySpec, ...] = (
     CapabilitySpec(key="ingest_labs", name="Lab result upload", default=True, enforced=True),
     CapabilitySpec(key="ingest_adl", name="Daily function check-in", default=True, enforced=True),
     CapabilitySpec(key="ingest_biomech", name="BioMech report upload", default=True, enforced=True),
+    # Symptom items (pain + numbness) are the CORE of the daily neuropathy instrument, so they
+    # default ON (ADR-0049 — amends ADR-0034's Phase-1 opt-in). Kept a separable toggle, not
+    # merged into ingest_adl, so a patient can decline daily symptom prompts and keep the
+    # function check-in (autonomy, ADR-0013). enforced=True — the /adl route only persists
+    # symptom rows when it is on.
     CapabilitySpec(
         key="ingest_symptoms",
         name="Symptom check-in (pain & numbness)",
-        default=False,
+        default=True,
         enforced=True,
     ),
     # Wearable/phone mobility import (ADR-0035 Phase 1). OPT-IN (default off): health-store

@@ -281,17 +281,18 @@ async def test_adl_check_in_audits_counts_only(client: TestClient, service: EmrS
 # --- POST /adl symptom capture (ADR-0034 Phase 1) -------------------------------------
 
 
-def _symptoms_on_service() -> CapabilityService:
-    """A capability service with `ingest_symptoms` turned ON for PATIENT (the opt-in
-    toggle defaults OFF). No clinic connections -> the patient holds authority, so the
-    self-set succeeds; every other key falls back to its registry default."""
+def _symptoms_service(*, active: bool) -> CapabilityService:
+    """A capability service with `ingest_symptoms` explicitly set for PATIENT. No clinic
+    connections -> the patient holds authority, so the self-set succeeds; every other key
+    falls back to its registry default. As of ADR-0049 the registry default is ON, so
+    `active=False` here models a patient who has opted OUT of the daily symptom prompts."""
     service = CapabilityService()
     asyncio.run(
         service.set_for_patient(
             patient_id=PATIENT.patient_id,
             actor_id=PATIENT.user_id,
             key="ingest_symptoms",
-            active=True,
+            active=active,
             now=NOW,
         )
     )
@@ -303,7 +304,7 @@ def symptom_client(service: EmrService) -> Iterator[TestClient]:
     """A signed-in patient client with the symptom capture capability enabled."""
     # Built once at setup (not per request): the override must not run asyncio.run
     # inside the request's running event loop.
-    capability_service = _symptoms_on_service()
+    capability_service = _symptoms_service(active=True)
     app.dependency_overrides[get_emr_service] = lambda: service
     app.dependency_overrides[get_current_user] = lambda: PATIENT
     app.dependency_overrides[get_capability_service] = lambda: capability_service
@@ -313,12 +314,27 @@ def symptom_client(service: EmrService) -> Iterator[TestClient]:
         app.dependency_overrides.clear()
 
 
-async def test_symptoms_off_by_default_ignores_pain_and_numbness(
-    client: TestClient, service: EmrService
+@pytest.fixture()
+def symptoms_off_client(service: EmrService) -> Iterator[TestClient]:
+    """A signed-in patient client who has turned symptom capture OFF (the supported
+    opt-out under ADR-0049 — the default is ON, this patient declined the prompts)."""
+    capability_service = _symptoms_service(active=False)
+    app.dependency_overrides[get_emr_service] = lambda: service
+    app.dependency_overrides[get_current_user] = lambda: PATIENT
+    app.dependency_overrides[get_capability_service] = lambda: capability_service
+    try:
+        yield TestClient(app)
+    finally:
+        app.dependency_overrides.clear()
+
+
+async def test_symptoms_off_ignores_pain_and_numbness(
+    symptoms_off_client: TestClient, service: EmrService
 ) -> None:
-    """The opt-in toggle defaults OFF: even when the client sends pain/numbness, nothing
-    is persisted for them — a stored 'off' the code actually respects (ADR-0013)."""
-    resp = client.post("/adl", json=_adl(pain=8, numbness=5))
+    """A patient who has turned symptom capture OFF (ADR-0049 opt-out): even when the
+    client sends pain/numbness, nothing is persisted for them — a stored 'off' the code
+    actually respects (ADR-0013)."""
+    resp = symptoms_off_client.post("/adl", json=_adl(pain=8, numbness=5))
     assert resp.status_code == 200
     # daily_score stays function-only (0-12); Phase 1 composites nothing.
     assert resp.json() == {"check_in_date": TODAY, "daily_score": 9, "superseded": False}
@@ -328,6 +344,27 @@ async def test_symptoms_off_by_default_ignores_pain_and_numbness(
         "adl_stairs",
         "adl_balance_confidence",
         "adl_daily_score",
+    }
+
+
+async def test_symptoms_stored_by_default_no_opt_in_needed(
+    client: TestClient, service: EmrService
+) -> None:
+    """ADR-0049: pain + numbness are the core of the daily instrument and default ON, so
+    the plain client (no capability row, registry default) persists them without any
+    explicit opt-in — the mirror of the opt-out test above."""
+    resp = client.post("/adl", json=_adl(pain=8, numbness=5))
+    assert resp.status_code == 200
+    # Response is function-only in Phase 1; the symptom rows land in storage regardless.
+    assert resp.json() == {"check_in_date": TODAY, "daily_score": 9, "superseded": False}
+    rows = await service.observations.list_for_patient(PATIENT.patient_id)
+    assert {row.code for row in rows} == {
+        "adl_walking",
+        "adl_stairs",
+        "adl_balance_confidence",
+        "adl_daily_score",
+        "symptom_pain",
+        "symptom_numbness",
     }
 
 

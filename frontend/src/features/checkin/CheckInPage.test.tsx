@@ -13,7 +13,8 @@ import { consumeDroppedNotices } from './offlineSync';
 /** The signed-in account (msw /auth/me returns ME) — the queue's owner. */
 const OWNER = ME.user_id;
 
-/** Capabilities with the opt-in symptom capture (ADR-0034) turned ON. */
+/** Capabilities with symptom capture ON — the default daily instrument (ADR-0049); the
+ *  base fixture models the opt-out, so this restores the default for the on-path tests. */
 function withSymptomsOn(): CapabilityStateOut[] {
   return CAPABILITIES.map((c) => (c.key === 'ingest_symptoms' ? { ...c, active: true } : c));
 }
@@ -471,10 +472,11 @@ describe('CheckInPage', () => {
 
   // ---- symptom capture toggle (ADR-0034 Phase 1) ----
 
-  it('hides the pain and numbness questions when symptom capture is off (default)', async () => {
+  it('hides the pain and numbness questions when symptom capture is turned off', async () => {
     renderApp('/check-in');
-    // The default capabilities fixture has ingest_symptoms off — only the three
-    // function questions render, exactly as before symptom capture existed.
+    // Symptoms default ON (ADR-0049), but a patient may opt out; this fixture models that
+    // opt-out (ingest_symptoms off) — only the three function questions render, exactly as
+    // before symptom capture existed.
     const groups = await screen.findAllByRole('radiogroup');
     expect(groups).toHaveLength(3);
     expect(screen.queryByText('Symptoms today')).not.toBeInTheDocument();
