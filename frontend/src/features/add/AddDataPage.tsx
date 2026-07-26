@@ -154,12 +154,29 @@ function EventsCard() {
   );
 }
 
+function FoodCard() {
+  return (
+    <div className="card">
+      <div className="eyebrow">Food &amp; nutrition</div>
+      <h2>Log what you eat</h2>
+      <p className="muted" style={{ marginTop: 0 }}>
+        Keep a log of your meals as rough estimates. For self-tracking only — never exact, and never
+        used for dosing.
+      </p>
+      <Link className="btn-inline" to="/food">
+        Open food log
+      </Link>
+    </div>
+  );
+}
+
 export function AddDataPage() {
   return (
     <div>
       <h1>Add data</h1>
       <MedsCard />
       <EventsCard />
+      <FoodCard />
       <BiomechUploadCard />
       <ConnectRecordsCard />
     </div>

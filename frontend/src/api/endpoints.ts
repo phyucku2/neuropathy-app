@@ -34,6 +34,10 @@ import type {
   EventIn,
   EventList,
   EventOut,
+  FoodEstimateOut,
+  FoodLogIn,
+  FoodLogList,
+  FoodLogOut,
   ExportOut,
   InvitationOut,
   LoginIn,
@@ -224,6 +228,31 @@ export function postEvent(body: Omit<EventIn, 'client_entry_id'>): Promise<Event
 /** The patient's between-visit events & notes, newest-first. PHI. */
 export function getEvents(): Promise<EventList> {
   return request<EventList>('/events');
+}
+
+// ---- food & nutrition log (ADR-0042 V2, Phase 1) ----
+
+/** Ask for a draft ranged estimate of a described item. Phase 1 returns `estimate: null`
+ * (manual entry). Capability-gated (`log_food`, 409 when off). No PHI stored. */
+export function postFoodEstimate(body: {
+  description: string;
+  portion: string;
+}): Promise<FoodEstimateOut> {
+  return request<FoodEstimateOut>('/food/estimate', { method: 'POST', body });
+}
+
+/** Record one confirmed, ranged food log. Capability-gated (`log_food`, 409 when off);
+ * idempotent per client_entry_id. */
+export function postFoodLog(body: Omit<FoodLogIn, 'client_entry_id'>): Promise<FoodLogOut> {
+  return request<FoodLogOut>('/food', {
+    method: 'POST',
+    body: { ...body, client_entry_id: clientEntryId() },
+  });
+}
+
+/** The patient's food logs, newest-first. PHI. */
+export function getFoodLogs(): Promise<FoodLogList> {
+  return request<FoodLogList>('/food');
 }
 
 // ---- wearable/phone mobility import (ADR-0035 Phase 1) ----

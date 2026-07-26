@@ -51,6 +51,7 @@ from app.emr.service import (
 )
 from app.emr.signals import InMemoryNewChartNoteSink
 from app.emr.transport import HttpxTransport
+from app.ingestion.food import NullNutritionSource, NutritionSource
 from app.models.user import UserRole
 from app.repositories.capability import InMemoryCapabilityRepository
 from app.repositories.caregiver import (
@@ -887,6 +888,17 @@ def get_narrator() -> Narrator | None:
 
 
 NarratorDep = Annotated[Narrator | None, Depends(get_narrator)]
+
+
+def get_nutrition_source() -> NutritionSource:
+    """The food-estimate seam (ADR-0042). Phase 1 always returns NullNutritionSource — no
+    automated estimate, so the flow falls back to manual ranged entry. Phase 2/3 select a
+    DB-backed source (Open Food Facts / USDA) or the BAA-gated photo source here, mirroring
+    _default_narrator's gate; the route and frontend need no change."""
+    return NullNutritionSource()
+
+
+NutritionSourceDep = Annotated[NutritionSource, Depends(get_nutrition_source)]
 
 
 @lru_cache(maxsize=1)

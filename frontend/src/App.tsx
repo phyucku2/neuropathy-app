@@ -54,6 +54,9 @@ const MedsPage = lazy(() =>
 const EventsPage = lazy(() =>
   import('./features/events/EventsPage').then((m) => ({ default: m.EventsPage })),
 );
+const FoodLogPage = lazy(() =>
+  import('./features/food/FoodLogPage').then((m) => ({ default: m.FoodLogPage })),
+);
 const SettingsPage = lazy(() =>
   import('./features/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })),
 );
@@ -201,6 +204,8 @@ export function App() {
                     between-visit notes/events surfaces, reached from cards on Add data. */}
                 <Route path="meds" element={<MedsPage />} />
                 <Route path="events" element={<EventsPage />} />
+                {/* Food & nutrition log (ADR-0042) — reached from a card on Add data. */}
+                <Route path="food" element={<FoodLogPage />} />
                 <Route path="settings" element={<SettingsPage />} />
                 {/* Your Records (read-only, display-only) — reached from a card on the
                     Sources surface, NOT a bottom-nav tab (ADR-0039: five is the max). */}
