@@ -187,9 +187,10 @@ def test_b2c_patient_sees_registry_defaults(client: TestClient) -> None:
         assert state["expires_at"] is None
     # Back-compat keys default ON (absence of a row = default). The opt-in keys default OFF
     # until the owner turns them on: `ingest_symptoms` (ADR-0034 Phase 1),
-    # `ingest_wearable` (ADR-0035 Phase 1 — health-store data is PHI), and `ingest_notes`
-    # (ADR-0045 P2 #27 — EMR clinical notes are sensitive free-text).
-    opt_in = {"ingest_symptoms", "ingest_wearable", "ingest_notes"}
+    # `ingest_wearable` (ADR-0035 Phase 1 — health-store data is PHI), `ingest_notes`
+    # (ADR-0045 P2 #27 — EMR clinical notes are sensitive free-text), and `log_food`
+    # (ADR-0042 — a ranged self-tracking estimate, off until the patient turns it on).
+    opt_in = {"ingest_symptoms", "ingest_wearable", "ingest_notes", "log_food"}
     for key, state in states.items():
         expected = key not in opt_in
         assert state["active"] is expected, key

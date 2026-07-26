@@ -458,6 +458,54 @@ export interface EventList {
   items: EventOut[];
 }
 
+// ---- food.py (ADR-0042 food & nutrition log) ----
+
+/** A ranged nutrient estimate (low..high) — the only shape a nutrient takes (no point value). */
+export interface FoodRange {
+  low: number;
+  high: number;
+}
+
+/** A draft ranged estimate the patient edits and confirms. */
+export interface FoodEstimateDraft {
+  carbs_g: FoodRange;
+  energy_kcal: FoodRange | null;
+  basis: string;
+}
+
+/** FoodEstimateOut — the draft, or `estimate: null` when no automated source is available. */
+export interface FoodEstimateOut {
+  estimate: FoodEstimateDraft | null;
+  note: string;
+}
+
+/** FoodLogIn — record one confirmed, ranged food log. `confirmed` must be true. */
+export interface FoodLogIn {
+  description: string;
+  portion: string;
+  carbs_g: FoodRange;
+  energy_kcal: FoodRange | null;
+  effective_date: string;
+  client_entry_id: string;
+  confirmed: boolean;
+}
+
+/** FoodLogOut — one recorded food log. `skipped` is true on an idempotent retry. */
+export interface FoodLogOut {
+  food_id: string;
+  description: string;
+  portion: string;
+  carbs_g: FoodRange;
+  energy_kcal: FoodRange | null;
+  effective_at: string;
+  skipped: boolean;
+}
+
+/** FoodLogList — the patient's food logs, newest-first. */
+export interface FoodLogList {
+  items: FoodLogOut[];
+}
+
 // ---- biomech.py ----
 
 /** BiomechImportOut */

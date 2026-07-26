@@ -32,6 +32,7 @@ const CAPABILITY_ICONS: Record<string, { glyph: string; color: string }> = {
   emr_connect: { glyph: '🏥', color: 'var(--color-brand-sky)' },
   ai_narrative: { glyph: '✦', color: 'var(--color-brand-navy)' },
   share_with_clinic: { glyph: '👪', color: 'var(--color-text-secondary)' },
+  log_food: { glyph: '🍎', color: 'var(--color-action-green)' },
 };
 
 function CapabilityRow({

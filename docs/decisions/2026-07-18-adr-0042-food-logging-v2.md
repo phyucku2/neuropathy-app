@@ -1,7 +1,10 @@
 # ADR-0042 — AI photo food logging (V2): GPT-4o-vision + free-DB hybrid
 
-- **Status:** Proposed (V2 spec — not built; gated on the same clinical/product sign-off as the
-  other roadmap specs).
+- **Status:** Phase 1 implemented (the deterministic spine) — capability-gated `log_food`, OFF by
+  default, so it stays dormant until product/clinical sign-off enables it. Phase 1 is manual,
+  confirm-required, ranged entry stored as NSI-excluded `patient_estimated` Observations, with a
+  `NutritionSource` seam. Deferred behind that seam: the free-DB paths (barcode → Open Food Facts,
+  text → USDA) and the BAA-gated photo → GPT-4o path.
 - **Date:** 2026-07-18
 - **Builds on:** ADR-0006 (append-only research-grade Observations), ADR-0013/0020 (enforced
   capability toggles), ADR-0011/0040 (BAA-gated AI; Azure OpenAI narrator), ADR-0016

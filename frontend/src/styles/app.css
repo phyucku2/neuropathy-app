@@ -801,6 +801,17 @@ h2 {
   margin-bottom: var(--space-md);
 }
 
+/* Two fields side by side (e.g. a low/high estimate range). Stacks on narrow screens. */
+.field-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+}
+
+.field-row .field {
+  flex: 1 1 8rem;
+}
+
 .field label {
   display: block;
   font-size: var(--text-small);
