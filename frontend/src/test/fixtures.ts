@@ -681,7 +681,10 @@ export const CAPABILITIES: CapabilityStateOut[] = [
     enforced: true,
   },
   {
-    // Opt-in symptom capture (ADR-0034 Phase 1) — default OFF until the owner enables it.
+    // Symptom capture defaults ON (ADR-0049 — pain & numbness are the core of the daily
+    // instrument), but a patient may opt out; this fixture models that opt-out (off), so the
+    // check-in tests exercise the function-only path. The symptoms-ON path is covered by
+    // withSymptomsOn() in CheckInPage.test.tsx.
     key: 'ingest_symptoms',
     name: 'Symptom check-in (pain & numbness)',
     active: false,

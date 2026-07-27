@@ -36,7 +36,7 @@ const STEPS: Step[] = [
     title: 'Three easy ways',
     lead: 'Pick whatever fits. You can start with just one and add more later.',
     points: [
-      'A quick daily check-in — a few taps on how you feel and move.',
+      'A quick daily check-in — a few taps on your pain, numbness, and how you’re moving. Prefer not to be asked about pain and numbness? You can turn those off under Sources.',
       'Connect your health records to bring in your labs — you sign in on your provider’s own page.',
       'Upload a BioMech balance or gait report as a PDF.',
     ],
