@@ -137,6 +137,12 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
     # notes are large sensitive free-text, so nothing is pulled until the patient turns it
     # on. enforced=True — POST /emr/connections/{id}/pull-notes refuses with 409 when off.
     CapabilitySpec(key="ingest_notes", name="EMR clinician notes", default=False, enforced=True),
+    # Food & nutrition log (ADR-0042 V2). OPT-IN (default off, like ingest_wearable/notes):
+    # a ranged self-tracking estimate, never lab-grade, so nothing is captured until the
+    # patient turns it on. enforced=True — POST /food and /food/estimate refuse with 409 when
+    # off. Phase 1 is manual ranged entry; the automated-estimate paths (barcode/text/photo)
+    # arrive later behind this same key + the BAA gate for photos.
+    CapabilitySpec(key="log_food", name="Food & nutrition log", default=False, enforced=True),
     CapabilitySpec(key="ai_narrative", name="AI trajectory narration", default=True, enforced=True),
     CapabilitySpec(
         key=SHARE_WITH_CLINIC_KEY, name="Share data with my clinic", default=True, enforced=True

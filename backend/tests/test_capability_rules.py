@@ -127,20 +127,23 @@ async def test_registry_covers_every_shipped_feature() -> None:
         "ingest_medications",
         "ingest_events",
         "ingest_notes",
+        "log_food",
         "emr_connect",
         "ai_narrative",
         "share_with_clinic",
     }
     by_key = {s.key: s for s in states}
     # Back-compat: with no rows, every pre-existing feature keeps working. The opt-in keys
-    # are default OFF until the owner enables them: ingest_wearable (ADR-0035 Phase 1) and
-    # ingest_notes (ADR-0045 P2 #27). ingest_symptoms is NOT opt-in: it is the core of the
-    # daily neuropathy instrument and defaults ON (ADR-0049 — amends ADR-0034's Phase-1 opt-in).
-    opt_in = {"ingest_wearable", "ingest_notes"}
+    # are default OFF until the owner enables them: ingest_wearable (ADR-0035 Phase 1),
+    # ingest_notes (ADR-0045 P2 #27), and log_food (ADR-0042 — a ranged self-tracking
+    # estimate). ingest_symptoms is NOT opt-in: it is the core of the daily neuropathy
+    # instrument and defaults ON (ADR-0049 — amends ADR-0034's Phase-1 opt-in).
+    opt_in = {"ingest_wearable", "ingest_notes", "log_food"}
     assert all(s.active for s in states if s.key not in opt_in)
     assert by_key["ingest_symptoms"].active is True
     assert by_key["ingest_wearable"].active is False
     assert by_key["ingest_notes"].active is False
+    assert by_key["log_food"].active is False
     assert all(s.managed_by == "patient" for s in states)
 
 

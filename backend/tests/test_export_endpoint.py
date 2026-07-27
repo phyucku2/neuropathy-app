@@ -406,7 +406,7 @@ def test_export_writes_one_phi_free_audit_event(world: World, client: TestClient
         "emr_connections": 1,
         "emr_clinical_notes": 1,  # the pulled note (metadata-only export, ADR-0045 P2 #27)
         "clinic_connections": 1,
-        "capabilities": 11,  # + ADR-0045 P2 ingest_medications, ingest_events, ingest_notes
+        "capabilities": 12,  # + ADR-0045 P2 ingest_medications/events/notes, ADR-0042 log_food
         "caregiver_links": 1,  # the accepted caregiver share (ADR-0047)
         "caregiver_alerts": 0,
         "caregiver_alert_preferences": 0,

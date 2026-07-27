@@ -30,6 +30,7 @@ class SourceType(enum.StrEnum):
     wearable = "wearable"  # phone/watch mobility metrics from a health store (ADR-0035)
     medication = "medication"  # patient-entered medication/supplement change log (ADR-0045 P2)
     event = "event"  # patient-entered between-visit event/note (ADR-0045 P2)
+    food = "food"  # patient-logged food/nutrition, ranged self-tracking estimate (ADR-0042)
 
 
 class DataOrigin(enum.StrEnum):
@@ -39,6 +40,10 @@ class DataOrigin(enum.StrEnum):
     document_imported = "document_imported"  # extracted from an imported doc (e.g. lab PDF)
     ehr_imported = "ehr_imported"  # pulled from the patient's EMR via SMART on FHIR
     patient_reported = "patient_reported"  # self-reported (e.g. ADL check-in)
+    # ranged self-tracking estimate — NEVER lab-grade, excluded from the NSI (ADR-0042). Kept
+    # distinct from patient_reported so a food estimate can never be mistaken for a confirmed
+    # self-report (a symptom check-in) and never carries analysis weight.
+    patient_estimated = "patient_estimated"
     derived = "derived"  # computed from other observations
 
 
