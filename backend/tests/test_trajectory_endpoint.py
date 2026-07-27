@@ -132,8 +132,10 @@ async def test_naive_fhir_datetime_does_not_crash_trajectory(
     """FHIR allows date-only effectiveDateTime (parses tz-naive). A naive stored
     timestamp must never 500 the trajectory (review finding, dual-confirmed)."""
     naive = _hba1c(7.5, 0)
-    naive.effective_at = datetime(2026, 5, 1)  # noqa: DTZ001 — deliberately naive
-    naive.recorded_at = datetime(2026, 5, 1)  # noqa: DTZ001
+    # Deliberately tz-naive, but NOW-relative: a fixed absolute date mixed with the
+    # NOW-relative series rots as real time passes (the series stops being monotone).
+    naive.effective_at = (NOW - timedelta(days=5)).replace(tzinfo=None)
+    naive.recorded_at = (NOW - timedelta(days=5)).replace(tzinfo=None)
     await _seed(service, [_hba1c(9.0, 90), _hba1c(8.3, 60), _hba1c(7.9, 30), naive])
     resp = client.get("/trajectory")
     assert resp.status_code == 200
