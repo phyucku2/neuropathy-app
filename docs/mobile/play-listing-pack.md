@@ -25,7 +25,7 @@ ephemerally? required? purpose.
 |---|---|---|---|
 | Personal info → Name | Yes | No | display_name at registration |
 | Personal info → Email | Yes | No | account identity (ADR-0010) |
-| Health info | Yes | No | ADL check-ins, lab results (FHIR/LOINC), balance/gait report data, trajectory outputs |
+| Health info | Yes | No | Daily check-in — **symptoms (pain + numbness, default ON since ADR-0049)** and function (walking/stairs/balance); patient-entered medications & supplements (ADR-0045 P2); between-visit notes & events, e.g. falls/ER (ADR-0045 P2); lab results (FHIR/LOINC); balance/gait report data; trajectory outputs. **Optional/off by default:** wearable mobility data (ADR-0035), imported clinician notes (ADR-0045 P2 #27), food/nutrition log (ADR-0042). Only disclose the optional rows the shipped build actually collects at submission. [verify] |
 | Financial info | No | — | nothing collected |
 | Location | No | — | nothing collected |
 | Contacts / photos / files | No | — | PDF report upload is user-initiated file selection, contents become Health info [verify wording in form's file-access follow-up] |
