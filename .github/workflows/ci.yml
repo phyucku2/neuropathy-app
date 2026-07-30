@@ -11,8 +11,72 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Which of the expensive jobs below actually need to run for this change.
+  #
+  # Motivation is minutes, not speed: a private repo has a finite monthly Actions
+  # allowance, and running an Android SDK download plus a Chromium install for a
+  # markdown-only pull request spends it on nothing. Six jobs ran on every PR
+  # regardless of what it touched.
+  #
+  # Two deliberate safety properties:
+  #
+  #   * **Pushes to `main` always run everything.** Gating is applied to pull
+  #     requests only, so whatever is on the protected branch has been verified by
+  #     the full matrix, and a merge can never inherit a job that was skipped.
+  #   * **Touching CI forces everything true.** A change to the workflow itself must
+  #     be proven by the workflow itself.
+  #
+  # The security scan is deliberately NOT gated — see its own comment.
+  #
+  # Filtering is plain `git diff` rather than a marketplace action: no new
+  # third-party dependency to vet (CLAUDE.md §4), and on a `pull_request` the
+  # checked-out ref is the merge commit, so `HEAD^1..HEAD` is exactly this PR's diff.
+  changes:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      mobile: ${{ steps.filter.outputs.mobile }}
+      docker: ${{ steps.filter.outputs.docker }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" != "pull_request" ]; then
+            # Not a PR: verify everything.
+            changed="__ALL__"
+          else
+            changed="$(git diff --name-only HEAD^1 HEAD)"
+          fi
+
+          match() {
+            [ "$changed" = "__ALL__" ] && { echo true; return; }
+            # A CI change re-verifies every job.
+            printf '%s\n' "$changed" | grep -Eq '^\.github/workflows/' && { echo true; return; }
+            printf '%s\n' "$changed" | grep -Eq "$1" && echo true || echo false
+          }
+
+          {
+            echo "backend=$(match '^backend/')"
+            echo "frontend=$(match '^frontend/')"
+            echo "mobile=$(match '^(frontend/|android/|capacitor\.config\.)')"
+            echo "docker=$(match '^(backend/|frontend/|docker/|Dockerfile|docker-compose)')"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Changed files:"
+          printf '%s\n' "$changed"
+
   backend:
     name: Backend — lint, types, tests
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -63,6 +127,8 @@ jobs:
 
   frontend:
     name: Frontend — types, lint, tests, build
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -104,6 +170,8 @@ jobs:
   # locally the browser is pre-installed at PLAYWRIGHT_BROWSERS_PATH.
   e2e:
     name: Frontend — browser E2E (Playwright)
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -144,6 +212,8 @@ jobs:
   # web gates; existing jobs are untouched.
   mobile:
     name: Mobile — Android debug assemble (Capacitor)
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -196,6 +266,12 @@ jobs:
   # license allowlist, and the secret scan. The Python steps resolve the real
   # dependency tree by installing the backend into an isolated venv, then scan
   # that environment — pip-audit could never parse our pyproject directly.
+  # Deliberately NOT gated on changed paths, unlike the jobs above. A dependency
+  # advisory or a committed secret is not something the diff can be trusted to
+  # predict — an npm advisory lands without anyone touching `frontend/`, and a
+  # secret can arrive in any file at all. Saving a couple of minutes by scanning
+  # less often is the wrong trade for the one job whose whole purpose is catching
+  # what nobody looked for.
   security:
     name: Security & license scan
     runs-on: ubuntu-latest
@@ -274,6 +350,8 @@ jobs:
   # untouched.
   docker:
     name: Docker — lint, compose, build
+    needs: changes
+    if: needs.changes.outputs.docker == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
