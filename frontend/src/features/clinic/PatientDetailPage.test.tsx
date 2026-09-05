@@ -7,7 +7,13 @@ import type {
   ClinicianCapabilitySetIn,
   ObservationItem,
 } from '../../api/types';
-import { CLINIC_CAPABILITIES, PANEL_PATIENT_ID, visitSummaryForWindow } from '../../test/fixtures';
+import {
+  CLINIC_CAPABILITIES,
+  FUTURE_RENEWAL,
+  NEW_RENEWAL,
+  PANEL_PATIENT_ID,
+  visitSummaryForWindow,
+} from '../../test/fixtures';
 import { renderApp } from '../../test/renderApp';
 import { actAsClinician, server } from '../../test/server';
 import { minRenewalDate } from './CapabilityOrders';
@@ -440,7 +446,7 @@ describe('PatientDetailPage — features tab (capability orders)', () => {
     await openTab('Features');
     const biomech = await screen.findByRole('switch', { name: 'BioMech report upload' });
     expect(biomech).toBeChecked();
-    expect(screen.getByText('renews Aug 6, 2026')).toBeInTheDocument();
+    expect(screen.getByText(`renews ${FUTURE_RENEWAL.label}`)).toBeInTheDocument();
     expect(screen.getByRole('switch', { name: 'Daily function check-in' })).not.toBeChecked();
     // A now-wired key is an interactive switch...
     expect(screen.getByRole('switch', { name: 'AI trajectory summary' })).toBeInTheDocument();
@@ -494,10 +500,10 @@ describe('PatientDetailPage — features tab (capability orders)', () => {
     const user = await openTab('Features');
     await screen.findByRole('switch', { name: 'Lab result upload' });
     fireEvent.change(screen.getByLabelText('Renewal date for Lab result upload'), {
-      target: { value: '2026-09-01' },
+      target: { value: NEW_RENEWAL.input },
     });
     await user.click(screen.getByRole('button', { name: 'Set renewal for Lab result upload' }));
-    expect(await screen.findByText('renews Sep 1, 2026')).toBeInTheDocument();
+    expect(await screen.findByText(`renews ${NEW_RENEWAL.label}`)).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
@@ -542,12 +548,12 @@ describe('PatientDetailPage — features tab (capability orders)', () => {
     const user = await openTab('Features');
     await screen.findByText(/^expired /);
     fireEvent.change(screen.getByLabelText('Renewal date for BioMech report upload'), {
-      target: { value: '2026-09-01' },
+      target: { value: NEW_RENEWAL.input },
     });
     await user.click(screen.getByRole('button', { name: 'Set renewal for BioMech report upload' }));
-    expect(await screen.findByText('renews Sep 1, 2026')).toBeInTheDocument();
+    expect(await screen.findByText(`renews ${NEW_RENEWAL.label}`)).toBeInTheDocument();
     // The stale row said active=false; the renewal still sends active=true.
-    expect(putBodies).toEqual([{ active: true, expires_at: '2026-09-01T23:59:59Z' }]);
+    expect(putBodies).toEqual([{ active: true, expires_at: NEW_RENEWAL.expiresAt }]);
     expect(screen.getByRole('switch', { name: 'BioMech report upload' })).toBeChecked();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
@@ -582,10 +588,10 @@ describe('PatientDetailPage — features tab (capability orders)', () => {
     // Another clinician enables the check-in while this page sits open.
     externallyEnabled = true;
     fireEvent.change(screen.getByLabelText('Renewal date for Lab result upload'), {
-      target: { value: '2026-09-01' },
+      target: { value: NEW_RENEWAL.input },
     });
     await user.click(screen.getByRole('button', { name: 'Set renewal for Lab result upload' }));
-    expect(await screen.findByText('renews Sep 1, 2026')).toBeInTheDocument();
+    expect(await screen.findByText(`renews ${NEW_RENEWAL.label}`)).toBeInTheDocument();
     // The fresh GET fired BEFORE the PUT — never acting on a stale snapshot —
     // and the refetch re-rendered the external change.
     expect(events).toEqual(['GET', 'GET', 'PUT']);
@@ -622,7 +628,7 @@ describe('PatientDetailPage — features tab (capability orders)', () => {
     const user = await openTab('Features');
     await screen.findByRole('switch', { name: 'Daily function check-in' });
     fireEvent.change(screen.getByLabelText('Renewal date for Daily function check-in'), {
-      target: { value: '2026-09-01' },
+      target: { value: NEW_RENEWAL.input },
     });
     await user.click(
       screen.getByRole('button', { name: 'Set renewal for Daily function check-in' }),
