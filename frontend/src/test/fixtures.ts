@@ -733,13 +733,60 @@ export const PANEL: PanelOut = {
   ],
 };
 
+/**
+ * A renewal date relative to now, in the three shapes the capability-order
+ * tests need: the date input's value, the ISO instant the backend stores, and
+ * the label the row renders.
+ *
+ * These were literals ('2026-08-06', '2026-09-01'), which made them TIME
+ * BOMBS. They were future when written, so the suite passed; on 2026-08-07 and
+ * 2026-09-02 the component correctly began rendering "expired" while the
+ * assertions still expected "renews", and CI went red with no code change at
+ * all. Worse, a renewal date in the past is below the input's own `min`
+ * (minRenewalDate() floors at tomorrow), so the flow under test could no
+ * longer be performed the way a clinician performs it.
+ *
+ * Anchoring to Date.now() is the convention this file's own passing tests
+ * already use - 'labels a lapsed order "expired"' computes yesterday the same
+ * way - so this follows it rather than inventing one.
+ *
+ * The label is formatted here rather than through formatDayYear, deliberately:
+ * nothing else tests that formatter, so borrowing it would leave the rendered
+ * date format unpinned by any test. UTC throughout, because the component
+ * formats in UTC and a renewal expires at 23:59:59Z.
+ */
+export function renewalInDays(days: number): {
+  input: string;
+  expiresAt: string;
+  label: string;
+} {
+  const input = new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+  const expiresAt = `${input}T23:59:59Z`;
+  return {
+    input,
+    expiresAt,
+    label: new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      timeZone: 'UTC',
+    }).format(new Date(expiresAt)),
+  };
+}
+
+/** The standing order on the fixture clinic capability. */
+export const FUTURE_RENEWAL = renewalInDays(60);
+
+/** A DIFFERENT future date, so a renewal is visibly a change. */
+export const NEW_RENEWAL = renewalInDays(90);
+
 export const CLINIC_CAPABILITIES: CapabilityStateOut[] = [
   {
     key: 'ingest_biomech',
     name: 'BioMech report upload',
     active: true,
     managed_by: 'clinic',
-    expires_at: '2026-08-06T23:59:59Z',
+    expires_at: FUTURE_RENEWAL.expiresAt,
     enforced: true,
   },
   {
