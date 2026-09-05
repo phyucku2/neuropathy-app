@@ -33,9 +33,18 @@ export function PrivacyPage() {
             your account. Passwords are stored only as modern one-way hashes.
           </li>
           <li>
-            <strong>Health information you add</strong> — daily function check-ins, lab results you
-            import from your medical record after you authorize the connection, and balance/gait
-            measurements from reports you upload.
+            <strong>Health information you add</strong> — your daily check-in (how your pain and
+            numbness feel, and how you&rsquo;re moving — walking, stairs, balance), any medications
+            or supplements you log, and notes about between-visit events such as a fall or an ER
+            visit. You can turn the pain and numbness questions off in Sources if you&rsquo;d rather
+            not be asked.
+          </li>
+          <li>
+            <strong>Health information from sources you connect or turn on</strong> — lab results
+            you import from your medical record after you authorize the connection, and balance/gait
+            measurements from reports you upload. Only if you switch them on: mobility data from
+            your phone or watch&rsquo;s health app, clinician notes from your medical record, and a
+            food log you enter yourself. Each of these stays off until you enable it.
           </li>
           <li>
             <strong>Nothing else</strong> — no location, contacts, advertising identifiers, or usage

@@ -13,10 +13,18 @@ the App collects and how it is handled.
 
 - **Account information:** your name and email address, used to create and secure your
   account. Passwords are stored only as modern one-way hashes (Argon2id). [ADR-0010]
-- **Health information you choose to add:** daily function check-ins (walking, stairs,
-  balance confidence), laboratory results you import from your electronic medical record
-  after you explicitly authorize the connection, and balance/gait measurements from reports
-  you upload. [ADR-0006/0007/0009/0014]
+- **Health information you add:** your daily check-in, which by default covers both your
+  neuropathy symptoms (pain and numbness, on a 0–10 scale) and your daily function (walking,
+  stairs, balance confidence, on a 0–4 scale); patient-entered medications and supplements and
+  changes to them; and between-visit notes and events you record (for example a fall, an
+  emergency-department visit, or a new provider). The symptom questions default on but can be
+  turned off, leaving a function-only check-in. [ADR-0006/0034/0049/0045]
+- **Health information you import or enable:** laboratory results you import from your
+  electronic medical record after you explicitly authorize the connection, and balance/gait
+  measurements from reports you upload. Only when you turn them on: mobility data from your
+  phone or watch's health store, clinician notes pulled from your medical record, and a
+  food/nutrition log you enter yourself. These optional sources are off by default and
+  collect nothing until you enable them. [ADR-0007/0009/0014/0035/0038/0042]
 - **Nothing else.** The App does not collect location, contacts, photos (beyond the report
   file you explicitly choose), advertising identifiers, or usage analytics, and it contains
   no advertising or analytics SDKs.
