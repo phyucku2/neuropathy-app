@@ -167,16 +167,6 @@ time-in-range → NSI Physiologic.
 decision D2) — the single highest-leverage owner action per
 [`docs/product/market-position-and-gaps.md`](product/market-position-and-gaps.md).
 
-## Multi-tenant wellness platform & the agency estate (2026-09-04 → 09-05)
-
-| Item | Decision / doc | State | Notes |
-|---|---|---|---|
-| **Multi-tenant wellness platform brainstorm** (hormones & peptides) — all 17 CLAUDE.md §6 lenses | `docs/brainstorm/2026-09-04-multi-tenant-wellness-platform-brainstorm.md` | ✅ Merged | Recommends shared schema + `tenant_id` + Postgres RLS (§2); §28 reuse table assumes this repo's Azure deployment unchanged. Forces owner decisions D1–D4 |
-| **Agency CRM platform — finish on Workers, then migrate to Azure** | ADR-0050 | ✅ Decided (owner, 2026-09-05) | The CRM (separate repo, through PR #26) is on Cloudflare Workers + D1 + R2: **46** files import `cloudflare:workers`, 23 use `env.DB`, 2 use `env.BACKUPS`, 0 mention Azure or Postgres. Cannot deploy to the Azure estate as written. Owner's call: finish the feature work, then port. **Binding constraint: synthetic data only in the CRM until the migration lands** — its host is not in the BAA inventory and `reorder_reminders` links a named contact to a product and a schedule |
-| **D1 — repository / IP / licence placement** | brainstorm §29 | ⛔ Open (owner + counsel) | ADR-0001-level. Recommendation is (c) extract a shared platform core; ADR-0050 settles *where the CRM runs*, not this |
-| **D2 — peptide vertical in scope?** · **D3 — MSO/PC structure** · **D4 — DEA posture after 2026-12-31** | brainstorm §29 | ⛔ Open (owner) | D3 gates the data model; D4 gates the men's hormone vertical |
-| **BAA inventory gaps surfaced by ADR-0050** | `docs/compliance/baa-inventory.md` | ⛔ Owner follow-up | (i) no row exists for the CRM's current host — it is unattested, which is what the synthetic-data-only constraint rests on; (ii) row 6 still reads "no outbound email of PHI today" — true for this app, but the CRM sends via Resend and publishes to Meta/LinkedIn/X. Named, not edited: widening that inventory's scope is its own decision |
-
 ## Deferred (not scheduled)
 
 - BioMech API/SDK live ingestion — the recommendation remains **API-first** (`device_measured`)
